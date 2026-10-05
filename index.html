@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#050608" />
+    <meta
+      name="description"
+      content="MUTE: a co-op VR horror game. The monster is blind, but it hears everything, including your real voice."
+    />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+    <title>MUTE</title>
+  </head>
+  <body>
+    <!-- three.js canvas goes here -->
+    <div id="app"></div>
+    <!-- DOM overlays (menus, desktop HUD) are built by src/ui/ui.ts -->
+    <div id="ui"></div>
+    <noscript>MUTE needs JavaScript (and ideally a VR headset).</noscript>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

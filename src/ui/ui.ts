@@ -1,0 +1,422 @@
+/**
+ * DOM menus + desktop HUD. Web-only (a native app would rebuild these screens with its own UI kit,
+ * driven by the same callbacks).
+ */
+
+import { NOISE } from '../config';
+import type { GamePhase } from '../core/types';
+import type { LobbyPlayer } from '../net/protocol';
+import './style.css';
+
+type Handler = () => void;
+
+const NAME_KEY = 'mute.playerName';
+
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  attrs: Record<string, string> = {},
+  children: (Node | string)[] = [],
+): HTMLElementTagNameMap[K] {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') e.className = v;
+    else e.setAttribute(k, v);
+  }
+  for (const c of children) e.append(c);
+  return e;
+}
+
+function button(label: string, cls = ''): HTMLButtonElement {
+  const b = el('button', { type: 'button', class: cls }, [label]);
+  return b;
+}
+
+function hex(color: number): string {
+  return `#${color.toString(16).padStart(6, '0')}`;
+}
+
+function loadName(): string {
+  try {
+    return localStorage.getItem(NAME_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function saveName(name: string): void {
+  try {
+    localStorage.setItem(NAME_KEY, name);
+  } catch {
+    /* private mode etc. */
+  }
+}
+
+/** Meter with tick marks at the reference loudness levels. */
+function micMeter(): { root: HTMLElement; fill: HTMLElement } {
+  const fill = el('div', { class: 'fill' });
+  const root = el('div', { class: 'meter', title: 'How loud you are to the monster' }, [fill]);
+  for (const v of [NOISE.whisper, NOISE.talk, NOISE.shout]) {
+    const t = el('div', { class: 'tick' });
+    t.style.left = `${v * 100}%`;
+    root.append(t);
+  }
+  return { root, fill };
+}
+
+const CONTROLS: [string, string, string][] = [
+  ['Move', 'Left stick', 'WASD'],
+  ['Turn', 'Right stick / your body', 'Mouse'],
+  ['Sneak (quiet)', 'Crouch for real', 'Hold C'],
+  ['Run (loud)', 'Click left stick', 'Shift'],
+  ['Grab / drop', 'Grip near it', 'E'],
+  ['Flash camera', 'Trigger', 'Left click'],
+  ['Hand signs', 'Your real hands', '1–6'],
+  ['Talk', 'Just talk (careful)', 'Just talk'],
+];
+
+function controlsTable(): HTMLElement {
+  const rows = CONTROLS.map(([a, vr, pc]) =>
+    el('tr', {}, [el('td', {}, [a]), el('td', {}, [vr]), el('td', {}, [pc])]),
+  );
+  return el('table', { class: 'controls' }, [
+    el('tr', {}, [el('td', {}, ['']), el('td', {}, ['VR']), el('td', {}, ['Desktop'])]),
+    ...rows,
+  ]);
+}
+
+function howToPlay(): HTMLElement {
+  return el('details', {}, [
+    el('summary', {}, ['How to play']),
+    el('p', { class: 'muted' }, [
+      'Something lives in this house. It is blind, but it hears everything: footsteps, the camera, ',
+      'and your real voice through your microphone. Whisper and it may not notice. Scream and it charges.',
+    ]),
+    el('p', { class: 'muted' }, [
+      'Find the fuses, put them in the fuse box by the front door, and escape. It is dark: use your hands ',
+      'to sign to each other, then FLASH the camera so everyone sees your sign frozen in the air. ',
+      'Every flash clicks. Film is limited.',
+    ]),
+    controlsTable(),
+    el('p', { class: 'muted' }, ['Desktop signs: 1 point · 2 stop · 3 thumbs up · 4 fist · 5 three · 6 come here']),
+  ]);
+}
+
+export interface LobbyInfo {
+  code: string | null;
+  isHost: boolean;
+  vrSupported: boolean;
+}
+
+export class UI {
+  // callbacks (set by main)
+  onSolo: (name: string) => void = () => {};
+  onHost: (name: string) => void = () => {};
+  onJoin: (name: string, code: string) => void = () => {};
+  onEnterVR: Handler = () => {};
+  onPlayDesktop: Handler = () => {};
+  onStartRound: Handler = () => {};
+  onLeave: Handler = () => {};
+  onResume: Handler = () => {};
+
+  readonly hud: Hud;
+
+  private readonly title: HTMLElement;
+  private readonly lobby: HTMLElement;
+  private readonly pause: HTMLElement;
+  private readonly titleError: HTMLElement;
+  private readonly titleButtons: HTMLButtonElement[];
+  private readonly nameInput: HTMLInputElement;
+  private readonly codeInput: HTMLInputElement;
+
+  private readonly lobbyCode: HTMLElement;
+  private readonly lobbyCodeBlock: HTMLElement;
+  private readonly lobbyPlayers: HTMLUListElement;
+  private readonly lobbyMicStatus: HTMLElement;
+  private readonly lobbyMeter: { root: HTMLElement; fill: HTMLElement };
+  private readonly vrButton: HTMLButtonElement;
+  private readonly startButton: HTMLButtonElement;
+  private readonly lobbyError: HTMLElement;
+  private readonly pauseStart: HTMLButtonElement;
+  private readonly pauseInfo: HTMLElement;
+  private readonly shareButton: HTMLButtonElement;
+
+  constructor(root: HTMLElement) {
+    // ---------- title ----------
+    this.nameInput = el('input', { type: 'text', maxlength: '16', placeholder: 'Your name', autocomplete: 'off' });
+    this.nameInput.value = loadName();
+    this.codeInput = el('input', {
+      type: 'text',
+      maxlength: '8',
+      placeholder: 'ROOM CODE',
+      autocomplete: 'off',
+      autocapitalize: 'characters',
+      spellcheck: 'false',
+    });
+    const joinParam = new URLSearchParams(location.search).get('join');
+    if (joinParam) this.codeInput.value = joinParam.toUpperCase();
+
+    const soloBtn = button('Play solo');
+    const hostBtn = button('Host a game', 'primary');
+    const joinBtn = button('Join');
+    this.titleButtons = [soloBtn, hostBtn, joinBtn];
+    this.titleError = el('p', { class: 'error', role: 'alert' });
+
+    soloBtn.onclick = () => this.onSolo(this.name());
+    hostBtn.onclick = () => this.onHost(this.name());
+    joinBtn.onclick = () => {
+      const code = this.codeInput.value.trim();
+      if (!code) {
+        this.showError('Type the room code your friend gave you.');
+        this.codeInput.focus();
+        return;
+      }
+      this.onJoin(this.name(), code);
+    };
+    this.codeInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') joinBtn.click();
+    });
+
+    this.title = el('div', { class: 'screen' }, [
+      el('div', { class: 'panel' }, [
+        el('h1', { class: 'logo' }, ['MUTE']),
+        el('p', { class: 'tagline' }, ['It can’t see you. It can hear you.']),
+        el('label', { for: 'mute-name' }, ['Name']),
+        this.nameInput,
+        el('h2', {}, ['Play']),
+        el('div', { class: 'row' }, [soloBtn, hostBtn]),
+        el('h2', {}, ['Join a friend']),
+        el('div', { class: 'row' }, [this.codeInput, joinBtn]),
+        this.titleError,
+        el('p', { class: 'muted' }, [
+          'Best with headphones and a microphone. Open this page in the Meta Quest browser for VR, ',
+          'or play with keyboard + mouse.',
+        ]),
+        howToPlay(),
+      ]),
+    ]);
+    this.nameInput.id = 'mute-name';
+
+    // ---------- lobby ----------
+    this.lobbyCode = el('div', { class: 'code' });
+    this.shareButton = button('Copy invite link');
+    this.shareButton.onclick = () => void this.copyInvite();
+    this.lobbyCodeBlock = el('div', {}, [
+      el('h2', {}, ['Room code']),
+      this.lobbyCode,
+      el('p', { class: 'muted' }, ['Friends open this page and type the code under “Join a friend”.']),
+      this.shareButton,
+    ]);
+    this.lobbyPlayers = el('ul', { class: 'players' });
+    this.lobbyMicStatus = el('p', { class: 'muted' }, ['Microphone: starting…']);
+    this.lobbyMeter = micMeter();
+    this.vrButton = button('Enter VR', 'primary');
+    const desktopBtn = button('Play on this screen');
+    this.startButton = button('Start round');
+    const leaveBtn = button('Leave', 'danger');
+    this.lobbyError = el('p', { class: 'error', role: 'alert' });
+    this.vrButton.onclick = () => this.onEnterVR();
+    desktopBtn.onclick = () => this.onPlayDesktop();
+    this.startButton.onclick = () => this.onStartRound();
+    leaveBtn.onclick = () => this.onLeave();
+
+    this.lobby = el('div', { class: 'screen', hidden: '' }, [
+      el('div', { class: 'panel' }, [
+        el('h1', { class: 'logo', style: 'font-size:48px' }, ['MUTE']),
+        this.lobbyCodeBlock,
+        el('h2', {}, ['Players']),
+        this.lobbyPlayers,
+        el('h2', {}, ['Your voice']),
+        this.lobbyMicStatus,
+        this.lobbyMeter.root,
+        el('p', { class: 'muted' }, ['Ticks: whisper · talk · shout. The monster hears what this meter hears.']),
+        el('h2', {}, ['Go']),
+        el('div', { class: 'row' }, [this.vrButton, desktopBtn]),
+        el('div', { class: 'row', style: 'margin-top:10px' }, [this.startButton, leaveBtn]),
+        this.lobbyError,
+        howToPlay(),
+      ]),
+    ]);
+
+    // ---------- pause ----------
+    const resumeBtn = button('Resume', 'primary');
+    this.pauseStart = button('Start round');
+    const pauseLeave = button('Leave game', 'danger');
+    this.pauseInfo = el('p', { class: 'muted' });
+    resumeBtn.onclick = () => this.onResume();
+    this.pauseStart.onclick = () => this.onStartRound();
+    pauseLeave.onclick = () => this.onLeave();
+    this.pause = el('div', { class: 'screen', hidden: '' }, [
+      el('div', { class: 'panel' }, [
+        el('h1', { class: 'logo', style: 'font-size:48px' }, ['MUTE']),
+        this.pauseInfo,
+        el('div', { class: 'row' }, [resumeBtn, this.pauseStart]),
+        el('div', { class: 'row', style: 'margin-top:10px' }, [pauseLeave]),
+        el('h2', {}, ['Controls']),
+        controlsTable(),
+      ]),
+    ]);
+
+    this.hud = new Hud();
+    root.append(this.hud.root, this.title, this.lobby, this.pause);
+  }
+
+  private name(): string {
+    const n = this.nameInput.value.trim().slice(0, 16) || 'Survivor';
+    saveName(n);
+    return n;
+  }
+
+  private screens(): HTMLElement[] {
+    return [this.title, this.lobby, this.pause];
+  }
+
+  private show(screen: HTMLElement | null): void {
+    for (const s of this.screens()) s.hidden = s !== screen;
+  }
+
+  showTitle(): void {
+    this.setBusy(false);
+    this.hud.root.hidden = true;
+    this.show(this.title);
+  }
+
+  setBusy(busy: boolean, label?: string): void {
+    for (const b of this.titleButtons) b.disabled = busy;
+    if (busy && label) this.titleError.textContent = label;
+    else if (!busy) this.titleError.textContent = '';
+    this.titleError.style.color = busy ? 'var(--dim)' : '';
+  }
+
+  showError(msg: string): void {
+    this.titleError.style.color = '';
+    this.titleError.textContent = msg;
+    this.lobbyError.textContent = msg;
+  }
+
+  showLobby(info: LobbyInfo): void {
+    this.lobbyCodeBlock.hidden = !info.code;
+    this.lobbyCode.textContent = info.code ?? '';
+    this.vrButton.disabled = !info.vrSupported;
+    this.vrButton.title = info.vrSupported ? '' : 'No VR headset found. Open this page in the Meta Quest browser.';
+    this.startButton.hidden = !info.isHost;
+    this.lobbyError.textContent = '';
+    this.hud.root.hidden = true;
+    this.show(this.lobby);
+  }
+
+  setLobbyPlayers(players: LobbyPlayer[], localId: string): void {
+    this.lobbyPlayers.replaceChildren(
+      ...players.map((p) => {
+        const dot = el('span', { class: 'dot' });
+        dot.style.background = hex(p.color);
+        return el('li', {}, [
+          dot,
+          p.name,
+          el('span', { class: 'tag' }, [(p.id === localId ? 'you · ' : '') + (p.isDesktop ? 'desktop' : 'VR')]),
+        ]);
+      }),
+    );
+  }
+
+  setMicStatus(status: 'on' | 'blocked'): void {
+    this.lobbyMicStatus.textContent =
+      status === 'on'
+        ? 'Microphone: on. Say something and watch the meter.'
+        : 'Microphone: blocked. You can still play, but you can’t talk (and the monster can’t hear you either, which is cheating a little).';
+  }
+
+  setMicLevel(level: number): void {
+    this.lobbyMeter.fill.style.width = `${Math.round(level * 100)}%`;
+    this.hud.setMicLevel(level);
+  }
+
+  /** Show the pause/round menu (desktop). */
+  showPause(isHost: boolean, phase: GamePhase): void {
+    this.pauseStart.hidden = !isHost;
+    this.pauseStart.textContent = phase === 'playing' ? 'Restart round' : phase === 'lobby' ? 'Start round' : 'Play again';
+    this.pauseInfo.textContent =
+      phase === 'lobby'
+        ? isHost
+          ? 'Everyone in? Start the round.'
+          : 'Waiting for the host to start the round.'
+        : phase === 'won'
+          ? 'Someone got out.'
+          : phase === 'lost'
+            ? 'Nobody got out.'
+            : 'Paused. (The monster is not.)';
+    this.show(this.pause);
+  }
+
+  /** Hide every menu (in-game). */
+  hideMenus(showHud: boolean): void {
+    this.show(null);
+    this.hud.root.hidden = !showHud;
+  }
+
+  isMenuOpen(): boolean {
+    return this.screens().some((s) => !s.hidden);
+  }
+
+  private async copyInvite(): Promise<void> {
+    const url = new URL(location.href);
+    url.search = '';
+    url.searchParams.set('join', this.lobbyCode.textContent ?? '');
+    try {
+      await navigator.clipboard.writeText(url.toString());
+      this.shareButton.textContent = 'Copied!';
+    } catch {
+      this.shareButton.textContent = url.toString();
+    }
+    setTimeout(() => (this.shareButton.textContent = 'Copy invite link'), 2500);
+  }
+}
+
+/** Desktop heads-up display (VR uses in-world displays instead). */
+export class Hud {
+  readonly root: HTMLElement;
+  private readonly status: HTMLElement;
+  private readonly film: HTMLElement;
+  private readonly meter: { root: HTMLElement; fill: HTMLElement };
+  private readonly toast: HTMLElement;
+  private toastTimer = 0;
+
+  constructor() {
+    this.status = el('div', { class: 'status' });
+    this.film = el('div', { class: 'film' });
+    this.meter = micMeter();
+    this.toast = el('div', { class: 'toast' });
+    this.root = el('div', { class: 'hud', hidden: '' }, [
+      el('div', { class: 'crosshair' }),
+      this.status,
+      this.film,
+      el('div', { class: 'mic' }, [el('div', { class: 'label' }, ['your noise']), this.meter.root]),
+      el('div', { class: 'hint' }, [
+        'E grab/drop · Click flash · 1–6 signs · Shift run · C sneak · Esc menu',
+      ]),
+      this.toast,
+    ]);
+  }
+
+  setStatus(lines: string[]): void {
+    const text = lines.join('\n');
+    if (this.status.textContent !== text) {
+      this.status.replaceChildren(...lines.flatMap((l, i) => (i ? [el('br'), l] : [l])));
+    }
+  }
+
+  setFilm(film: number | null): void {
+    const text = film === null ? '' : `📷 ${film}`;
+    if (this.film.textContent !== text) this.film.textContent = text;
+  }
+
+  setMicLevel(level: number): void {
+    this.meter.fill.style.width = `${Math.round(level * 100)}%`;
+  }
+
+  showMessage(text: string, seconds = 3): void {
+    this.toast.textContent = text;
+    this.toast.classList.add('show');
+    clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => this.toast.classList.remove('show'), seconds * 1000);
+  }
+}
