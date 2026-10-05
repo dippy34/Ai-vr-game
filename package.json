@@ -1,0 +1,28 @@
+{
+  "name": "mute-vr",
+  "private": true,
+  "version": "0.1.0",
+  "description": "MUTE — a co-op VR horror game where the monster hears your voice and your hands do the talking.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:https": "vite --mode https --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "peerjs": "^1.5.5",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
+  }
+}
