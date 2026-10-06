@@ -44,6 +44,24 @@ When the game needs more performance, better audio, or store features (achieveme
    afterimage effect.
 4. Copy `src/config.ts` numbers so the game feels the same.
 
+### Multiplayer in a native engine
+
+There is no game server today: one player's game is the host (it runs `src/core`'s GameSim) and
+the others connect to it peer to peer over WebRTC, introduced by the free PeerJS signaling
+service. The **design** carries over to any engine unchanged; the **transport code** (PeerJS)
+is web-only and gets swapped for the engine's networking:
+
+| Engine | Suggested stack | Notes |
+|---|---|---|
+| Unity | Netcode for GameObjects + Unity Relay/Lobby, or Photon Fusion / Normcore | Normcore and Photon include VR-friendly voice; Relay solves strict-NAT players (what the web build needs a TURN server for) |
+| Unreal | Built-in replication + Epic Online Services (lobbies, P2P relay, voice; free) | Heavier for standalone Quest; budget performance early |
+| Godot 4 | High-level multiplayer over ENet or WebRTC | Closest to the current code |
+| Any (Quest store) | Meta Platform SDK rooms/invites/voice | Also gives store-native friend invites |
+
+Keep the host-authoritative model and the messages in `src/net/protocol.ts` (they map to
+RPCs/replicated state). The monster still hears each player's **local** mic level, sent to the
+host like today, whatever voice service carries the actual audio.
+
 ## Route 3: PC VR / Steam
 
 Either the native port above (Godot/Unity export to SteamVR/OpenXR), or wrap the web build in a

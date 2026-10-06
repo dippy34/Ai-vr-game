@@ -50,6 +50,15 @@ with `node dev/models/shoot.cjs out.png "model=monster&anim=Walk&t=0.4"`.
 | `furniture_<style>.glb` | `furniture.py` | ≤ 2.5k each | One per `PropStyle`: table, shelf, bed, couch, crate, counter, cabinet, piano. Modeled at a typical real size (write it into the glTF extras: `extras.size = [w, h, d]`). The game scales it to fit its box. |
 | `dressing_<name>.glb` | `dressing.py` | ≤ 1.5k each | Clutter that sells "abandoned": picture frames, chair, books pile, bottles, candle stubs, broken plate, rug, wall clock, coat rack, hanging bare bulb. |
 
+## House surfaces and trims
+
+| File | Script | Notes |
+|---|---|---|
+| `public/textures/<name>_{color,normal,orm}.webp` + `textures.json` | `surfaces.py` | Seamless 1024² PBR sets: wallpaper_a, wallpaper_b, plaster_ceiling, wood_floor, tile_floor, wood_trim. Normal = OpenGL (+Y), ORM = AO/roughness/metalness. `tile` = meters per repeat. |
+| `window_frame.glb` | `trims.py` | 1.0 × 1.2 m opening, origin = opening center on the wall's inner face; glass sits ~10 cm inside the wall plane (the renderer sets it forward on solid walls). |
+| `doorway_casing.glb` | `trims.py` | 1.1 × 2.4 × 0.2 m opening, origin = bottom center, casing on both wall faces. |
+| `radiator.glb` | `trims.py` | Floor piece, back against the wall. |
+
 ## Monster ("the Listener")
 
 Blind and very tall (2.3 m), emaciated and hunched. It has very long arms down past the knees and
