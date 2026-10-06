@@ -146,7 +146,7 @@ function pad(
 
 /** Camera flash: two-blade shutter click, xenon tick, then the capacitor whine rising as it recharges. */
 export function sfxShutter(s: Shot, t: number): void {
-  clicks(s, t, [0, 0.006, 0.052], { freq: 3200, q: 1.2, peak: 0.9, decay: 0.02 });
+  clicks(s, t, [0, 0.006, 0.052], { freq: 3200, q: 1.2, peak: 1.3, decay: 0.02 });
   const body = s.osc('square', 1400, t, t + 0.06);
   glide(body.frequency, t, 1400, 480, 0.04);
   const bbp = s.filter('bandpass', 1200, 3);
@@ -174,7 +174,7 @@ export function sfxShutter(s: Shot, t: number): void {
 
 /** Trigger pulled with no film: small mechanical click. */
 export function sfxDryFire(s: Shot, t: number): void {
-  clicks(s, t, [0, 0.011], { freq: 2600, q: 3, peak: 0.45, decay: 0.012 });
+  clicks(s, t, [0, 0.011], { freq: 2600, q: 3, peak: 1.0, decay: 0.012 });
   const o = s.osc('square', 520, t, t + 0.03);
   glide(o.frequency, t, 520, 280, 0.02);
   const g = s.gain(0);
@@ -187,7 +187,7 @@ export function sfxPickup(s: Shot, t: number, what: 'camera' | ItemKind): void {
   if (what === 'fuse') metal(s, t, [2380, 3910, 5420], 0.28, 0.1);
   else if (what === 'film') {
     metal(s, t, [1650, 2730, 4100], 0.12, 0.06);
-    clicks(s, t + 0.03, [0, 0.045, 0.08], { freq: 4200, q: 2, peak: 0.12, decay: 0.01 });
+    clicks(s, t + 0.03, [0, 0.045, 0.08], { freq: 4200, q: 2, peak: 0.35, decay: 0.01 });
   } else metal(s, t, [1180, 2150, 3320], 0.1, 0.05);
   // Handling rustle.
   const n = s.noise('pink', t, 0.2);
@@ -200,7 +200,7 @@ export function sfxPickup(s: Shot, t: number, what: 'camera' | ItemKind): void {
 /** Drop: thud, plus a rattle for the camera or a tinkle for a fuse. */
 export function sfxDrop(s: Shot, t: number, what: 'camera' | ItemKind): void {
   thud(s, t, { level: what === 'camera' ? 0.7 : 0.45, f0: 160, f1: 70, body: 700, dur: 0.16, tick: 0.15 });
-  if (what === 'camera') clicks(s, t + 0.04, [0, 0.03, 0.075, 0.13], { freq: 2900, q: 1.6, peak: 0.25, decay: 0.02 });
+  if (what === 'camera') clicks(s, t + 0.04, [0, 0.03, 0.075, 0.13], { freq: 2900, q: 1.6, peak: 0.6, decay: 0.02 });
   else if (what === 'fuse') metal(s, t + 0.01, [2380, 3910], 0.18, 0.05);
 }
 
@@ -214,7 +214,7 @@ export function sfxRatchet(s: Shot, t: number): void {
       times.push(base + dt);
       dt += 0.05 - i * 0.003;
     }
-    clicks(s, t, times, { freq: rand(2700, 3200), q: 3, peak: 0.35, decay: 0.012 });
+    clicks(s, t, times, { freq: rand(2700, 3200), q: 3, peak: 0.6, decay: 0.012 });
     const n = s.noise('pink', t + base, 0.32);
     const bp = s.filter('bandpass', 1800, 0.6);
     const g = s.gain(0);
@@ -229,7 +229,7 @@ export function sfxRatchet(s: Shot, t: number): void {
 export function sfxFuse(s: Shot, t: number, complete: boolean): void {
   thud(s, t, { level: 0.5, f0: 180, f1: 70, body: 900, dur: 0.16 });
   metal(s, t, [620, 1012, 1530], 0.3, 0.1);
-  clicks(s, t + 0.16, [0, 0.004], { freq: 3800, q: 2, peak: 0.5, decay: 0.01 });
+  clicks(s, t + 0.16, [0, 0.004], { freq: 3800, q: 2, peak: 1.0, decay: 0.01 });
 
   const tb = t + 0.18;
   const dur = complete ? 2.8 : 1.4;
@@ -270,7 +270,7 @@ export function sfxExitDoor(s: Shot, t: number): void {
   });
   const rattle: number[] = [];
   for (let x = 0; x < 0.9; x += rand(0.03, 0.055)) rattle.push(x);
-  clicks(s, t + 0.75, rattle, { freq: 2200, q: 1.5, peak: 0.35, decay: 0.02 });
+  clicks(s, t + 0.75, rattle, { freq: 2200, q: 1.5, peak: 0.8, decay: 0.02 });
   creak(s, t + 1.3, { dur: 4.2, rateLo: 7, rateHi: 26, res: 380, res2: 940, q: 12, level: 0.9 });
   thud(s, t + 5.45, { level: 0.85, f0: 90, f1: 38, body: 400, dur: 0.7, tick: 0.1 });
 }
@@ -287,7 +287,7 @@ export function sfxWoodStep(s: Shot, t: number, loudness: number, creakChance = 
   perc(g.gain, t, 0.6 * L, 0.002, 0.08);
   clicks(s, t + 0.005, [0], { freq: 2400, q: 0.9, peak: 0.07 * L, decay: 0.05 });
   if (chance(creakChance + loudness * 0.4)) {
-    creak(s, t + rand(0.02, 0.06), { dur: rand(0.15, 0.4), rateLo: 18, rateHi: 45, res: rand(600, 1400), q: 10, level: 0.09 * L });
+    creak(s, t + rand(0.02, 0.06), { dur: rand(0.15, 0.4), rateLo: 18, rateHi: 45, res: rand(600, 1400), q: 10, level: 0.3 * L });
   }
 }
 
@@ -297,7 +297,7 @@ export function sfxWoodStep(s: Shot, t: number, loudness: number, creakChance = 
 
 /** Heavy monster footstep. weight 0..1 (speed), drag 0..1 (slow = dragging feet). */
 export function sfxMonsterStep(s: Shot, t: number, weight: number, drag: number): void {
-  const W = 0.55 + 0.6 * clamp(weight, 0, 1);
+  const W = 0.4 + 0.45 * clamp(weight, 0, 1);
   const o = s.osc('sine', 70, t, t + 0.4);
   glide(o.frequency, t, 72, 34, 0.12);
   const og = s.gain(0);
@@ -325,8 +325,8 @@ export function sfxMonsterStep(s: Shot, t: number, weight: number, drag: number)
   sc.connect(sbp).connect(s.filter('highpass', 600)).connect(sg).connect(s.out);
   swell(sg.gain, t + 0.02, 0.07 * (0.4 + d), 0.04, d * 0.3, 0.15);
 
-  if (chance(0.25 + 0.3 * weight)) clicks(s, t + 0.01, [0, rand(0.015, 0.03)], { freq: rand(3800, 4800), q: 4, peak: 0.25, decay: 0.01 });
-  if (chance(0.3)) creak(s, t + rand(0.03, 0.08), { dur: rand(0.3, 0.7), rateLo: 9, rateHi: 24, res: rand(380, 700), q: 11, level: 0.25 * W });
+  if (chance(0.25 + 0.3 * weight)) clicks(s, t + 0.01, [0, rand(0.015, 0.03)], { freq: rand(3800, 4800), q: 4, peak: 0.8, decay: 0.01 });
+  if (chance(0.3)) creak(s, t + rand(0.03, 0.08), { dur: rand(0.3, 0.7), rateLo: 9, rateHi: 24, res: rand(380, 700), q: 11, level: 0.4 * W });
 }
 
 /** Echolocation-like tongue clicks (investigating / listening). */
@@ -341,8 +341,8 @@ export function sfxMonsterClicks(s: Shot, t: number): void {
     gap = Math.max(0.032, gap * rand(0.75, 0.9));
   }
   const f = rand(2200, 3600);
-  clicks(s, t, times, { freq: f, q: 4, peak: 0.55, decay: 0.012 });
-  clicks(s, t + 0.002, times, { freq: f * 0.42, q: 6, peak: 0.25, decay: 0.02, kind: 'pink' });
+  clicks(s, t, times, { freq: f, q: 4, peak: 1.6, decay: 0.012 });
+  clicks(s, t + 0.002, times, { freq: f * 0.42, q: 6, peak: 0.6, decay: 0.02, kind: 'pink' });
 }
 
 /** Wet sniffing: a few sharp inhales and a snort. */
@@ -356,7 +356,7 @@ export function sfxSniff(s: Shot, t: number): void {
   let x = 0;
   for (let i = 0; i < n; i++) {
     const len = rand(0.09, 0.14);
-    perc(g.gain, t + x, 0.5, 0.03, len);
+    perc(g.gain, t + x, 1.2, 0.03, len);
     bp.frequency.setValueAtTime(2500, t + x);
     bp.frequency.linearRampToValueAtTime(4200, t + x + len);
     x += len + rand(0.05, 0.09);
@@ -429,8 +429,8 @@ export function sfxShriek(s: Shot, t: number, level = 1): void {
     .connect(env)
     .connect(s.out);
   env.gain.setValueAtTime(0, t);
-  env.gain.linearRampToValueAtTime(level * 0.55, t + 0.04);
-  env.gain.setTargetAtTime(level * 0.4, t + 0.2, 0.2);
+  env.gain.linearRampToValueAtTime(level * 0.8, t + 0.04);
+  env.gain.setTargetAtTime(level * 0.6, t + 0.2, 0.2);
   env.gain.setTargetAtTime(0, t + dur - 0.5, 0.15);
 }
 
@@ -443,7 +443,7 @@ export function sfxCrunch(s: Shot, t: number, level = 1): void {
     cracks.push(x);
     x += rand(0.02, 0.05);
   }
-  clicks(s, t, cracks, { freq: rand(900, 1600), q: 6, peak: 0.9 * level, decay: 0.03 });
+  clicks(s, t, cracks, { freq: rand(900, 1600), q: 6, peak: 2.0 * level, decay: 0.03 });
   const grit: number[] = [];
   for (let y = 0; y < 0.16; y += rand(0.008, 0.016)) grit.push(y);
   clicks(s, t + 0.01, grit, { freq: 3000, q: 0.7, peak: 0.4 * level, decay: 0.006 });
@@ -572,7 +572,7 @@ export function sfxRoundStart(s: Shot, t: number): void {
   const ng = s.gain(0);
   n.connect(bp).connect(ng).connect(s.out);
   ng.gain.setValueAtTime(0.0001, t);
-  ng.gain.exponentialRampToValueAtTime(0.22, t + 2.1);
+  ng.gain.exponentialRampToValueAtTime(0.12, t + 2.1);
   ng.gain.linearRampToValueAtTime(0, t + 2.2);
   const cg = s.gain(0);
   for (const f of [196, 207.65, 293.66, 311.13]) {
@@ -581,8 +581,8 @@ export function sfxRoundStart(s: Shot, t: number): void {
     o.connect(cg);
   }
   cg.connect(s.out);
-  swell(cg.gain, t, 0.05, 1.8, 0.2, 0.6);
-  thud(s, t + 2.2, { level: 0.6, f0: 80, f1: 35, body: 250, dur: 1.0, tick: 0 });
+  swell(cg.gain, t, 0.035, 1.8, 0.2, 0.6);
+  thud(s, t + 2.2, { level: 0.35, f0: 80, f1: 35, body: 250, dur: 1.0, tick: 0 });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -593,7 +593,7 @@ export function sfxRoundStart(s: Shot, t: number): void {
 export function sfxKnock(s: Shot, t: number, count: number): void {
   let x = 0;
   for (let i = 0; i < count; i++) {
-    thud(s, t + x, { level: 0.35, f0: 210, f1: 110, body: 1100, dur: 0.12, tick: 0.1 });
+    thud(s, t + x, { level: 0.2, f0: 210, f1: 110, body: 1100, dur: 0.12, tick: 0.1 });
     x += rand(0.12, 0.38);
   }
 }
@@ -607,5 +607,5 @@ export function sfxTicks(s: Shot, t: number): void {
     times.push(x);
     x += rand(0.18, 0.7);
   }
-  clicks(s, t, times, { freq: rand(1500, 2600), q: 5, peak: 0.35, decay: 0.03 });
+  clicks(s, t, times, { freq: rand(1500, 2600), q: 5, peak: 2.0, decay: 0.03 });
 }

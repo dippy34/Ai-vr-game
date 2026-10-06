@@ -274,13 +274,13 @@ export class AudioManager implements IAudioManager {
             this.setGhost(true, t + 0.35);
           } else {
             const s = pool.spatial(event.position, { ref: 2.5, rolloff: 0.9 }, 2);
-            if (s) sfxScream(s, t, 0.9);
+            if (s) sfxScream(s, t, 0.6);
           }
           break;
         }
         case 'playerEscaped': {
           const s = pool.begin(e.ui, 2);
-          if (s) sfxRelief(s, t, event.id === localId ? 0.14 : 0.08);
+          if (s) sfxRelief(s, t, event.id === localId ? 0.07 : 0.045);
           break;
         }
         case 'phase': {
@@ -317,7 +317,7 @@ export class AudioManager implements IAudioManager {
       // Only spatialize if the game passes a position clearly away from the listener.
       const s = dist3(position, this.listener) > 2.5 ? e.pool.spatial(position, SPATIAL.prop, 1) : e.pool.begin(e.world, 1);
       if (!s) return;
-      s.out.gain.value = 0.6;
+      s.out.gain.value = 0.25;
       sfxWoodStep(s, t, l);
     } catch (err) {
       this.warn('playFootstep failed', err);

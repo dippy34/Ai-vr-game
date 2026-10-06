@@ -94,8 +94,8 @@ export const HEARTBEAT = {
   curve: 1.35,
   /** How much monster.alert (0..1) adds on top of proximity. */
   alertWeight: 0.25,
-  minGain: 0.04,
-  maxGain: 0.85,
+  minGain: 0.012,
+  maxGain: 0.32,
 } as const;
 
 /** 0..1 "fear" from distance to the monster and its agitation. */

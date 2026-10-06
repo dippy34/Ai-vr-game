@@ -367,7 +367,6 @@ function darker(c: number, k: number): number {
 // Level helpers
 // ---------------------------------------------------------------------------------------------
 
-const DIRS: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
 /** Distance from a furniture box's side (in direction dir) to the nearest wall in that direction. */
 function wallGap(b: Box, dir: [number, number], walls: Box[]): number {

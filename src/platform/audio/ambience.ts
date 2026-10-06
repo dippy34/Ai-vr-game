@@ -34,7 +34,7 @@ export class Ambience {
     this.droneLp.frequency.value = 160;
     this.droneLp.Q.value = 2;
     this.droneGain = this.keep(ctx.createGain());
-    this.droneGain.gain.value = 0.035;
+    this.droneGain.gain.value = 0.016;
     this.droneLp.connect(this.droneGain).connect(out);
     for (const [type, f, g] of [['sawtooth', 41.2, 0.5], ['sawtooth', 41.45, 0.5], ['triangle', 58.27, 0.6], ['sawtooth', 87.3, 0.12]] as const) {
       const o = this.osc(type, f);
@@ -48,7 +48,7 @@ export class Ambience {
     sweep.connect(sweepDepth).connect(this.droneLp.frequency);
     const breathe = this.osc('sine', 0.071);
     const breatheDepth = this.keep(ctx.createGain());
-    breatheDepth.gain.value = 0.01;
+    breatheDepth.gain.value = 0.005;
     breathe.connect(breatheDepth).connect(this.droneGain.gain);
 
     // Room tone: very low band of brown noise.
@@ -58,7 +58,7 @@ export class Ambience {
     roomBp.frequency.value = 180;
     roomBp.Q.value = 0.8;
     const roomGain = this.keep(ctx.createGain());
-    roomGain.gain.value = 0.025;
+    roomGain.gain.value = 0.014;
     room.connect(roomBp).connect(roomGain).connect(out);
 
     // Wind: pink noise through a wandering, slightly whistly band.
@@ -68,7 +68,7 @@ export class Ambience {
     this.windBp.frequency.value = 500;
     this.windBp.Q.value = 3;
     this.windGain = this.keep(ctx.createGain());
-    this.windGain.gain.value = 0.05;
+    this.windGain.gain.value = 0.03;
     wind.connect(this.windBp).connect(this.windGain);
     this.windPan = typeof ctx.createStereoPanner === 'function' ? this.keep(ctx.createStereoPanner()) : null;
     if (this.windPan) this.windGain.connect(this.windPan).connect(out);
@@ -107,12 +107,12 @@ export class Ambience {
     if (tq !== this.tension) {
       this.tension = tq;
       approach(this.droneLp.frequency, 160 + 230 * tq, now, 1.2);
-      approach(this.droneGain.gain, 0.035 + 0.045 * tq, now, 1.2);
+      approach(this.droneGain.gain, 0.016 + 0.024 * tq, now, 1.2);
     }
 
     if (now >= this.nextGust) {
       const tau = rand(0.8, 2.2);
-      approach(this.windGain.gain, chance(0.25) ? rand(0.1, 0.16) : rand(0.025, 0.08), now, tau);
+      approach(this.windGain.gain, chance(0.25) ? rand(0.06, 0.1) : rand(0.015, 0.05), now, tau);
       approach(this.windBp.frequency, rand(300, 1000), now, 1.5);
       approach(this.windBp.Q, rand(1.5, 6), now, 2);
       if (this.windPan) approach(this.windPan.pan, rand(-0.7, 0.7), now, 2.5);
@@ -134,7 +134,7 @@ export class Ambience {
     const shot = this.eng.pool.spatial(pos, SPATIAL.ambient, 0);
     if (!shot) return;
     if (r < 0.5) {
-      creak(shot, t, { dur: rand(0.6, 1.8), rateLo: rand(9, 18), rateHi: rand(24, 48), res: rand(350, 1300), q: 12, level: rand(0.15, 0.4) });
+      creak(shot, t, { dur: rand(0.6, 1.8), rateLo: rand(9, 18), rateHi: rand(24, 48), res: rand(350, 1300), q: 12, level: rand(0.12, 0.3) });
     } else if (r < 0.75) {
       shot.out.gain.value = rand(0.6, 1);
       sfxKnock(shot, t, 1 + Math.floor(Math.random() * 3));

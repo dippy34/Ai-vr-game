@@ -41,7 +41,8 @@ export class MonsterAudio {
   private readonly sources: AudioScheduledSourceNode[] = [];
 
   private pos: Vec3 | null = null;
-  private active = false;
+  /** Sound is scheduled until this AudioContext time (Infinity while playing). */
+  private activeUntil = 0;
   private lastPhase: GamePhase | null = null;
   private prevMode: MonsterMode | null = null;
   private stepAccum = MONSTER_STRIDE * 0.6;
@@ -141,18 +142,28 @@ export class MonsterAudio {
     const m = state.monster;
     if (!m) return;
 
-    // Only audible during a round; fades out after it ends.
+    // Audible during a round. After a round ends it keeps breathing/feeding for a few seconds
+    // (the last catch still gets its crunch), then fades out and stops scheduling.
     if (state.phase !== this.lastPhase) {
+      const was = this.lastPhase;
       this.lastPhase = state.phase;
-      const on = state.phase === 'playing';
-      approach(this.out.gain, on ? 1 : 0, now, on ? 0.3 : state.phase === 'lobby' ? 0.2 : 1.4);
-      if (on && !this.active) {
-        this.nextBreath = now + 0.3;
-        this.nextIdle = now + rand(2, 5);
-        this.stepAccum = MONSTER_STRIDE * 0.6;
+      if (state.phase === 'playing') {
+        approach(this.out.gain, 1, now, 0.3);
+        if (was !== 'playing') {
+          this.nextBreath = now + 0.3;
+          this.nextIdle = now + rand(2, 5);
+          this.stepAccum = MONSTER_STRIDE * 0.6;
+          this.feedUntil = 0;
+        }
+        this.activeUntil = Infinity;
+      } else if (state.phase === 'lobby') {
+        approach(this.out.gain, 0, now, 0.2);
+        this.activeUntil = 0;
+        this.feedUntil = 0;
+      } else {
+        approach(this.out.gain, 0, now + 3, 1.0);
+        this.activeUntil = was === 'playing' ? now + 7 : 0;
       }
-      this.active = on;
-      if (!on) this.feedUntil = 0;
     }
 
     // Smoothed position (snapshots arrive at ~12 Hz on clients).
@@ -179,7 +190,7 @@ export class MonsterAudio {
       if (m.mode === 'chase' || this.prevMode === 'chase') this.hurryBreath(now, m.mode === 'chase' ? 1.3 : 0.3);
       this.prevMode = m.mode;
     }
-    if (!this.active) return;
+    if (now >= this.activeUntil) return;
 
     // Breathing, scheduled slightly ahead.
     if (this.nextBreath < now - 1) this.nextBreath = now + 0.05;
@@ -292,7 +303,7 @@ export class MonsterAudio {
     } else {
       air.setTargetAtTime(0.3 * loud * rand(0.8, 1.1), t0, inDur * 0.3);
     }
-    rat.setTargetAtTime(0.02 + 0.1 * a, t0, 0.1);
+    rat.setTargetAtTime(0.05 + 0.25 * a, t0, 0.1);
 
     // Held breath.
     air.setTargetAtTime(0.015, t0 + inDur, 0.04);
@@ -303,7 +314,7 @@ export class MonsterAudio {
     bp.setTargetAtTime(rand(380, 520), tEx + exDur * 0.3, exDur * 0.5);
     air.setTargetAtTime(0.55 * loud * rand(0.8, 1.15), tEx, 0.05);
     air.setTargetAtTime(0, tEx + exDur * 0.35, exDur * 0.3);
-    rat.setTargetAtTime(rand(0.25, 0.6) * (0.5 + a), tEx, 0.06);
+    rat.setTargetAtTime(rand(0.6, 1.4) * (0.5 + a), tEx, 0.06);
     rat.setTargetAtTime(0, tEx + exDur * 0.4, exDur * 0.3);
     const g = 0.04 + 0.35 * a * a + (mode === 'chase' ? 0.2 : mode === 'feeding' ? 0.12 : 0);
     groan.setTargetAtTime(g, tEx + 0.03, 0.08);

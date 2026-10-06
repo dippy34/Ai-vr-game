@@ -16,8 +16,8 @@ export type NoiseKind = 'white' | 'pink' | 'brown';
 export const SPATIAL = {
   /** Voices: 1/(1 + 1.3 * (d - 1)) -> ~-7 dB at 2 m, ~-20 dB at 8 m. */
   voice: { ref: 1, rolloff: 1.3 },
-  /** Monster: ~-17 dB at 12 m, so you hear it from across a room but not across the house. */
-  monster: { ref: 1.6, rolloff: 1.0 },
+  /** Monster: ~-19 dB at 12 m (~-6 dB at 3 m): heard across a room, faint across the house. */
+  monster: { ref: 1.6, rolloff: 1.2 },
   /** Small props / clicks / steps. */
   prop: { ref: 1, rolloff: 1.15 },
   /** Ambient creaks and knocks. */
@@ -101,6 +101,8 @@ export function buildEngine(ctx: AudioContext): Engine {
   voiceLp.Q.value = 0.5;
   const voiceDuck = ctx.createGain();
   const voice = ctx.createGain();
+  // Makeup gain: mics run with AGC off, so raw voices are quiet next to the synthesized world.
+  voice.gain.value = 2.2;
   voice.connect(voiceLp).connect(voiceDuck).connect(master);
 
   const ui = ctx.createGain();
@@ -470,9 +472,14 @@ export function setListenerPose(l: AudioListener, pos: Vec3, forward: Vec3, up: 
   }
 }
 
-/** Smoothly move a param toward a value (no-op if WebAudio rejects the call). */
-export function approach(param: AudioParam, value: number, now: number, tau: number): void {
+/**
+ * Smoothly move a param toward `value` starting at `at`, replacing anything scheduled from `at`
+ * on (so e.g. a delayed fade-out can't fire after a newer fade-in). Never throws.
+ */
+export function approach(param: AudioParam, value: number, at: number, tau: number): void {
+  if (!Number.isFinite(value) || !Number.isFinite(at)) return;
   try {
-    param.setTargetAtTime(value, now, Math.max(0.001, tau));
+    param.cancelScheduledValues(at);
+    param.setTargetAtTime(value, at, Math.max(0.001, tau));
   } catch { /* ignore */ }
 }
