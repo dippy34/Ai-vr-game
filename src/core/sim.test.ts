@@ -689,3 +689,28 @@ describe('noise memory', () => {
     expect(Number.isFinite(lingerAfterNoise(false, SEED, 'kitchen', kitchen, 30))).toBe(true);
   });
 });
+
+describe('random monster spawn', () => {
+  it('starts each round somewhere far from the players, and varies between rounds', () => {
+    const level = createLevel(SEED);
+    const sim = new GameSim(level, { randomMonsterSpawn: true });
+    sim.addPlayer('p0', 'Player 0', true);
+    const spots = new Set<string>();
+    for (let r = 0; r < 12; r++) {
+      sim.startRound();
+      const m = sim.state.monster.position;
+      spots.add(`${m.x.toFixed(2)},${m.z.toFixed(2)}`);
+      for (const p of level.playerSpawns) {
+        expect(distXZ(m, p.position)).toBeGreaterThanOrEqual(SIM_TUNING.monsterSpawnMinDistance);
+      }
+      expect(circleBlocked(level, m, SIM_TUNING.monsterRadius)).toBe(false);
+    }
+    expect(spots.size).toBeGreaterThan(3);
+  });
+
+  it('keeps the fixed spawn when the option is off', () => {
+    const { level, sim } = setup(1);
+    sim.startRound();
+    expect(distXZ(sim.state.monster.position, level.monsterSpawn)).toBe(0);
+  });
+});

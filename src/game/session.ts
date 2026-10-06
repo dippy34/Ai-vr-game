@@ -103,6 +103,7 @@ export class HostSession implements Session {
     this.sim = new GameSim(this.level, {
       fusesRequired: GAME.fusesRequired,
       startingFilm: GAME.startingFilm,
+      randomMonsterSpawn: true,
     });
     this.localId = transport?.selfId ?? 'solo';
     this.roomCode = transport?.roomCode ?? null;

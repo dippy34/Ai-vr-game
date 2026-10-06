@@ -56,6 +56,11 @@ export interface SimOptions {
   startingFilm?: number;
   /** The monster remembers where it heard things and patrols there more (default true). */
   noiseMemory?: boolean;
+  /**
+   * Each round the monster starts at a random nav node far from the players (default false:
+   * always level.monsterSpawn, which tests rely on). The game turns this on.
+   */
+  randomMonsterSpawn?: boolean;
 }
 
 /** Sim-private tunables (shared "feel" numbers live in config.ts). */
@@ -94,6 +99,8 @@ export const SIM_TUNING = {
    * even if the door noise alone would not reach it through the house.
    */
   exitDoorAlwaysAlerts: true,
+  /** Random monster spawns are at least this far (m, XZ) from every player spawn. */
+  monsterSpawnMinDistance: 10,
   /**
    * Noise memory: every noise the monster hears warms up the nav nodes around it (gaussian of
    * this radius, m), the warmth halves every `noiseMemoryHalfLife` s, and while wandering the
@@ -417,6 +424,17 @@ export class GameSim {
     return Object.keys(this.state.players).length % n;
   }
 
+  /** Where the monster starts this round (see SimOptions.randomMonsterSpawn). */
+  private pickMonsterSpawn(): Vec3 {
+    const L = this.level;
+    if (!this.opts.randomMonsterSpawn) return L.monsterSpawn;
+    const far = L.nav.filter((n) =>
+      L.playerSpawns.every((p) => distXZ(n.position, p.position) >= SIM_TUNING.monsterSpawnMinDistance),
+    );
+    if (far.length === 0) return L.monsterSpawn;
+    return far[Math.floor(this.rng() * far.length) % far.length].position;
+  }
+
   /** Reset monster, items, camera and objective for a new round (players handled by caller). */
   private resetWorld(): void {
     const s = this.state;
@@ -457,9 +475,10 @@ export class GameSim {
       lastFlashTime: NEVER,
     };
 
+    const yaw = this.rng() * Math.PI * 2 - Math.PI;
     s.monster = {
-      position: flat(L.monsterSpawn),
-      yaw: this.rng() * Math.PI * 2 - Math.PI,
+      position: flat(this.pickMonsterSpawn()),
+      yaw,
       mode: 'wander',
       target: null,
       targetPlayer: null,
