@@ -256,6 +256,11 @@ export class MonsterModel {
   }
 
   /** World position of the head (for afterimage range tests). */
+  /** The scene object to add (same role as SkinnedMonster.object). */
+  get object(): THREE.Object3D {
+    return this.mesh;
+  }
+
   headWorld(out: THREE.Vector3): THREE.Vector3 {
     return this.j.head.getWorldPosition(out);
   }

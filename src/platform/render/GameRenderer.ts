@@ -14,6 +14,8 @@ import { HandModel } from './HandModel';
 import { LevelView } from './LevelView';
 import { MessagePanel } from './MessagePanel';
 import { MonsterModel } from './MonsterModel';
+import { ModelLibrary } from './assets';
+import { SkinnedMonster } from './SkinnedMonster';
 import { NoiseMeter } from './NoiseMeter';
 import { CameraProp, FilmProp, FuseProp, type Prop } from './Props';
 import { RemoteAvatar, headGhostGeometry } from './RemoteAvatar';
@@ -34,6 +36,8 @@ const AMBIENT_SCALE = Math.PI;
 const NEAR_LIGHT = { intensity: 0.016, distance: 2.2, decay: 2 };
 const FOG_COLOR = 0x04060b;
 const AFTERIMAGE_MIN_DOT = 0.1;
+/** GLB models the renderer knows how to use (public/models/<name>.glb). */
+const MODEL_NAMES = ['monster'] as const;
 
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
@@ -55,7 +59,9 @@ export class GameRenderer implements IGameRenderer {
   private readonly ghostMat: THREE.MeshBasicMaterial;
   private readonly avatars = new Map<PlayerId, RemoteAvatar>();
   private readonly pendingPoses = new Map<PlayerId, PlayerPose>();
-  private readonly monster: MonsterModel;
+  private monster: MonsterModel | SkinnedMonster;
+  /** Blender GLB models; each one replaces its procedural fallback once loaded. */
+  readonly models = new ModelLibrary();
   private readonly items = new Map<number, Prop>();
   private readonly seenItems = new Set<number>();
   private readonly cameraProp: CameraProp;
@@ -117,7 +123,7 @@ export class GameRenderer implements IGameRenderer {
     this.ghostMat.userData.shared = true;
 
     this.monster = new MonsterModel();
-    this.dynamic.add(this.monster.mesh);
+    this.dynamic.add(this.monster.object);
 
     this.cameraProp = new CameraProp();
     this.cameraProp.group.visible = false;
@@ -131,6 +137,22 @@ export class GameRenderer implements IGameRenderer {
 
     this.resize();
     window.addEventListener('resize', this.onResize);
+
+    void this.models.load(MODEL_NAMES).then(() => this.applyModels());
+  }
+
+  /** Swap procedural stand-ins for the Blender models that loaded. */
+  private applyModels(): void {
+    const monster = this.models.get('monster');
+    const inst = monster && SkinnedMonster.usable(monster) ? this.models.instance('monster') : null;
+    if (monster && inst) {
+      const old = this.monster;
+      const next = new SkinnedMonster(monster, inst);
+      this.dynamic.remove(old.object);
+      old.dispose();
+      this.monster = next;
+      this.dynamic.add(next.object);
+    }
   }
 
   // -------------------------------------------------------------------------------------------
