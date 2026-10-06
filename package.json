@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "assets": ".blender-venv/bin/python art/build.py"
   },
   "license": "UNLICENSED",
   "dependencies": {
