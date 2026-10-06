@@ -38,9 +38,10 @@ LAB = {n: i for i, n in enumerate(LABEL_NAMES)}
 FINGERS = ('thumb', 'index', 'middle', 'ring', 'pinky')
 
 # face features shared by the sculpt, texture masks and jaw weights
-MOUTH_SLIT = (v3(0, 0.352, 2.044), v3(0.0042, 0.022, 0.048))
-MOUTH_CAV = (v3(0, 0.322, 2.044), v3(0.0140, 0.024, 0.042))
-SOCKETS = [(v3(0.030 * s, 0.350, 2.138), v3(0.022, 0.019, 0.018)) for s in (1, -1)]
+MOUTH_SLIT = (v3(0, 0.354, 2.040), v3(0.0072, 0.024, 0.056))
+MOUTH_CAV = (v3(0, 0.322, 2.040), v3(0.0185, 0.026, 0.050))
+SOCKETS = [(v3(0.031 * s, 0.352, 2.140), v3(0.025, 0.024, 0.021)) for s in (1, -1)]
+PALM = 0.150
 NOSTRILS = [(v3(0.0055 * s, 0.350, 2.096), v3(0.0080 * s, 0.344, 2.113)) for s in (1, -1)]
 
 
@@ -69,9 +70,9 @@ def _right_side() -> dict:
     R['clav_in'] = v3(0.028, 0.06, 1.795)               # shoulder bone head (near the neck)
     R['S'] = S_
     d_up = normalize(v3(0.69, 0.14, -0.71))
-    E = S_ + 0.50 * d_up
+    E = S_ + 0.56 * d_up
     d_fo = normalize(d_up + v3(0.0, 0.24, 0.05))
-    W = E + 0.46 * d_fo
+    W = E + 0.53 * d_fo
     R['E'], R['W'] = E, W
     R['d_up'], R['d_fo'] = d_up, d_fo
     a = d_fo
@@ -85,13 +86,13 @@ def _right_side() -> dict:
 
     # fingers: (b offset, spread deg (toward thumb +), lengths, radii at joints, curl deg per joint)
     fingers = {
-        'index': (0.029, 9.0, (0.088, 0.064, 0.050), (0.0092, 0.0084, 0.0072, 0.0050), (6, 10, 9)),
-        'middle': (0.0095, 2.0, (0.098, 0.070, 0.054), (0.0096, 0.0086, 0.0074, 0.0052), (7, 11, 9)),
-        'ring': (-0.0095, -6.0, (0.091, 0.066, 0.050), (0.0090, 0.0081, 0.0070, 0.0049), (8, 12, 10)),
-        'pinky': (-0.028, -14.0, (0.073, 0.052, 0.042), (0.0080, 0.0072, 0.0062, 0.0045), (10, 13, 11)),
+        'index': (0.035, 9.0, (0.112, 0.082, 0.064), (0.0108, 0.0098, 0.0084, 0.0058), (6, 10, 9)),
+        'middle': (0.0115, 2.0, (0.126, 0.090, 0.069), (0.0112, 0.0101, 0.0086, 0.0060), (7, 11, 9)),
+        'ring': (-0.0115, -6.0, (0.117, 0.084, 0.064), (0.0105, 0.0095, 0.0082, 0.0056), (8, 12, 10)),
+        'pinky': (-0.034, -14.0, (0.094, 0.068, 0.054), (0.0094, 0.0085, 0.0073, 0.0052), (10, 13, 11)),
     }
     for f, (off, spread, lens, rads, curls) in fingers.items():
-        k = W + a * 0.122 + b * off - n * 0.003
+        k = W + a * PALM + b * off - n * 0.003
         d = toward(a, b, math.radians(spread)) if spread >= 0 else toward(a, -b, math.radians(-spread))
         pts = [k]
         dirs = []
@@ -103,16 +104,16 @@ def _right_side() -> dict:
         R[f'{f}_rad'] = rads
         R[f'{f}_dirs'] = dirs
     # thumb
-    k = W + a * 0.030 + b * 0.026 + n * 0.010
-    d = normalize(a * 0.62 + b * 0.66 + n * 0.42)
+    k = W + a * 0.036 + b * 0.032 + n * 0.012
+    d = normalize(a * 0.82 + b * 0.46 + n * 0.36)
     pts = [k]
     dirs = []
-    for L, c in zip((0.054, 0.044, 0.036), (0, 10, 12)):
+    for L, c in zip((0.068, 0.056, 0.046), (0, 10, 12)):
         d = bend(d, n - b * 0.3, math.radians(c))
         dirs.append(d)
         pts.append(pts[-1] + d * L)
     R['thumb_pts'] = pts
-    R['thumb_rad'] = (0.0115, 0.0095, 0.0080, 0.0056)
+    R['thumb_rad'] = (0.0130, 0.0110, 0.0094, 0.0064)
     R['thumb_dirs'] = dirs
 
     # leg
@@ -151,6 +152,7 @@ def _mirror(obj):
 
 def skeleton() -> dict:
     J = {
+        'scale': 1.0,
         'pelvis': v3(0, -0.02, 1.10),
         'L5': v3(0, -0.045, 1.235),
         'T12': v3(0, -0.068, 1.445),
@@ -175,6 +177,36 @@ def skeleton() -> dict:
     return J
 
 
+DIRECTION_KEYS = {'d_up', 'd_fo', 'ha', 'hn', 'hb', 'elbow_back', 'foot_fwd'}
+
+
+def scale_skeleton(J, k: float) -> dict:
+    """World-space copy of the design skeleton: positions/radii scaled by k, directions kept."""
+    out = {'scale': k}
+    for key, v in J.items():
+        if key in ('L', 'R'):
+            side = {}
+            for kk, vv in v.items():
+                if kk in DIRECTION_KEYS or kk.endswith('_dirs'):
+                    side[kk] = vv
+                elif kk.endswith('_pts'):
+                    side[kk] = [p * k for p in vv]
+                elif kk.endswith('_rad'):
+                    side[kk] = tuple(r * k for r in vv)
+                elif kk == 'toes':
+                    side[kk] = {i: (b0 * k, p1 * k, p2 * k, r * k, d2) for i, (b0, p1, p2, r, d2) in vv.items()}
+                elif kk == 'ear':
+                    side[kk] = (vv[0] * k, vv[1], vv[2])
+                else:
+                    side[kk] = vv * k
+            out[key] = side
+        elif key == 'scale':
+            continue
+        else:
+            out[key] = v * k
+    return out
+
+
 def spine_curve(J, n=64):
     """Catmull-Rom through the spine joints, pelvis -> atlas. Returns points (n,3)."""
     ctrl = [J['pelvis'] + v3(0, 0.01, -0.12), J['pelvis'], J['L5'], J['T12'], J['T6'], J['C7'], J['C3'], J['atlas'],
@@ -193,7 +225,7 @@ def spine_curve(J, n=64):
 # sculpt
 # ---------------------------------------------------------------------------------------------
 
-def _ear_prim(base, u, nrm, side_s, L=0.225, Wmax=0.060, seed=0.0, notches=(), holes=()):
+def _ear_prim(base, u, nrm, side_s, L=0.265, Wmax=0.074, seed=0.0, notches=(), holes=()):
     """Big ragged bat-like ear membrane (cupped, thick cartilage rim, bites and tears).
     Returns (Func prim, axes, ridge point lists)."""
     e_u = normalize(u)
@@ -213,7 +245,7 @@ def _ear_prim(base, u, nrm, side_s, L=0.225, Wmax=0.060, seed=0.0, notches=(), h
     def w0(t, rel):
         return 0.022 * rel * rel * np.clip(t * 3, 0, 1) * (1 - 0.45 * t) - 0.008 * t * t
 
-    TH = 0.0050
+    TH = 0.0058
 
     def fn(p):
         q = (p - base32) @ M
@@ -224,16 +256,16 @@ def _ear_prim(base, u, nrm, side_s, L=0.225, Wmax=0.060, seed=0.0, notches=(), h
         d_edge = (np.abs(qv - c) - W) * 0.8
         d_edge = np.maximum(d_edge, np.maximum(-qu, qu - L))
         ragged = smoothstep(0.12, 0.4, t)
-        nz = S.fbm(np.stack([qu * 22, qv * 22, np.full_like(qu, seed)], 1), 2, seed=seed)
-        nz2 = S.perlin(np.stack([qu * 70, qv * 70, np.full_like(qu, seed + 5)], 1))
-        d_edge = d_edge + (0.0030 * nz + 0.0005 * nz2) * ragged
+        nz = S.fbm(np.stack([qu * 16, qv * 16, np.full_like(qu, seed)], 1), 2, seed=seed)
+        nz2 = S.perlin(np.stack([qu * 45, qv * 45, np.full_like(qu, seed + 5)], 1))
+        d_edge = d_edge + (0.0042 * nz + 0.0010 * nz2) * ragged
         for (nt, nside, ra, rb) in notches:   # bites / tears out of the rim (ellipses, rb deep)
             cu = nt * L
             cv = float(vc(np.array([nt]))[0]) + nside * Wmax * float(prof(np.array([nt]))[0])
             dn = np.sqrt(((qu - cu) / ra) ** 2 + ((qv - cv) / rb) ** 2) - 1.0
             d_edge = np.maximum(d_edge, -dn * min(ra, rb))
         rel = np.clip((qv - c) / np.maximum(W, 1e-3), -1.3, 1.3)
-        th = TH + 0.0040 * smoothstep(-0.008, 0.0, d_edge) + 0.016 * np.power(np.clip(1 - t * 3.2, 0, 1), 2)
+        th = TH + 0.0050 * smoothstep(-0.010, 0.0, d_edge) + 0.018 * np.power(np.clip(1 - t * 3.2, 0, 1), 2)
         d_w = (np.abs(qw - w0(t, rel)) - th * 0.5) * 0.8
         d = smax(d_edge, d_w, 0.0015)
         for (ht, hv, hr) in holes:
@@ -275,9 +307,21 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
     info['spine'] = sp
     B = Group(LAB['torso'])
 
-    def on(grp, pts, r, prot):
-        """Centers for features of radius r that stick out `prot` above grp's surface."""
+    def on(grp, pts, r, prot, origin=None):
+        """Centers for features of radius r that stick out `prot` above grp's surface.
+        With `origin` (an interior point; its z is replaced by each seed's z) the surface point
+        is found by a ray from inside toward the seed instead of by nearest-point projection."""
+        if origin is not None:
+            hits = [S.raycast(grp, v3(origin[0], origin[1], p_[2]), np.asarray(p_, float) - v3(origin[0], origin[1], p_[2]), 0.3)
+                    for p_ in pts]
+            P = np.array([h[0] for h in hits])
+            N = np.array([h[1] for h in hits])
+            return [P[i] - N[i] * (r - prot) for i in range(len(P))], N
         P, N = S.project(grp, pts)
+        jump = np.linalg.norm(P - np.asarray(pts, float).reshape(-1, 3), axis=1)
+        if jump.max() > 0.05:
+            import traceback
+            print('[anatomy] WARNING feature point jumped', np.round(jump, 3), traceback.extract_stack()[-2].lineno)
         return [P[i] - N[i] * (r - prot) for i in range(len(P))], N
 
     # ======================= ENVELOPES =======================================================
@@ -290,7 +334,7 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
     core.union(Ellipsoid(rc_c, rc_r, Rrc))
     core.union(Ellipsoid(v3(0, 0.002, 1.752), v3(0.160, 0.078, 0.066)), k=0.04)            # shoulder girdle
     core.union(Ellipsoid(v3(0, -0.024, 1.338), v3(0.098, 0.064, 0.125)), k=0.05)            # sunken abdomen
-    core.union(Ellipsoid(v3(0, -0.030, 1.150), v3(0.118, 0.078, 0.078)), k=0.05, label=LAB['pelvis'])
+    core.union(Ellipsoid(v3(0, -0.036, 1.165), v3(0.114, 0.074, 0.070)), k=0.05, label=LAB['pelvis'])
     for s_ in (1, -1):
         core.union(Ellipsoid(v3(0.058 * s_, -0.080, 1.050), v3(0.056, 0.042, 0.066)), k=0.035, label=LAB['pelvis'])
         # erector columns (wasted) along the lower back
@@ -400,12 +444,12 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
         # iliac crest + ASIS
         cr = [v3(0.050 * s_, -0.096, 1.200), v3(0.110 * s_, -0.072, 1.195), v3(0.132 * s_, -0.020, 1.178),
               v3(0.118 * s_, 0.040, 1.150), v3(0.094 * s_, 0.070, 1.122)]
-        C, _ = on(core, cr, 0.010, 0.0065)
+        C, _ = on(core, cr, 0.010, 0.0065, origin=(0.0, -0.03))
         feat.union(S.tube(C, [0.009, 0.010, 0.011, 0.011, 0.011]), k=0.004)
-        C, _ = on(core, [v3(0.094 * s_, 0.078, 1.115)], 0.014, 0.008)
+        C, _ = on(core, [v3(0.094 * s_, 0.078, 1.125)], 0.014, 0.008, origin=(0.0, -0.03))
         feat.union(Sphere(C[0], 0.014), k=0.008)
         # trochanter
-        C, _ = on(core, [Rs['H'] + v3(0.055 * s_, -0.008, -0.045)], 0.022, 0.010)
+        C, _ = on(core, [Rs['H'] + v3(0.055 * s_, -0.008, -0.030)], 0.020, 0.008, origin=(0.0, -0.02))
         feat.union(Sphere(C[0], 0.022), k=0.02, label=LAB['thigh_' + side])
         # abdominal sinew
         ab = [v3(0.022 * s_, 0.06, 1.42), v3(0.020 * s_, 0.05, 1.33), v3(0.016 * s_, 0.05, 1.24)]
@@ -422,7 +466,11 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
     C, _ = on(core, [v3(0, 0.200, 1.915)], 0.013, 0.008)
     feat.union(Sphere(C[0], 0.013), k=0.008, label=LAB['neck'])        # larynx
     B.union(feat, k=0.0)
-    B.sub(Ellipsoid(v3(0, -0.005, 0.975), v3(0.028, 0.11, 0.075)), k=0.03)   # crotch arch between thighs
+    B.sub(Ellipsoid(v3(0, -0.010, 0.985), v3(0.036, 0.15, 0.105)), k=0.035)  # crotch arch between thighs
+    B.sub(Ellipsoid(v3(0, 0.072, 1.165), v3(0.062, 0.022, 0.055)), k=0.03)   # sunken lower belly
+    B.sub(Ellipsoid(v3(0, 0.040, 1.075), v3(0.045, 0.040, 0.040)), k=0.03)   # smooth, sexless groin
+    for s_ in (1, -1):   # inguinal creases: belly / thigh separation from the hip bone to the crotch
+        B.sub(RoundCone(v3(0.092 * s_, 0.084, 1.128), v3(0.034 * s_, 0.050, 1.055), 0.006, 0.008), k=0.022)
     # hollows (after features)
     for s_ in (1, -1):
         B.sub(Ellipsoid(v3(0.072 * s_, 0.092, 1.818), v3(0.030, 0.016, 0.014)), k=0.016)  # supraclavicular
@@ -435,7 +483,7 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
     hd.union(Ellipsoid(v3(0, 0.168, 2.204), v3(0.058, 0.070, 0.068), Rhead), k=0.06)    # stretched occiput
     hd.union(Ellipsoid(v3(0, 0.298, 2.098), v3(0.053, 0.046, 0.100)), k=0.03)          # long face
     hd.union(Ellipsoid(v3(0, 0.304, 2.030), v3(0.034, 0.040, 0.048)), k=0.022)         # lower face
-    hd.union(Sphere(v3(0, 0.322, 1.992), 0.0155), k=0.022)                             # pointed chin
+    hd.union(Sphere(v3(0, 0.320, 1.986), 0.0165), k=0.022)                             # pointed chin
     for s_ in (1, -1):
         hd.union(Ellipsoid(v3(0.040 * s_, 0.262, 2.058), v3(0.016, 0.050, 0.028),
                            rot((1, 0, 0), math.radians(35))), k=0.03)                   # jaw sides
@@ -456,15 +504,15 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
         hfeat.union(S.tube(C, [0.008, 0.0085, 0.008, 0.007]), k=0.008)               # jaw edge
         C, _ = on(hd, [v3(0.050 * s_, 0.200, 2.105)], 0.012, 0.006)
         hfeat.union(Sphere(C[0], 0.012), k=0.01)                                      # mastoid
-        gr = [v3(0.0098 * s_, 0.0, z) for z in np.linspace(1.998, 2.090, 5)]
+        gr = [v3(0.0128 * s_, 0.0, z) for z in np.linspace(1.990, 2.092, 6)]
         P = []
         for g_ in gr:
             sp_, n_ = S.raycast(hd, g_ + v3(0, 0.28, 0), v3(0, 1, 0), 0.12)
             P.append(sp_ - n_ * (0.0048 - 0.003))
-        hfeat.union(S.tube(P, [0.0042, 0.0050, 0.0052, 0.0050, 0.0042]), k=0.005)    # gum ridges
+        hfeat.union(S.tube(P, [0.0040, 0.0050, 0.0055, 0.0055, 0.0050, 0.0040]), k=0.005)    # gum ridges
     hd.union(hfeat, k=0.0)
     for s_ in (1, -1):
-        hd.sub(Ellipsoid(v3(0.030 * s_, 0.350, 2.138), v3(0.022, 0.019, 0.018)), k=0.013)   # sockets
+        hd.sub(Ellipsoid(SOCKETS[0 if s_ > 0 else 1][0], SOCKETS[0][1]), k=0.014)           # sockets
         hd.sub(Ellipsoid(v3(0.047 * s_, 0.316, 2.068), v3(0.016, 0.028, 0.024)), k=0.016)   # hollow cheeks
         hd.sub(Ellipsoid(v3(0.072 * s_, 0.285, 2.172), v3(0.011, 0.032, 0.030)), k=0.018)   # temples
         hd.sub(RoundCone(v3(0.0055 * s_, 0.350, 2.096), v3(0.0080 * s_, 0.344, 2.113), 0.0030, 0.0026), k=0.002)  # nostril slits
@@ -476,7 +524,7 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
     cand = []
     cc = v3(0, 0.215, 2.19)
     tries = 0
-    while len(cand) < 34 and tries < 6000:
+    while len(cand) < 22 and tries < 6000:
         tries += 1
         d = normalize(rng.normal(size=3))
         if d[2] < 0.0 or d[1] > 0.62:
@@ -488,9 +536,9 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
             continue
         if any(np.linalg.norm(pp - J[s2]['ear'][0]) < 0.045 for s2 in ('L', 'R')):
             continue
-        if any(np.linalg.norm(pp - q) < 0.020 for q, _, _ in cand):
+        if any(np.linalg.norm(pp - q) < 0.026 for q, _, _ in cand):
             continue
-        r = 0.0030 + 0.0028 * rng.rand()
+        r = 0.0042 + 0.0032 * rng.rand()
         cand.append((pp, nn[0], r))
     for p, nrm, r in cand:
         hd.union(Sphere(p - nrm * r * 1.25, r * 1.65), k=0.004)       # low swollen rim
@@ -502,10 +550,10 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
     # ======================= EARS ============================================================
     ear_info = {}
     for side, s_, seed, notches, eholes in (
-        ('R', 1.0, 0.0, ((0.46, 1.0, 0.011, 0.012), (0.70, -1.0, 0.004, 0.018), (0.28, -1.0, 0.008, 0.008),
-                          (0.86, 1.0, 0.005, 0.006)), ((0.55, 0.10, 0.0050),)),
-        ('L', -1.0, 3.7, ((0.38, -1.0, 0.012, 0.014), (0.60, 1.0, 0.004, 0.020), (0.80, -1.0, 0.006, 0.006)),
-         ((0.34, -0.25, 0.0040), (0.66, 0.20, 0.0035))),
+        ('R', 1.0, 0.0, ((0.46, 1.0, 0.016, 0.018), (0.68, -1.0, 0.006, 0.026), (0.28, -1.0, 0.011, 0.011),
+                          (0.84, 1.0, 0.008, 0.010)), ((0.55, 0.10, 0.0070),)),
+        ('L', -1.0, 3.7, ((0.38, -1.0, 0.018, 0.020), (0.58, 1.0, 0.006, 0.030), (0.78, -1.0, 0.009, 0.010)),
+         ((0.62, 0.20, 0.0060),)),
     ):
         base, u, nrm = J[side]['ear']
         prim, axes, ridges = _ear_prim(base, u, nrm, s_, seed=seed, notches=notches, holes=eholes)
@@ -524,107 +572,138 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
         Sx, E, W = R_['S'], R_['E'], R_['W']
         a, n, b = R_['ha'], R_['hn'], R_['hb']
         eb = R_['elbow_back']
+        du, df = R_['d_up'], R_['d_fo']
+        lu = np.linalg.norm(E - Sx)
+        lf = np.linalg.norm(W - E)
         ua = Group(LAB['upper_arm_' + side])
-        ua.union(RoundCone(Sx, E, 0.036, 0.027))
-        ua.union(Ellipsoid(Sx + R_['d_up'] * 0.25 + eb * 0.012, v3(0.025, 0.14, 0.024), frame_from(R_['d_up'], eb)), k=0.02)
-        ua.union(Ellipsoid(Sx + R_['d_up'] * 0.30 - eb * 0.010, v3(0.022, 0.11, 0.020), frame_from(R_['d_up'], -eb)), k=0.02)
+        ua.union(RoundCone(Sx, Sx + du * lu * 0.45, 0.037, 0.027))                     # tapering humerus mass
+        ua.union(RoundCone(Sx + du * lu * 0.45, E - du * 0.02, 0.027, 0.019), k=0.02)
+        ua.union(Ellipsoid(Sx + du * lu * 0.42 - eb * 0.013, v3(0.019, lu * 0.24, 0.016), frame_from(du, -eb)), k=0.018)  # biceps
+        ua.union(Ellipsoid(Sx + du * lu * 0.36 + eb * 0.014, v3(0.021, lu * 0.27, 0.017), frame_from(du, eb)), k=0.018)   # triceps
+        ua.union(RoundCone(Sx + du * lu * 0.62 + eb * 0.016, E + eb * 0.016, 0.0075, 0.0065), k=0.01)  # triceps tendon
         B.union(ua, k=0.03)
         fa = Group(LAB['forearm_' + side])
-        fa.union(RoundCone(E, W, 0.025, 0.0155))
-        fa.union(Ellipsoid(E + R_['d_fo'] * 0.10 + b * 0.010 - n * 0.004, v3(0.024, 0.11, 0.019),
-                           frame_from(R_['d_fo'], -n)), k=0.02)   # brachioradialis
-        fa.union(Ellipsoid(E + R_['d_fo'] * 0.24, v3(0.022, 0.20, 0.0135), frame_from(R_['d_fo'], -n)), k=0.02)  # flatten
+        fa.union(RoundCone(E + b * 0.010, W + b * 0.016, 0.0145, 0.0105))             # radius
+        fa.union(RoundCone(E - b * 0.008 + eb * 0.010, W - b * 0.015 - n * 0.002, 0.0135, 0.0098), k=0.008)   # ulna
+        fa.union(Ellipsoid(E + df * lf * 0.24 + b * 0.008 - n * 0.003, v3(0.027, lf * 0.26, 0.019),
+                           frame_from(df, -n)), k=0.022)                                  # flexor/extensor bellies
+        fa.union(Ellipsoid(E + df * lf * 0.20 + b * 0.020 - n * 0.008, v3(0.016, lf * 0.20, 0.014),
+                           frame_from(df, -n)), k=0.016)                                  # brachioradialis
         ffeat = Group(LAB['forearm_' + side])
-        lat = normalize(np.cross(R_['d_up'], eb))
-        C, _ = on(fa, [E + eb * 0.02], 0.022, 0.012)
-        ffeat.union(Sphere(C[0], 0.022))                             # olecranon
-        C, _ = on(fa, [E + lat * 0.03, E - lat * 0.03], 0.014, 0.007)
-        ffeat.union(Sphere(C[0], 0.014), k=0.006)
-        ffeat.union(Sphere(C[1], 0.015), k=0.006)
-        ul = [E + eb * 0.02 + (W - E) * t for t in np.linspace(0.1, 0.95, 5)]
-        C, _ = on(fa, ul, 0.006, 0.0025)
-        ffeat.union(S.tube(C, [0.006] * 5), k=0.006)                 # ulna ridge
-        C, _ = on(fa, [W + b * 0.02, W - b * 0.02 - n * 0.003], 0.010, 0.0055)
-        ffeat.union(Sphere(C[0], 0.010), k=0.005)                    # styloids
-        ffeat.union(Sphere(C[1], 0.010), k=0.005)
-        for off in (-0.006, 0.006):                                  # wrist tendons (palm side)
-            tn = [E + (W - E) * t + b * off + n * 0.01 for t in np.linspace(0.6, 1.0, 4)]
-            C, _ = on(fa, tn, 0.003, 0.0018)
-            ffeat.union(S.tube(C, [0.0028] * 4), k=0.003)
+        C, _ = on(fa, [E + eb * 0.02 - df * 0.004], 0.016, 0.009)
+        ffeat.union(Ellipsoid(C[0], v3(0.014, 0.020, 0.012), frame_from(df, eb)))       # olecranon (pointed)
+        lat = normalize(np.cross(du, eb))
+        C, _ = on(fa, [E + lat * 0.026, E - lat * 0.026], 0.010, 0.0045)
+        ffeat.union(Sphere(C[0], 0.010), k=0.008)
+        ffeat.union(Sphere(C[1], 0.011), k=0.008)
+        ul = [E + eb * 0.02 + (W - E) * t for t in np.linspace(0.1, 0.95, 6)]
+        C, _ = on(fa, ul, 0.0055, 0.0022)
+        ffeat.union(S.tube(C, [0.0055] * 6), k=0.006)                                    # ulna ridge
+        C, _ = on(fa, [W + b * 0.02, W - b * 0.02 - n * 0.003], 0.0085, 0.0045)
+        ffeat.union(Sphere(C[0], 0.0085), k=0.006)                                       # styloids
+        ffeat.union(Sphere(C[1], 0.0085), k=0.006)
+        for off, side_n in ((-0.009, 1), (0.0, 1), (0.009, 1), (-0.006, -1), (0.007, -1)):   # tendons
+            tn = [E + (W - E) * t + b * off + n * 0.012 * side_n for t in np.linspace(0.45, 1.0, 5)]
+            C, _ = on(fa, tn, 0.0030, 0.0020)
+            ffeat.union(S.tube(C, [0.0026, 0.0030, 0.0030, 0.0030, 0.0028]), k=0.003)
         fa.union(ffeat, k=0.0)
-        B.union(fa, k=0.016)
+        B.union(fa, k=0.018)
         hand = Group(LAB['hand_' + side])
-        hand.union(Ellipsoid(W + a * 0.064 - n * 0.001, v3(0.034, 0.066, 0.0118), np.stack([b, a, -n], 1)))
-        hand.union(Ellipsoid(W + a * 0.035 - b * 0.022 + n * 0.004, v3(0.014, 0.03, 0.010), np.stack([b, a, -n], 1)), k=0.01)
+        hand.union(Ellipsoid(W + a * PALM * 0.52 - n * 0.001, v3(0.040, PALM * 0.53, 0.0128), np.stack([b, a, -n], 1)))
+        hand.union(Ellipsoid(W + a * 0.042 - b * 0.026 + n * 0.004, v3(0.016, 0.036, 0.011), np.stack([b, a, -n], 1)), k=0.012)
         hfe = Group(LAB['hand_' + side])
         for f in ('index', 'middle', 'ring', 'pinky'):
             k0 = R_[f + '_pts'][0]
-            mc = [W + a * 0.02 + (k0 - W - a * 0.122) * 0.3 - n * 0.006, (W + k0) / 2 - n * 0.008, k0 - n * 0.006]
-            C, _ = on(hand, mc, 0.0045, 0.0030)
-            hfe.union(S.tube(C, [0.0040, 0.0048, 0.0058]), k=0.004)  # metacarpal tendons
-            hfe.union(Sphere(k0 - n * 0.0035, 0.0112), k=0.004)        # knuckle
+            mc = [W + a * 0.02 + (k0 - W - a * PALM) * 0.3 - n * 0.006, (W + k0) / 2 - n * 0.008, k0 - n * 0.006]
+            C, _ = on(hand, mc, 0.0050, 0.0034)
+            hfe.union(S.tube(C, [0.0042, 0.0052, 0.0064]), k=0.004)                     # metacarpal tendons
+            hfe.union(Sphere(k0 - n * 0.0035, 0.0125), k=0.006)                          # knuckle
         hand.union(hfe, k=0.0)
-        B.union(hand, k=0.013)
+        B.union(hand, k=0.014)
         for f in FINGERS:
             pts = R_[f + '_pts']
             rads = R_[f + '_rad']
             fg = Group(LAB[f + '_' + side])
             for i in range(3):
-                fg.union(RoundCone(pts[i], pts[i + 1], rads[i] * 0.93, rads[i + 1] * 1.0), k=0.003)
+                fg.union(RoundCone(pts[i], pts[i + 1], rads[i] * 0.97, rads[i + 1] * 0.97), k=0.004)
                 if i > 0:
-                    fg.union(Sphere(pts[i] - n * 0.0016, rads[i] * 1.22), k=0.004)
+                    fg.union(Ellipsoid(pts[i] - n * 0.0016, v3(rads[i] * 1.10, rads[i] * 1.30, rads[i] * 1.06),
+                                       frame_from(R_[f + '_dirs'][i], -n)), k=0.007)    # knobby knuckles
             fg.union(Sphere(pts[3] - R_[f + '_dirs'][2] * 0.002, rads[3] * 1.08), k=0.003)
-            B.union(fg, k=0.008 if f != 'thumb' else 0.014)
+            B.union(fg, k=0.009 if f != 'thumb' else 0.015)
 
     # ======================= LEGS + FEET =====================================================
     for side, s_ in (('R', 1), ('L', -1)):
         R_ = J[side]
-        H, K, A = R_['H'], R_['K'], R_['A']
-        leg_d = normalize(K - H)
-        lf = normalize(v3(0, 1, 0) - leg_d * np.dot(v3(0, 1, 0), leg_d))
+        H, K, A_ = R_['H'], R_['K'], R_['A']
+        ld = normalize(K - H)
+        lf_ = normalize(v3(0, 1, 0) - ld * np.dot(v3(0, 1, 0), ld))
+        lat = v3(s_, 0, 0)
+        ll = np.linalg.norm(K - H)
         th = Group(LAB['thigh_' + side])
-        th.union(RoundCone(H + v3(0.006 * s_, 0, 0.03), K + v3(0, 0, 0.045), 0.064, 0.040))
-        th.union(Ellipsoid((H + K) / 2 + lf * 0.016 + v3(0.010 * s_, 0, 0.03), v3(0.042, 0.19, 0.038), frame_from(leg_d, lf)), k=0.035)
-        th.union(Ellipsoid((H + K) / 2 - lf * 0.022 + v3(-0.004 * s_, 0, 0.05), v3(0.040, 0.17, 0.034), frame_from(leg_d, lf)), k=0.035)
-        B.union(th, k=0.035)
+        th.union(RoundCone(H + lat * 0.010, H + ld * ll * 0.30, 0.054, 0.047))                # thigh root
+        th.union(RoundCone(H + ld * ll * 0.30, K - ld * 0.06, 0.047, 0.027), k=0.03)        # -> thin above knee
+        th.union(Ellipsoid(H + ld * ll * 0.46 + lf_ * 0.018 + lat * 0.008, v3(0.031, ll * 0.28, 0.024),
+                           frame_from(ld, lf_)), k=0.03)                                    # wasted quadriceps
+        th.union(Ellipsoid(H + ld * ll * 0.34 - lf_ * 0.020, v3(0.033, ll * 0.30, 0.026), frame_from(ld, -lf_)), k=0.03)
+        th.union(Ellipsoid(H + ld * ll * 0.36 - lat * 0.010 - lf_ * 0.006, v3(0.022, ll * 0.17, 0.020), frame_from(ld, -lat)), k=0.03)  # adductor
+        tf = Group(LAB['thigh_' + side])
+        q = [H + ld * ll * t + lf_ * 0.028 for t in (0.55, 0.75, 0.93)]
+        C, _ = on(th, q, 0.009, 0.004)
+        tf.union(S.tube(C, [0.0085, 0.0095, 0.0105]), k=0.008)                            # quadriceps tendon
+        for sgn in (1, -1):                                                                 # hamstring cords
+            hq = [H + ld * ll * t - lf_ * 0.022 + lat * 0.018 * sgn for t in (0.55, 0.78, 1.02)]
+            C, _ = on(th, hq, 0.0065, 0.0035)
+            tf.union(S.tube(C, [0.0065, 0.0070, 0.0065]), k=0.006)
+        th.union(tf, k=0.0)
+        B.union(th, k=0.045)
         sh = Group(LAB['shin_' + side])
-        shin_d = normalize(A - K)
-        sf = normalize(v3(0, 1, 0) - shin_d * np.dot(v3(0, 1, 0), shin_d))
-        sh.union(RoundCone(K - shin_d * 0.04, A - shin_d * 0.02, 0.030, 0.019))
-        sh.union(Ellipsoid(K - shin_d * 0.15 - sf * 0.024, v3(0.034, 0.11, 0.030), frame_from(shin_d, sf)), k=0.03)  # calf
-        sh.union(RoundCone(K - shin_d * 0.25 - sf * 0.026, R_['heel'] + v3(0, 0.004, 0.030), 0.012, 0.0085), k=0.014)  # achilles
+        sd = normalize(A_ - K)
+        sf = normalize(v3(0, 1, 0) - sd * np.dot(v3(0, 1, 0), sd))
+        sl = np.linalg.norm(A_ - K)
+        sh.union(RoundCone(K + sd * 0.01, A_ - sd * 0.03, 0.025, 0.0145))                  # tibia
+        sh.union(RoundCone(K + sd * 0.03 + lat * 0.022 - sf * 0.01, A_ + lat * 0.018, 0.010, 0.008), k=0.012)  # fibula
+        sh.union(Ellipsoid(K + sd * sl * 0.25 - sf * 0.026, v3(0.032, sl * 0.21, 0.030), frame_from(sd, sf)), k=0.03)   # calf belly
+        sh.union(Ellipsoid(K + sd * sl * 0.22 - sf * 0.012 - lat * 0.016, v3(0.022, sl * 0.16, 0.022), frame_from(sd, sf)), k=0.03)
+        # knee: bony but blended
         kn = Group(LAB['shin_' + side])
-        kn.union(Ellipsoid(K + lf * 0.036, v3(0.025, 0.016, 0.031), frame_from(lf, v3(0, 0, 1))))   # patella
-        kn.union(Sphere(K + v3(0.030 * s_, 0.0, 0.022), 0.031), k=0.01)
-        kn.union(Sphere(K + v3(-0.030 * s_, -0.004, 0.022), 0.032), k=0.01)
-        kn.union(Sphere(K + v3(0.027 * s_, 0.006, -0.034), 0.026), k=0.012)
-        kn.union(Sphere(K + v3(-0.027 * s_, 0.004, -0.034), 0.026), k=0.012)
-        kn.union(Sphere(K + sf * 0.026 - shin_d * 0.075, 0.011), k=0.012)    # tibial tuberosity
-        sh.union(kn, k=0.012)
-        tc = [K - shin_d * t + sf * 0.03 for t in np.linspace(0.09, 0.42, 6)]
-        C, _ = on(sh, tc, 0.0075, 0.0035)
-        sh.union(S.tube(C, [0.0075, 0.0075, 0.007, 0.0065, 0.006, 0.0055]), k=0.006)   # tibial crest
-        B.union(sh, k=0.025)
+        kn.union(Ellipsoid(K + lf_ * 0.032, v3(0.022, 0.012, 0.027), frame_from(lf_, v3(0, 0, 1))))    # patella
+        kn.union(Ellipsoid(K + lat * 0.024 + v3(0, -0.002, 0.018), v3(0.019, 0.024, 0.034)), k=0.022)  # condyles
+        kn.union(Ellipsoid(K - lat * 0.024 + v3(0, -0.004, 0.018), v3(0.020, 0.024, 0.034)), k=0.022)
+        kn.union(Ellipsoid(K + v3(0, 0.004, -0.030), v3(0.036, 0.024, 0.022)), k=0.022)               # tibial plateau
+        kn.union(Sphere(K + sf * 0.024 + sd * 0.072, 0.0095), k=0.014)                                # tuberosity
+        sh.union(kn, k=0.026)
+        sfe = Group(LAB['shin_' + side])
+        tc = [K + sd * t + sf * 0.03 for t in np.linspace(0.09, 0.45, 6)]
+        C, _ = on(sh, tc, 0.0065, 0.0030)
+        sfe.union(S.tube(C, [0.0065, 0.0065, 0.006, 0.0058, 0.0055, 0.005]), k=0.006)       # tibial crest
+        for sgn in (1, -1):                                                                   # stringy calf tendons
+            cq = [K + sd * t * sl - sf * 0.024 + lat * 0.011 * sgn for t in np.linspace(0.22, 0.80, 5)]
+            C, _ = on(sh, cq, 0.0050, 0.0030)
+            sfe.union(S.tube(C, [0.0050, 0.0055, 0.0055, 0.0050, 0.0045]), k=0.005)
+        sh.union(sfe, k=0.0)
+        sh.union(RoundCone(K + sd * sl * 0.45 - sf * 0.024, R_['heel'] + v3(0, 0.004, 0.030), 0.0105, 0.0085), k=0.014)  # achilles
+        B.union(sh, k=0.022)
         ft = Group(LAB['foot_' + side])
         ffwd = R_['foot_fwd']
         mid = (R_['heel'] + R_['ball']) * 0.5 + v3(0, 0, 0.012)
-        ft.union(Ellipsoid(mid, v3(0.036, 0.108, 0.025), frame_from(ffwd, v3(0, 0, 1))))
-        ft.union(Sphere(R_['heel'] + v3(0, 0, 0.004), 0.033), k=0.012)
-        ft.union(Sphere(A, 0.023), k=0.014)
+        ft.union(Ellipsoid(mid, v3(0.035, 0.108, 0.024), frame_from(ffwd, v3(0, 0, 1))))
+        ft.union(Sphere(R_['heel'] + v3(0, 0, 0.004), 0.032), k=0.014)
+        ft.union(Sphere(A_, 0.021), k=0.016)
         ffe = Group(LAB['foot_' + side])
-        C, _ = on(ft, [A + v3(0.026 * s_, -0.008, -0.008), A + v3(-0.026 * s_, 0.004, 0.004)], 0.016, 0.009)
-        ffe.union(Sphere(C[0], 0.016))
-        ffe.union(Sphere(C[1], 0.016), k=0.004)                        # malleoli
+        C, _ = on(ft, [A_ + v3(0.024 * s_, -0.008, -0.008), A_ + v3(-0.024 * s_, 0.004, 0.004)], 0.013, 0.0065)
+        ffe.union(Sphere(C[0], 0.013))
+        ffe.union(Sphere(C[1], 0.013), k=0.004)                                              # malleoli
         for i, (base, p1, p2, r, d2) in R_['toes'].items():
-            mt = [A + (base - A) * t + v3(0, 0, 0.012 * (1 - t)) for t in (0.35, 0.65, 0.95)]
+            mt = [A_ + (base - A_) * t + v3(0, 0, 0.012 * (1 - t)) for t in (0.35, 0.65, 0.95)]
             C, _ = on(ft, mt, 0.005, 0.003)
-            ffe.union(S.tube(C, [0.0045, 0.005, 0.006]), k=0.004)       # metatarsal tendons
+            ffe.union(S.tube(C, [0.0045, 0.005, 0.006]), k=0.004)                           # metatarsal tendons
         ft.union(ffe, k=0.0)
         for i, (base, p1, p2, r, d2) in R_['toes'].items():
-            ft.union(Sphere(base + v3(0, 0, 0.003), r * 1.15), k=0.008)
-            ft.union(RoundCone(base, p1, r, r * 0.88), k=0.003)
-            ft.union(Sphere(p1 + v3(0, 0, 0.002), r * 1.04), k=0.003)
-            ft.union(RoundCone(p1, p2, r * 0.85, r * 0.62), k=0.003)
+            ft.union(Sphere(base + v3(0, 0, 0.003), r * 1.12), k=0.008)
+            ft.union(RoundCone(base, p1, r, r * 0.86), k=0.003)
+            ft.union(Ellipsoid(p1 + v3(0, 0, 0.002), v3(r * 1.05, r * 1.15, r * 1.0), frame_from(d2, v3(0, 0, 1))), k=0.004)
+            ft.union(RoundCone(p1, p2, r * 0.84, r * 0.60), k=0.003)
         ft.inter(Func(lambda p: (0.0 - p[:, 2]).astype(F), v3(-2, -2, -1), v3(2, 2, 3)), k=0.004)   # flat sole
         B.union(ft, k=0.018)
 
@@ -638,4 +717,4 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
 
 
 def bounds(J):
-    return v3(-1.25, -0.40, -0.01), v3(1.25, 0.55, 2.50)
+    return v3(-1.45, -0.40, -0.01), v3(1.45, 0.60, 2.55)

@@ -858,7 +858,8 @@ def pbr(name: str, fn: Callable[[Kit], dict], culling: bool = True, marks: Seque
     for mk in marks or []:
         m = mk['mask'](k)
         if mk.get('color') is not None:
-            ch['color'] = k.mix(m, ch.get('color', (0.5, 0.5, 0.5)), mk['color'])
+            c = mk['color'](k) if callable(mk['color']) else mk['color']
+            ch['color'] = k.mix(m, ch.get('color', (0.5, 0.5, 0.5)), c)
         if mk.get('rough') is not None:
             ch['rough'] = k.mixf(m, ch.get('rough', 0.5), mk['rough'])
         if mk.get('metal') is not None:

@@ -33,7 +33,7 @@ def build() -> None:
 
 W, H, D = 0.42, 0.56, 0.14            # enclosure
 PANEL_Y = 0.092                       # dead-front panel front face
-SLOT_XS = (-0.095, 0.0, 0.095)
+SLOT_XS = (0.095, 0.0, -0.095)        # index 0 = viewer's left (Blender +X = three.js +X)
 LAMP_Z = 0.165
 SLOT_Z = -0.035
 BLOCK_Y0 = PANEL_Y                    # porcelain block back
@@ -65,8 +65,8 @@ def _decals():
     px = Wd / pw
     d = L.Decal('fb_panel', Wd, Hd)
 
-    def at(x, z):
-        return ((x + pw / 2) * px, (z + ph / 2) * px)
+    def at(x, z):   # the panel decal's u runs toward -X (viewer's right)
+        return ((-x + pw / 2) * px, (z + ph / 2) * px)
 
     for i, x in enumerate(SLOT_XS):
         cx, cy = at(x, LAMP_Z - 0.034)
@@ -137,8 +137,27 @@ def _materials(imgs):
         m = k.decal(imgs['card'], k.plane_uv(tuple(c), tuple(_rot((1, 0, 0))), (0, 0, 1), 0.20, 0.25))
         return k.ramp_f(m, 0.15, 0.8)
 
+    def bottom_rust(k):
+        x, y, z = k.xyz(k.coord())
+        n = k.noise(scale=25, detail=6, rough=0.65)
+        return k.mul(k.ramp_f(k.add(z, k.mul(n, 0.09)), -0.17, -0.26), k.ramp_f(z, -0.5, -0.45))
+
+    def screw_streaks(k):
+        x, y, z = k.xyz(k.coord())
+        n = k.noise(scale=18, detail=5, vec=k.mapping(scale=(40, 40, 1.5)))
+        m = None
+        for sx in (-0.012, 0.010, 0.135, -0.150):
+            band = k.ramp_f(k.math('ABSOLUTE', k.sub(x, sx)), 0.010, 0.002)
+            run = k.mul(k.ramp_f(z, H / 2 + 0.01, H / 2 - 0.01), k.ramp_f(z, H / 2 - 0.30, H / 2 - 0.12))
+            g = k.mul(k.mul(band, run), k.ramp_f(n, 0.35, 0.65))
+            m = g if m is None else k.maxf(m, g)
+        return m
+
+    rustc = (0.16, 0.065, 0.025)
     mats = dict(
-        steel=M.painted_steel('fb_steel', marks=[M.printed(side_text, (0.42, 0.40, 0.34), rough=0.6)]),
+        steel=M.painted_steel('fb_steel', marks=[M.printed(side_text, (0.42, 0.40, 0.34), rough=0.6),
+                                                 dict(mask=bottom_rust, color=rustc, rough=0.85, metal=0.0, height=0.6),
+                                                 dict(mask=screw_streaks, color=(0.12, 0.05, 0.02), rough=0.8)]),
         steel_door=M.painted_steel('fb_steel_door', edge_dist=0.0007,
                                    marks=[M.printed(danger, (0.30, 0.035, 0.02), rough=0.55)]),
         panel=M.painted_steel('fb_panel', paint=(0.018, 0.019, 0.018), chips=0.6, rust=0.35, dust=0.8,

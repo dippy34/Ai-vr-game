@@ -88,7 +88,7 @@ def build_fuse(final: bool = True) -> None:
         return k.ramp_f(k.maxf(a, b), 0.2, 0.8)
 
     mats = dict(
-        brass=M.brass('fuse_brass_src', s=0.35, tarnish=0.45, stamp=stamp, warm=1.05),
+        brass=M.brass('fuse_brass_src', s=0.35, tarnish=0.8, stamp=stamp, warm=1.0, grime=1.3),
         wire=M.copper_wire('fuse_wire_src'),
         solder=M.tin('fuse_solder_src', s=0.2, rust=0.0),
     )

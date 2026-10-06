@@ -36,19 +36,19 @@ def _mattress_top(x, y):
 
 def build_bed():
     P = F.Piece('bed', seed=3)
-    iron = F.mat_paint('bed_iron', hexc('b2a993'), hexc('1e1a17'), gloss=0.55, chip=0.75, flake=0.9,
-                       layer2=hexc('4a5248'), rust=0.9, metal_under=0.55, dust=0.6, grime=0.9, bevel_r=0.004,
-                       brush=0.0, seed=2.0)
+    iron = F.mat_paint('bed_iron', hexc('aaa28c'), hexc('1e1a17'), gloss=0.55, chip=0.55, flake=0.8,
+                       layer2=hexc('4a5248'), rust=0.8, metal_under=0.5, dust=0.6, grime=0.9, bevel_r=0.004,
+                       brush=0.0, seed=2.0, edge_chip=0.12, chip_scale=14.0)
     brass = F.mat_metal('bed_brass', hexc('94733a'), rough=0.38, metal=0.85, tarnish=0.75,
                         tarnish_col=hexc('2e2914'), pitting=0.4)
-    ticking = F.mat_fabric('bed_mattress', hexc('a29a84'), hexc('857d68'), stripe=(hexc('4a5263'), 0.032, 0.18, 'X'),
-                           fade=0.2, stains=1.0, dust=0.5, grime=1.0, wear=0.3, mold=0.8, rust_spots=0.7, seed=3.0,
+    ticking = F.mat_fabric('bed_mattress', hexc('968c74'), hexc('7a705a'), stripe=(hexc('3e4658'), 0.032, 0.18, 'X'),
+                           fade=0.1, stains=1.6, dust=0.5, grime=1.0, wear=0.3, mold=0.9, rust_spots=0.9, seed=3.0,
                            foam=hexc('8c7a54'))
-    sheet_m = F.mat_fabric('bed_sheet', hexc('a9a597'), hexc('8f8a7c'), fade=0.1, stains=0.9, dust=0.55, grime=1.0,
-                           wear=0.1, seed=6.0, weave=0.6, mold=0.3)
+    sheet_m = F.mat_fabric('bed_sheet', hexc('9a958a'), hexc('7f7a6e'), fade=0.1, stains=1.3, dust=0.6, grime=1.0,
+                           wear=0.1, seed=6.0, weave=0.6, mold=0.4)
     pillow_m = F.mat_fabric('bed_pillow', hexc('a49a80'), hexc('8a7f66'), fade=0.1, stains=1.0, dust=0.5,
                             grime=1.0, wear=0.1, seed=9.0, weave=0.5)
-    spring_m = F.mat_metal('bed_spring', hexc('2e2a26'), rough=0.6, metal=0.6, tarnish=0.3, rust=0.8, pitting=0.0)
+    spring_m = F.mat_wiremesh('bed_spring')
 
     W2 = 0.78                    # half width at the post centers
     YH, YF = -1.03, 1.03         # head / foot post Y
@@ -106,7 +106,7 @@ def build_bed():
     P.cushion((MW, ML, MH), (0, MY, MTOP - MH / 2), ticking, radius=0.06, bulge=(0.008, 0.008, M_BULGE),
               sag=M_SAG, dents=[M_DENT], wrinkle=0.005, piping=0.005, tufts=tufts, lowres=(3, 4, 0),
               skip_bottom=True, flat_bottom=True, seed=41, name='mattress',
-              tears=[(0.5, 0.75, 0.09)], use=[(0.0, 0.1, 0.45)])
+              tears=[(0.5, 0.75, 0.09)], use=[(0.05, 0.1, 0.42), (-0.3, -0.6, 0.25)])
     # pillow, squashed against the headboard
     P.cushion((0.62, 0.38, 0.13), (-0.28, YH + 0.3, _mattress_top(-0.28, YH + 0.3) + 0.045), pillow_m,
               rot=(-8, 4, 9), radius=0.06, bulge=(0.02, 0.03, 0.035), wrinkle=0.008, piping=0.0, lowres=(1, 1, 0),
@@ -136,5 +136,5 @@ def build_bed():
         return (x, y, _mattress_top(x, y) + 0.012 + bunch + 0.01 * math.sin(x * 11 + y * 5))
 
     P.sheet(sheet_fn, 16, 11, (0, 0, 0), sheet_m, hi_mult=7, thickness=0.0, folds=0.012, seed=5, name='sheet',
-            ext=0.02)
+            ext=0.045)
     P.finish(tex=1024, max_tris=3000, fit=(1.6, MTOP, 2.1), preview_yaw=40, preview_pitch=22)

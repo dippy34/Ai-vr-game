@@ -48,7 +48,8 @@ def bone_specs(J) -> list[tuple]:
     B.append(('head', V(J['atlas']), V(J['head_tip']), 'neck_2', V((0, 1, 0)), True))
     B.append(('jaw', V(J['jaw_hinge']), V(J['jaw_tip']), 'head', V((0, 0, 1)), False))
     for side, s in (('L', -1), ('R', 1)):
-        B.append((f'jaw_{side}', V((0.014 * s, 0.296, 2.062)), V((0.006 * s, 0.360, 2.045)), 'jaw', V((0, 0, 1)), False))
+        k = J['scale']
+        B.append((f'jaw_{side}', V((0.016 * s * k, 0.294 * k, 2.052 * k)), V((0.009 * s * k, 0.358 * k, 2.036 * k)), 'jaw', V((0, 0, 1)), False))
     for side in ('L', 'R'):
         base, u, nrm = J[side]['ear']
         B.append((f'ear_{side}', V(base), V(base + u * 0.10), 'head', V(nrm), False))
@@ -58,7 +59,7 @@ def bone_specs(J) -> list[tuple]:
         B.append(('shoulder' + sf, V(R['clav_in']), V(R['S']), 'spine_3', V((0, 0, 1)), False))
         B.append(('upper_arm' + sf, V(R['S']), V(R['E']), 'shoulder' + sf, V((0, 1, 0)), True))
         B.append(('forearm' + sf, V(R['E']), V(R['W']), 'upper_arm' + sf, V((0, 1, 0)), True))
-        hand_tip = R['W'] + R['ha'] * 0.122
+        hand_tip = R['W'] + R['ha'] * A.PALM
         B.append(('hand' + sf, V(R['W']), V(hand_tip), 'forearm' + sf, V(R['hn']), True))
         for f in A.FINGERS:
             pts = R[f + '_pts']
@@ -214,31 +215,42 @@ def skin(mesh: bpy.types.Object, arm: bpy.types.Object, labels: np.ndarray, J, e
     W = W / np.maximum(W.sum(1, keepdims=True), 1e-9)
 
     # --- hand-authored: split jaw -----------------------------------------------------------
-    x, y, z = co[:, 0], co[:, 1], co[:, 2]
+    x, y, z = (co / J['scale']).T     # jaw region is defined in design units
     head_lab = np.isin(labels, [A.LAB['head'], A.LAB['jaw_L'], A.LAB['jaw_R'], A.LAB['neck']])
     f_jaw = _smooth01(0.288, 0.318, y) * _smooth01(2.104, 2.082, z) * _smooth01(1.955, 1.975, z) * (np.abs(x) < 0.05) * head_lab
     f_jaw *= _smooth01(0.050, 0.032, np.abs(x))
     side_L = _smooth01(-0.0005, -0.0045, x)
     side_R = _smooth01(0.0005, 0.0045, x)
+    # arm/shoulder bones may only pull torso skin near the armpit/shoulder (no rib "skirt")
+    torso_like = np.isin(labels, [A.LAB['torso'], A.LAB['neck']])
+    k_ = J['scale']
+    for side in ('L', 'R'):
+        Sj = np.asarray(J[side]['S'], float)
+        dS = np.linalg.norm(co - Sj, axis=1)
+        f_arm = np.where(torso_like, _smooth01(0.16 * k_, 0.07 * k_, dS), 1.0)
+        f_sh = np.where(torso_like, _smooth01(0.24 * k_, 0.12 * k_, dS), 1.0)
+        for bn, f in (('upper_arm_' + side, f_arm), ('shoulder_' + side, f_sh)):
+            lost = W[:, col[bn]] * (1 - f)
+            W[:, col[bn]] *= f
+            hi_ = co[:, 2] > np.asarray(J['T6'])[2]
+            W[:, col['spine_3']] += lost * hi_
+            W[:, col['spine_2']] += lost * ~hi_
+    # bone-heat weight that landed on jaw/ear bones outside their regions goes back to the head
+    for bn in ('jaw', 'jaw_L', 'jaw_R', 'ear_L', 'ear_R'):
+        W[:, col['head']] += W[:, col[bn]]
+        W[:, col[bn]] = 0
     wj = np.zeros((nv, len(names)))
     wj[:, col['jaw_L']] = f_jaw * side_L
     wj[:, col['jaw_R']] = f_jaw * side_R
     wj[:, col['jaw']] = f_jaw * (1 - side_L - side_R)
-    keep = 1 - f_jaw
-    W = W * keep[:, None]
-    W[:, col['jaw_L']] = 0
-    W[:, col['jaw_R']] = 0
-    W[:, col['jaw']] = 0
-    W = W + wj
+    W = W * (1 - f_jaw)[:, None] + wj
     # --- ears ---------------------------------------------------------------------------------
     for side in ('L', 'R'):
         base, u, nrm = J[side]['ear']
         along = (co - base) @ u
         f = _smooth01(-0.004, 0.030, along) * (labels == A.LAB['ear_' + side])
-        # smooth label-based mask so the ear base blends into the head
         W = W * (1 - f)[:, None]
-        W[:, col['head']] += 0  # (rest already distributed)
-        W[:, col['ear_' + side]] = W[:, col['ear_' + side]] * 0 + f
+        W[:, col['ear_' + side]] += f
     # final cleanup: smooth a little, prune to 4 influences, normalize
     W = smooth_w(W, 2)
     W = W * allowed
@@ -247,6 +259,12 @@ def skin(mesh: bpy.types.Object, arm: bpy.types.Object, labels: np.ndarray, J, e
     rows = np.arange(nv)[:, None]
     W4[rows, idx] = W[rows, idx]
     W4[W4 < 0.01] = 0
+    dead = W4.sum(1) < 1e-6
+    if dead.any():   # never leave a vertex unweighted (the exporter would bind it to a neutral bone)
+        for vi in np.nonzero(dead)[0]:
+            j = int(np.argmax(W[vi])) if W[vi].max() > 0 else col['head' if co[vi, 2] > 1.95 else 'spine_2']
+            W4[vi, j] = 1.0
+        print(f'[rig] fixed {int(dead.sum())} unweighted vertices')
     W4 = W4 / np.maximum(W4.sum(1, keepdims=True), 1e-9)
     if extra_fix:
         W4 = extra_fix(W4, col, co, labels)
@@ -443,8 +461,9 @@ def pulse(phase, at, rise=0.03, hold=0.05, fall=0.12):
 class Gait:
     """Planted-foot gait in the armature frame (creature faces +Y; ground slides toward -Y)."""
 
-    def __init__(self, J, speed, period, duty, lift, stride_offset=0.0, toe_drop=-35.0, stutter=0.0):
+    def __init__(self, J, speed, period, duty, lift, stride_offset=0.0, toe_drop=-35.0, stutter=0.0, width=0.0):
         self.v, self.T, self.duty, self.lift = speed, period, duty, lift
+        self.width = width
         self.travel = speed * period * duty
         self.offset = stride_offset
         self.toe_drop = toe_drop
@@ -454,9 +473,10 @@ class Gait:
     def foot(self, side, phase):
         """Returns (ankle position, foot pitch deg (+ = toes up), toe pitch relative deg)."""
         R = self.J[side]
-        A0 = Vector(R['A'])
-        ball0 = Vector(R['ball'])
-        heel0 = Vector(R['heel']) + Vector((0, 0, -R['heel'][2] + 0.0))
+        wx = Vector((self.width * (1 if side == 'R' else -1), 0, 0))
+        A0 = Vector(R['A']) + wx
+        ball0 = Vector(R['ball']) + wx
+        heel0 = Vector(R['heel']) + wx + Vector((0, 0, -R['heel'][2] + 0.0))
         p = wrap(phase)
         half = self.travel / 2
         if p < self.duty:
@@ -492,6 +512,14 @@ class Gait:
         else:
             bp = Vector((ball0.x, ball0.y + dy, ball0.z + lift))
             ankle = bp + Rx @ (A0 - ball0)
+        # floor guard: the ball and the (curled) toe tips never go below the floor
+        tip0 = Vector(R['toe_tip']) + wx
+        Rt = Matrix.Rotation(math.radians(pitch + toe_rel), 3, 'X')
+        ball = ankle + Rx @ (ball0 - A0)
+        tip = ball + Rt @ (tip0 - ball0)
+        low = min(ball.z - ball0.z, tip.z - 0.006)
+        if low < 0:
+            ankle = ankle + Vector((0, 0, -low))
         return ankle, pitch, toe_rel
 
 
@@ -529,6 +557,7 @@ def _legs(P: Poser, gait: Gait, phase_L, phase_R, knee_out=0.15):
 
 def _plant(P: Poser, J, side, s, dy=0.0, dx=0.0, pitch=0.0, knee_out=0.15):
     R = J[side]
+    dx = dx * J.get('scale', 1.0)
     ankle = Vector(R['A']) + Vector((dx * s, dy, 0))
     if pitch:
         ball0 = Vector(R['ball'])
@@ -588,6 +617,13 @@ def _shoulders(P: Poser, L=(0, 0, 0), R=(0, 0, 0)):
     P.fk()
 
 
+def _hand_world(P: Poser, J, side, fwd: Vector, palm: Vector):
+    """Orient the hand in armature space: fingers along `fwd`, palm facing `palm`."""
+    R = J[side]
+    Rm = frame_rot(Vector(R['ha']), Vector(R['hn']), fwd.normalized(), palm.normalized())
+    P.orient('hand_' + side, Rm)
+
+
 def _hand(P: Poser, side, rx=0.0, ry=0.0, rz=0.0):
     P.set_local('hand_' + side, q_euler(rx, ry, rz))
     P.fk()
@@ -603,13 +639,13 @@ def pose_idle(P: Poser, J, t, T=4.0):
     P.reset()
     breathe = 0.5 + 0.5 * math.sin(w * 3)
     sway = math.sin(w)
-    _hips(P, (0.02 + 0.010 * sway, -0.02, -0.07 + 0.006 * math.sin(w * 2)), pitch=12, roll=-3 + 1.2 * sway,
+    _hips(P, (0.02 + 0.010 * sway, -0.03, -0.05 + 0.006 * math.sin(w * 2)), pitch=4, roll=-3 + 1.2 * sway,
           yaw=-4 + 2 * math.sin(w + 1))
-    _spine(P, pitch=(10, 16 + 1.5 * breathe, 20), yaw=(1, 2 - 1.5 * sway, 3 - 2 * sway), roll=(2, 2 - sway, 2 - sway),
+    _spine(P, pitch=(2, 9 + 1.5 * breathe, 25), yaw=(1, 2 - 1.5 * sway, 3 - 2 * sway), roll=(2, 2 - sway, 2 - sway),
            breathe=breathe)
     tw = pulse(ph, 0.37, 0.012, 0.06, 0.10) - 0.7 * pulse(ph, 0.71, 0.01, 0.03, 0.12)
-    _neck_head(P, neck=(-22, 4 * math.sin(w + 0.5), -3), neck2=(-16, 3, 0),
-               head=(-8 + 3 * math.sin(w * 2), 10 * math.sin(w + 0.8) + 4, 12 + 9 * tw + 3 * math.sin(w)))
+    _neck_head(P, neck=(16, 4 * math.sin(w + 0.5), -2), neck2=(4, 3, 0),
+               head=(-52 + 3 * math.sin(w * 2), 10 * math.sin(w + 0.8) + 4, 3 + 8 * tw + 3 * math.sin(w)))
     _jaw(P, open_=2.5 + 2.5 * math.sin(w * 3 + 1.2))
     et = pulse(ph, 0.52, 0.01, 0.02, 0.06)
     _ears(P, L=(-6 * et, 0, 0), R=(-3 * pulse(ph, 0.22, 0.01, 0.02, 0.06), 0, 0))
@@ -625,137 +661,160 @@ def pose_idle(P: Poser, J, t, T=4.0):
 
 
 def pose_walk(P: Poser, J, t, T=1.4):
+    """Slow stalking walk at 1.0 m/s: hunched, wide-footed, lurching onto the left leg (a slight
+    limp), swing foot hesitating mid-air, arms dangling low and swinging late."""
     ph = t / T
     w = 2 * math.pi * ph
-    g = Gait(J, 1.0, T, 0.62, 0.15, stride_offset=0.02, toe_drop=-40, stutter=0.55)
+    k = J['scale']
+    g = Gait(J, 1.0, T, 0.62, 0.15 * k, stride_offset=0.02 * k, toe_drop=-40, stutter=0.55, width=0.045 * k)
     P.reset()
-    # phase 0 = left heel strike, 0.5 = right heel strike
-    bob = math.cos(w * 2)                          # low at heel strikes
-    _hips(P, (0.022 * math.sin(w), 0.0, -0.105 - 0.018 * bob), pitch=8, yaw=6 * math.sin(w), roll=-3 * math.sin(w))
-    _spine(P, pitch=(6, 10, 12), yaw=(-2 * math.sin(w), -3 * math.sin(w), -4 * math.sin(w)),
-           roll=(2 * math.sin(w), 1 * math.sin(w), 0), breathe=0.5 + 0.5 * math.sin(w * 2))
+    # phase 0 = left heel strike, 0.5 = right heel strike; the left strike lands heavier
+    strikeL = pulse(ph, 0.0, 0.04, 0.03, 0.18)
+    strikeR = pulse(ph, 0.5, 0.04, 0.03, 0.18)
+    lurch = strikeL * 1.0 + strikeR * 0.55
+    bob = math.cos(w * 2)
+    _hips(P, (0.026 * math.sin(w), 0.0, -0.075 - 0.016 * bob - 0.02 * strikeL), pitch=8 + 2 * lurch,
+          yaw=4 * math.sin(w), roll=-3 * math.sin(w) - 2.5 * strikeL)
+    _spine(P, pitch=(2, 9 + 3 * lurch, 25 + 4 * lurch), yaw=(-2 * math.sin(w), -3 * math.sin(w), -4 * math.sin(w)),
+           roll=(2 * math.sin(w), 1.5 * math.sin(w), 0), breathe=0.5 + 0.5 * math.sin(w * 2))
     tw = pulse(ph, 0.30, 0.010, 0.07, 0.10) - pulse(ph, 0.80, 0.010, 0.04, 0.14)
-    _neck_head(P, neck=(-12, 3 * math.sin(w), 0), neck2=(-8, 0, 0),
-               head=(-4 + 2.5 * bob, -4 * math.sin(w) + 10 * tw, 12 * tw))
-    _jaw(P, open_=2.0)
+    _neck_head(P, neck=(15 - 6 * lurch, 3 * math.sin(w), 0), neck2=(4, 0, 0),
+               head=(-46 + 2.5 * bob + 4 * lurch, -4 * math.sin(w) + 10 * tw, 12 * tw - 6))
+    _jaw(P, open_=3.0)
     _ears(P, L=(-5 * pulse(ph, 0.1, 0.01, 0.02, 0.05), 0, 0), R=(-5 * pulse(ph, 0.62, 0.01, 0.02, 0.05), 0, 0))
-    _shoulders(P, L=(0, 0, 2 * math.sin(w)), R=(0, 0, 2 * math.sin(w)))
-    for side, s, off in (('L', -1, 0.0), ('R', 1, 0.5)):
-        sw = math.sin(w + (math.pi if side == 'L' else 0) - 0.6)   # lagging, loose
-        _arm_hang(P, side, s, swing=0.10 * sw, fwd=0.03, elbow=0.5 + 0.25 * max(0, sw))
-        _hand(P, side, rx=6 + 10 * max(0, -sw), ry=s * -10)
-        _fingers(P, side, curl=16 + 8 * sw, spread=4)
-    _legs(P, g, ph, ph + 0.5)
+    _shoulders(P, L=(6, 0, 2 * math.sin(w)), R=(6, 0, 2 * math.sin(w)))
+    for side, s in (('L', -1), ('R', 1)):
+        sw = math.sin(w + (math.pi if side == 'L' else 0) - 0.8)   # late, loose pendulum
+        _arm_hang(P, side, s, swing=0.20 * sw, fwd=0.16, out=0.03, elbow=0.35 + 0.25 * max(0, sw))
+        _hand(P, side, rx=6 + 12 * max(0, -sw), ry=s * -10)
+        _fingers(P, side, curl=18 + 10 * sw, spread=4)
+    _legs(P, g, ph, ph + 0.5, knee_out=0.30)
 
 
-def pose_run(P: Poser, J, t, T=0.72):
+def pose_run(P: Poser, J, t, T=22 / 30):
+    """Loping lunge-run at 3.1 m/s: body thrown forward and low, head thrust out, both arms
+    reaching ahead and clawing alternately, long bounding strides with a flight phase."""
     ph = t / T
     w = 2 * math.pi * ph
-    g = Gait(J, 3.1, T, 0.36, 0.22, stride_offset=0.10, toe_drop=-45)
+    k = J['scale']
+    g = Gait(J, 3.1, T, 0.36, 0.22 * k, stride_offset=0.10 * k, toe_drop=-45, width=0.04 * k)
     P.reset()
     bob = math.cos(w * 2)
-    _hips(P, (0.015 * math.sin(w), 0.06, -0.15 + 0.035 * bob), pitch=22, yaw=9 * math.sin(w), roll=-4 * math.sin(w))
-    _spine(P, pitch=(10, 13, 10 + 4 * bob), yaw=(-4 * math.sin(w), -6 * math.sin(w), -7 * math.sin(w)),
+    _hips(P, (0.015 * math.sin(w), 0.06 * k, -0.14 * k + 0.035 * bob), pitch=24, yaw=8 * math.sin(w), roll=-4 * math.sin(w))
+    _spine(P, pitch=(8, 12, 14 + 4 * bob), yaw=(-4 * math.sin(w), -6 * math.sin(w), -7 * math.sin(w)),
            roll=(2 * math.sin(w), 0, 0), breathe=0.5 + 0.5 * bob)
-    _neck_head(P, neck=(-24 - 3 * bob, 0, 0), neck2=(-16, 0, 0), head=(-12 + 4 * bob, 3 * math.sin(w), 0))
-    _jaw(P, open_=7 + 4 * bob)
+    _neck_head(P, neck=(6 - 3 * bob, 0, 0), neck2=(-4, 0, 0), head=(-34 + 4 * bob, 3 * math.sin(w), 0))
+    _jaw(P, open_=8 + 5 * bob)
     _ears(P, L=(18, 0, 0), R=(18, 0, 0))
     for side, s in (('L', -1), ('R', 1)):
         sw = math.sin(w + (math.pi if side == 'L' else 0))
         P.fk()
         S0 = P.unposed('upper_arm_' + side).translation
         reach = (P.length['upper_arm_' + side] + P.length['forearm_' + side]) * 0.93
-        d = Vector((s * 0.22, 0.75 + 0.45 * sw, -0.55 + 0.25 * sw)).normalized()
+        d = Vector((s * 0.22, 0.75 + 0.45 * sw, -0.62 + 0.25 * sw)).normalized()
         P.limb_ik('upper_arm_' + side, 'forearm_' + side, S0 + d * reach, Vector((s * 0.8, -0.4, 0.6)))
         _hand(P, side, rx=-15 - 15 * sw, ry=s * -20)
         _fingers(P, side, curl=10 + 25 * max(0, -sw), spread=10)
-    _legs(P, g, ph, ph + 0.5, knee_out=0.25)
+    _legs(P, g, ph, ph + 0.5, knee_out=0.30)
 
 
 def pose_listen(P: Poser, J, t, T=4.0):
+    """Frozen, half-reared up, head cocked and turning slowly side to side, ears twitching,
+    the split jaw slightly parted, a faint tremor."""
     ph = t / T
     w = 2 * math.pi * ph
     P.reset()
     tremor = 0.3 * math.sin(w * 23) + 0.2 * math.sin(w * 37)
-    _hips(P, (0.0, -0.01, -0.09), pitch=6)
-    _spine(P, pitch=(6, 9, 9), yaw=(0, 0, 5 * math.sin(w)), breathe=0.2 + 0.1 * math.sin(w * 2))
-    turn = math.sin(w)                               # slow side to side
+    _hips(P, (0.0, -0.02, -0.06), pitch=2)
+    _spine(P, pitch=(0, 4, 14), yaw=(0, 0, 5 * math.sin(w)), breathe=0.2 + 0.1 * math.sin(w * 2))
+    turn = math.sin(w)
     cock = 22 * math.sin(w + 0.35)
-    _neck_head(P, neck=(-10, 10 * turn, 0), neck2=(-4, 8 * turn, 0),
-               head=(-2 + tremor, 18 * turn, cock + tremor))
-    _jaw(P, open_=6 + 1.2 * math.sin(w * 5))
+    _neck_head(P, neck=(12, 10 * turn, 0), neck2=(2, 8 * turn, 0),
+               head=(-30 + tremor, 18 * turn, cock + tremor))
+    _jaw(P, open_=7 + 1.5 * math.sin(w * 5))
     eL = 10 * pulse(ph, 0.15, 0.01, 0.02, 0.05) + 8 * pulse(ph, 0.55, 0.01, 0.03, 0.06) + 6 * pulse(ph, 0.83, 0.01, 0.02, 0.04)
     eR = 9 * pulse(ph, 0.32, 0.01, 0.02, 0.05) + 10 * pulse(ph, 0.66, 0.01, 0.03, 0.06) + 6 * pulse(ph, 0.95, 0.01, 0.02, 0.04)
     _ears(P, L=(-12 - eL, 0, 4 * turn), R=(-12 - eR, 0, 4 * turn))
-    _shoulders(P, L=(0, 0, -3), R=(0, 0, 3))
+    _shoulders(P, L=(4, 0, -3), R=(4, 0, 3))
     for side, s in (('L', -1), ('R', 1)):
-        _arm_hang(P, side, s, out=0.06, fwd=0.08, elbow=0.9)
+        _arm_hang(P, side, s, out=0.08, fwd=0.14, elbow=0.9)
         _hand(P, side, rx=-8, ry=s * -15)
         _fingers(P, side, curl=6 + tremor, spread=12)
-    _plant(P, J, 'L', -1, dy=0.05, dx=0.03)
-    _plant(P, J, 'R', 1, dy=-0.04, dx=0.03)
+    _plant(P, J, 'L', -1, dy=0.05 * J['scale'], dx=0.03, knee_out=0.25)
+    _plant(P, J, 'R', 1, dy=-0.04 * J['scale'], dx=0.03, knee_out=0.25)
 
 
 def pose_attack(P: Poser, J, t, T=1.2):
+    """One-shot: rear up and spread the arms (0-0.3 s), lunge at head height with the jaws split
+    wide (0.3-0.55 s), claws clamp and pull the prey in (0.55-0.8 s), settle back to Idle."""
     P.reset()
-    # 0-0.32 anticipation, 0.32-0.55 lunge, 0.55-0.75 grab, then recover
-    a = smoothstep(0.0, 0.30, t) * (1 - smoothstep(0.30, 0.46, t))     # wind-up
-    l = smoothstep(0.30, 0.52, t) * (1 - smoothstep(0.80, 1.2, t))     # lunge
-    gch = smoothstep(0.50, 0.62, t) * (1 - smoothstep(0.95, 1.2, t))   # grab closed
-    rec = smoothstep(0.80, 1.2, t)
-    _hips(P, (0.0, -0.06 * a + 0.30 * l, -0.05 - 0.10 * a - 0.12 * l), pitch=4 - 6 * a + 26 * l)
-    _spine(P, pitch=(6 - 8 * a + 10 * l, 9 - 8 * a + 12 * l, 10 - 6 * a + 8 * l), breathe=0.5 + 0.5 * a)
-    _neck_head(P, neck=(-8 - 6 * a - 18 * l, 0, 0), neck2=(-6 + 4 * a - 12 * l, 0, 0), head=(-6 + 14 * a - 10 * l, 0, 0))
-    _jaw(P, open_=2 + 10 * a + 22 * l - 12 * gch * (1 - rec), drop=4 * l)
-    _ears(P, L=(-20 * a + 15 * l, 0, 0), R=(-20 * a + 15 * l, 0, 0))
-    _shoulders(P, L=(0, 0, -8 * a), R=(0, 0, 8 * a))
+    k = J['scale']
+    a = smoothstep(0.0, 0.30, t) * (1 - smoothstep(0.30, 0.46, t))     # rear up / wind-up
+    l = smoothstep(0.28, 0.50, t) * (1 - smoothstep(0.85, 1.2, t))     # lunge
+    gch = smoothstep(0.48, 0.60, t) * (1 - smoothstep(0.95, 1.2, t))   # claws closed
+    rec = smoothstep(0.85, 1.2, t)
+    idle = 1 - max(a, l)
+    _hips(P, (0.0, (-0.05 * a + 0.34 * l) * k, (-0.05 + 0.02 * a - 0.10 * l) * k), pitch=4 * idle - 8 * a + 16 * l)
+    _spine(P, pitch=(2 * idle + 2 * l, 9 * idle + 2 * a + 7 * l, 25 * idle + 6 * a + 12 * l), breathe=0.5 + 0.5 * a)
+    _neck_head(P, neck=(16 * idle + 4 * a + 10 * l, 0, 0), neck2=(4 * idle, 0, 0),
+               head=(-50 * idle - 26 * a - 34 * l, 0, 7 * idle))
+    _jaw(P, open_=3 + 14 * a + 26 * l - 14 * gch * (1 - rec), drop=5 * l)
+    _ears(P, L=(-22 * a + 14 * l, 0, 0), R=(-22 * a + 14 * l, 0, 0))
+    _shoulders(P, L=(0, 0, -10 * a), R=(0, 0, 10 * a))
     for side, s in (('L', -1), ('R', 1)):
         P.fk()
         S0 = P.unposed('upper_arm_' + side).translation
         reach = P.length['upper_arm_' + side] + P.length['forearm_' + side]
-        d_hang = Vector((s * 0.13, 0.12, -1.0)).normalized()
-        d_wide = Vector((s * 1.0, 0.35, 0.15)).normalized()
-        d_grab = Vector((s * 0.35, 1.0, -0.15)).normalized()
-        d_pull = Vector((s * 0.15, 1.0, -0.25)).normalized()
+        d_hang = Vector((s * 0.13, 0.25, -1.0)).normalized()
+        d_wide = Vector((s * 0.80, 0.10, 0.65)).normalized()
+        d_grab = Vector((s * 0.30, 1.0, 0.05)).normalized()
+        d_pull = Vector((s * 0.12, 1.0, -0.12)).normalized()
         d = d_hang.lerp(d_wide, a)
-        d = d.lerp(d_grab, l * (1 - gch * 0.6))
+        d = d.lerp(d_grab, l * (1 - gch * 0.7))
         d = d.lerp(d_pull, gch * (1 - rec))
-        d = d.lerp(d_hang, rec * 0.6)
-        r = reach * (0.97 - 0.25 * gch * (1 - rec))
-        pole = Vector((s * 1.0, -0.5, 0.4)).lerp(Vector((s * 0.35, -1.0, -0.1)), 1 - max(a, l))
+        d = d.lerp(d_hang, rec * 0.7)
+        r = reach * (0.97 - 0.18 * a - 0.30 * gch * (1 - rec))
+        pole = Vector((s * 0.6, -0.9, -0.3)).lerp(Vector((s * 1.0, -0.5, 0.4)), l).lerp(Vector((s * 0.35, -1.0, -0.1)), idle)
         P.limb_ik('upper_arm_' + side, 'forearm_' + side, S0 + d.normalized() * r, pole)
-        _hand(P, side, rx=-25 * l + 20 * gch, ry=s * -15)
-        _fingers(P, side, curl=10 - 12 * (a + l) * (1 - gch) + 55 * gch * (1 - rec * 0.7), spread=14 * max(a, l) * (1 - gch))
-    _plant(P, J, 'L', -1, dy=0.10 * l - 0.03 * a, dx=0.02)
-    _plant(P, J, 'R', 1, dy=-0.12 * l - 0.03 * a, dx=0.02, pitch=-18 * l)
+        _hand(P, side, rx=-20 * l + 25 * gch, ry=s * -15)
+        _fingers(P, side, curl=12 - 14 * (a + l) * (1 - gch) + 60 * gch * (1 - rec * 0.7), spread=16 * max(a, l) * (1 - gch))
+    _plant(P, J, 'L', -1, dy=(0.12 * l - 0.03 * a) * k, dx=0.03)
+    _plant(P, J, 'R', 1, dy=(-0.14 * l - 0.03 * a) * k, dx=0.03, pitch=-20 * l)
 
 
 def pose_feed(P: Poser, J, t, T=2.4):
+    """Crouched low over the floor on splayed knees, hands pinning the prey, head jerking and
+    tearing at irregular beats."""
     ph = t / T
     w = 2 * math.pi * ph
+    k = J['scale']
     P.reset()
     tear = pulse(ph, 0.10, 0.03, 0.04, 0.10) + pulse(ph, 0.42, 0.02, 0.03, 0.12) + 0.8 * pulse(ph, 0.70, 0.02, 0.06, 0.09)
     chew = math.sin(w * 6)
-    _hips(P, (0.0, 0.05, -0.43), pitch=38 + 3 * tear)
-    _spine(P, pitch=(14, 16, 14 - 6 * tear), yaw=(0, 3 * math.sin(w), 6 * tear), breathe=0.5 + 0.5 * math.sin(w * 2))
-    _neck_head(P, neck=(16 - 18 * tear, 6 * tear, 0), neck2=(18 - 12 * tear, 0, 0),
-               head=(14 - 20 * tear, 16 * tear - 4 * math.sin(w), 12 * tear))
+    _hips(P, (0.0, 0.05 * k, -0.43 * k), pitch=38 + 3 * tear)
+    _spine(P, pitch=(14, 16, 18 - 6 * tear), yaw=(0, 3 * math.sin(w), 6 * tear), breathe=0.5 + 0.5 * math.sin(w * 2))
+    _neck_head(P, neck=(30 - 18 * tear, 6 * tear, 0), neck2=(18 - 12 * tear, 0, 0),
+               head=(-10 - 20 * tear, 16 * tear - 4 * math.sin(w), 12 * tear))
     _jaw(P, open_=6 + 10 * max(0, chew) + 12 * tear)
     _ears(P, L=(8, 0, 0), R=(8, 0, 0))
     for side, s in (('L', -1), ('R', 1)):
         P.fk()
-        tgt = Vector((s * 0.24, 0.62 + 0.03 * s, 0.035 + 0.01 * max(0, math.sin(w * 2 + s))))
+        tgt = Vector((s * 0.26, 0.50 + 0.03 * s, 0.050 + 0.012 * max(0, math.sin(w * 2 + s)))) * k
         P.limb_ik('upper_arm_' + side, 'forearm_' + side, tgt, Vector((s * 1.0, -0.2, 0.8)))
-        _hand(P, side, rx=-35, ry=s * -25)
-        _fingers(P, side, curl=30 + 15 * tear * (1 if s > 0 else 0.5), spread=8)
-    _plant(P, J, 'L', -1, dy=0.02, dx=0.04, knee_out=0.5)
-    _plant(P, J, 'R', 1, dy=-0.06, dx=0.04, knee_out=0.5, pitch=-10)
+        _hand_world(P, J, side, Vector((s * 0.35, 1.0, 0.10)), Vector((0, 0.1, -1)))
+        c = 10 * tear * (1 if s > 0 else 0.5)
+        for i, f in enumerate(A.FINGERS):     # spider-arched fingers: knuckles up, claw tips down
+            P.set_local(f'{f}_1_{side}', q_euler(-18 + c * 0.3, 0, (i - 2) * 4 * s))
+            P.set_local(f'{f}_2_{side}', q_euler(30 + c))
+            P.set_local(f'{f}_3_{side}', q_euler(26 + c))
+    _plant(P, J, 'L', -1, dy=0.02 * k, dx=0.06, knee_out=0.5)
+    _plant(P, J, 'R', 1, dy=-0.06 * k, dx=0.06, knee_out=0.5, pitch=-10)
 
 
 ACTIONS = [
     ('Idle', pose_idle, 4.0, True),
     ('Walk', pose_walk, 1.4, True),
-    ('Run', pose_run, 0.72, True),
+    ('Run', pose_run, 22 / 30, True),
     ('Listen', pose_listen, 4.0, True),
     ('Attack', pose_attack, 1.2, False),
     ('Feed', pose_feed, 2.4, True),

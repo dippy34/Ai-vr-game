@@ -53,6 +53,7 @@ BOLT = (0.497, 1.19)
 MAIL = (-0.16, 1.02)
 HINGES_Z = (0.26, 1.20, 2.14)
 CASE_W = 0.110
+BAKE_OFFSET = 10.0
 CASE_IN = OW / 2 - JAMB + 0.005 - 0.0                        # casing inner edge |x| = 0.57
 
 
@@ -243,10 +244,10 @@ def _materials(imgs):
         leaf_v=M.painted_wood('door_leaf_v', paint=paint, grain='Z', marks=leaf_marks),
         leaf_h=M.painted_wood('door_leaf_h', paint=paint, grain='X', marks=leaf_marks),
         panel=M.painted_wood('door_panel', paint=paint, grain='Z', peel=1.25, marks=leaf_marks),
-        frame_v=M.painted_wood('door_frame_v', paint=(0.36, 0.33, 0.25), under=(0.20, 0.22, 0.20), grain='Z',
-                               peel=0.7, crack=1.4),
-        frame_h=M.painted_wood('door_frame_h', paint=(0.36, 0.33, 0.25), under=(0.20, 0.22, 0.20), grain='X',
-                               peel=0.7, crack=1.4),
+        frame_v=M.painted_wood('door_frame_v', paint=(0.34, 0.31, 0.235), under=(0.20, 0.22, 0.20), grain='Z',
+                               peel=0.45, crack=1.4, flakes=0.5),
+        frame_h=M.painted_wood('door_frame_h', paint=(0.34, 0.31, 0.235), under=(0.20, 0.22, 0.20), grain='X',
+                               peel=0.45, crack=1.4, flakes=0.5),
         sill=M.raw_wood('door_sill', wood=(0.15, 0.10, 0.06), grain='X', wear_z=True),
         board1=M.raw_wood('door_board1', grain='X', rot=-4.0),
         board2=M.raw_wood('door_board2', wood=(0.13, 0.10, 0.07), grain='X', rot=24.0),
@@ -369,7 +370,8 @@ def _frame_parts(hi: bool, mats):
                           1, sg)
         add(j, 'frame_v')
         st = L.rounded_box('stop', (0.013, 0.046, OH - JAMB - 0.022), (sx * (OW / 2 - JAMB - 0.0065), LY0 - 0.0005 - 0.023,
-                                                                   0.022 + (OH - JAMB - 0.022) / 2), 0.0, 0.002, 1, sg)
+                                                                   0.022 + (OH - JAMB - 0.022) / 2), 0.0,
+                           0.002 if hi else 0.0, 1, sg)
         add(st, 'frame_v')
     add(L.rounded_box('head_jamb', (OW, OD, JAMB), (0.0, 0.0, OH - JAMB / 2), 0.0, b, 1, sg), 'frame_h')
     add(L.rounded_box('head_stop', (OW - 2 * JAMB, 0.046, 0.013), (0.0, LY0 - 0.0005 - 0.023, OH - JAMB - 0.0065),
@@ -421,9 +423,14 @@ def build_door(final: bool = True) -> None:
     common.reset()
     imgs = _decals()
     mats = _materials(imgs)
-    highs = [o for o, _ in _leaf_parts(True, mats)] + [o for o, _ in _frame_parts(True, mats)]
+    leaf_high = [o for o, _ in _leaf_parts(True, mats)]
+    frame_high = [o for o, _ in _frame_parts(True, mats)]
+    highs = leaf_high + frame_high
     leaf_low = _leaf_parts(False, None)
     frame_low = _frame_parts(False, None)
+    # Bake the frame far away from the leaf: the 3 mm gaps are thinner than the bake cage, so
+    # rays from the leaf edges would otherwise start inside the jambs/stops.
+    L.shift_all(frame_high + [o for o, _ in frame_low], (BAKE_OFFSET, 0.0, 0.0))
     for o, _ in leaf_low:
         L.tag(o, 1)
     for o, _ in frame_low:
@@ -441,6 +448,8 @@ def build_door(final: bool = True) -> None:
             return 0.55   # leaf outside face
         if c.y < -OD / 2 + 0.001 and n.y < -0.5:
             return 0.5    # exterior casings
+        if c.x > BAKE_OFFSET / 2:
+            return 0.85   # the frame (baked at the offset)
         if abs(n.x) > 0.9 and abs(abs(c.x) - (LX1 + 0.0)) < 0.004:
             return 0.4    # leaf edges in the gap
         return 1.0
@@ -452,11 +461,13 @@ def build_door(final: bool = True) -> None:
         L.delete(o)
     parts = L.split_parts(low, {0: 'door_frame', 1: 'door_leaf'})
     frame, leaf = parts['door_frame'], parts['door_leaf']
+    L.shift_all([frame], (-BAKE_OFFSET, 0.0, 0.0))
     L.assign(glass, L.flat_material('door_window', color=(0.30, 0.33, 0.35), rough=0.35,
                                     emission=(0.020, 0.026, 0.036), emission_strength=1.0))
     L.set_origin(leaf, (HINGE[0], HINGE[1], 0.0))
+    L.set_origin(glass, (HINGE[0], HINGE[1], 0.0))
     glass.parent = leaf
-    glass.matrix_parent_inverse = leaf.matrix_world.inverted()
+    glass.location = (0.0, 0.0, 0.0)      # same origin as the leaf: swings with it
     scene = bpy.context.scene
     scene['opening'] = [OW, OH, OD]
     scene['hinge'] = [round(HINGE[0], 4), round(-HINGE[1], 4)]
@@ -468,6 +479,6 @@ def build_door(final: bool = True) -> None:
                                               ('flash', dict(yaw=15, pitch=5, mood='flash')),
                                               ('outside', dict(yaw=200, pitch=8, mood='studio'))], final=final)
     # open-door check (preview only)
-    leaf.rotation_euler = (0, 0, math.radians(-70))
+    leaf.rotation_euler = (0, 0, math.radians(75))   # = three.js rotation.y = +75 deg: swings inside
     L.previews('door', [frame, leaf, glass], [('open', dict(yaw=35, pitch=12, mood='studio'))], final=False)
     leaf.rotation_euler = (0, 0, 0)

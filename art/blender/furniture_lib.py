@@ -349,7 +349,7 @@ def new_material(name: str):
 # Shared aging stack
 # =============================================================================================
 
-DUST = hexc('8a847a')
+DUST = hexc('857f74')
 GRIME = hexc('120e0a')
 
 
@@ -395,7 +395,7 @@ class Masks:
         g = self.g
         if 'edge' not in g._cache:
             if self.inline:
-                d = g.v('DOT_PRODUCT', g.bevel(self.bevel_r), g.geo('True Normal'))
+                d = g.v('DOT_PRODUCT', g.bevel(self.bevel_r), g.geo('Normal'))
                 g._cache['edge'] = g.rng(d, 0.985, 0.80, smooth=True)
             else:
                 g._cache['edge'] = self._ch(2)
@@ -501,8 +501,8 @@ def age(g: G, mk: Masks, col, rough, h, *, dust=0.6, grime=0.7, wear=0.5, wear_c
     if dust > 0:
         dn = g.noise(pos, 3.5, 3, 0.6, offset=(off[1], 2.0, 5.0))
         dfine = g.noise(pos, 60.0, 2, 0.6)
-        d = g.mul(up, g.rng(dn, 0.25, 0.7, 0.35, 1.0))
-        d = g.add(g.mul(d, dust), film * dust)
+        d = g.mul(up, g.rng(dn, 0.2, 0.75, 0.2, 0.8))
+        d = g.add(g.mul(d, dust * 0.65), film * dust)
         d = g.mul(d, g.rng(dfine, 0.2, 0.8, 0.8, 1.1))
         d = g.clamp(d)
         col = g.mix(d, col, DUST)
@@ -550,23 +550,23 @@ def mat_wood(name, light, dark, *, finish=0.42, ring=0.006, figure=0.6, pores=0.
     h = g.add(g.mul(late, -0.15), g.mul(pz, -0.35 * pores))
     # varnish crazing (old finish cracking into tiny cells)
     if crack > 0:
-        cr = g.voronoi(g.pos(), 70.0, 'DISTANCE_TO_EDGE', stretch=(1.0, 1.0, 1.0))
-        crm = g.mul(g.rng(cr, 0.04, 0.0), g.rng(g.noise(None, 2.5, 2, 0.5), 0.45, 0.65))
+        cr = g.voronoi(g.pos(), 90.0, 'DISTANCE_TO_EDGE', stretch=(1.0, 1.0, 1.0))
+        crm = g.mul(g.rng(cr, 0.035, 0.0), g.rng(g.noise(None, 2.5, 2, 0.5), 0.45, 0.65))
         crm = g.mul(crm, crack)
         col = g.mix(g.mul(crm, 0.6), col, g.hsv(col, v=0.45))
-        h = g.sub(h, g.mul(crm, 0.4))
+        h = g.sub(h, g.mul(crm, 0.12))
     # peeling veneer: patches (mostly along edges) where the substrate shows through
     if peel > 0:
-        pn = g.noise(None, 4.0, 4, 0.62, offset=(seed, 3.0, 1.0))
-        pm = g.add(g.mul(pn, 1.0), g.mul(mk.convex(), 0.35 * peel))
-        pm = g.add(pm, g.mul(mk.up(), 0.05))
-        th = 0.78 - 0.18 * peel
+        pn = g.noise(None, 2.2, 3, 0.6, offset=(seed, 3.0, 1.0))
+        pm = g.add(g.mul(pn, 1.0), g.mul(mk.convex(), 0.3 * peel))
+        pm = g.add(pm, g.mul(mk.up(), 0.04))
+        th = 0.76 - 0.14 * peel
         inner = g.rng(pm, th, th + 0.015, smooth=True)
         lip = g.mul(g.rng(pm, th - 0.03, th, smooth=True), g.rng(pm, th + 0.02, th, smooth=True))
-        sub_col = peel_col or hexc('8a7254')
+        sub_col = peel_col or hexc('6e5a40')
         sub = g.mix(g.noise(None, 40.0, 2, 0.6), sub_col, tuple(c * 0.55 for c in sub_col))
         col = g.mix(inner, col, sub)
-        col = g.mix(g.mul(lip, 0.6), col, g.hsv(col, s=0.6, v=1.5))
+        col = g.mix(g.mul(lip, 0.35), col, g.hsv(col, s=0.7, v=1.3))
         rough = g.mixf(inner, rough, 0.88)
         h = g.add(g.sub(h, g.mul(inner, 0.9)), g.mul(lip, 0.6))
     if decal is not None:
@@ -580,7 +580,7 @@ def mat_wood(name, light, dark, *, finish=0.42, ring=0.006, figure=0.6, pores=0.
 
 def mat_paint(name, color, under, *, gloss=0.5, chip=0.5, layer2=None, dust=0.5, grime=0.8, tide=0.0,
               stains=0.0, scratch=0.3, rust=0.0, metal_under=0.0, period=None, bevel_r=0.006, seed=0.0,
-              flake=0.5, grease=0.0, brush=0.3, film=0.12):
+              flake=0.5, grease=0.0, brush=0.3, film=0.12, edge_chip=None, chip_scale=9.0):
     """Old paint over wood/metal: chips at edges and random flakes, an older layer underneath."""
     mat = new_material(name)
     g = G(mat, period)
@@ -596,8 +596,9 @@ def mat_paint(name, color, under, *, gloss=0.5, chip=0.5, layer2=None, dust=0.5,
     h = g.mul(br, 0.25 * brush)
     rough = g.add(1.0 - gloss, g.mul(br, 0.05))
     # chips / flakes
-    cn = g.noise(pos, 9.0, 4, 0.65, offset=(seed, 1.0, 2.0))
-    cm = g.add(g.mul(mk.convex(), 0.55 * chip + 0.1), cn)
+    cn = g.noise(pos, chip_scale, 4, 0.65, offset=(seed, 1.0, 2.0))
+    ec = (0.55 * chip + 0.1) if edge_chip is None else edge_chip
+    cm = g.add(g.mul(mk.convex(), ec), cn)
     th = 0.82 - 0.22 * chip * flake
     chip1 = g.rng(cm, th, th + 0.012)
     chip2 = g.rng(cm, th + 0.05, th + 0.06)
@@ -662,11 +663,9 @@ def mat_fabric(name, base, alt=None, *, pattern='tweed', fade=0.4, stains=0.5, d
         col = g.mix(g.clamp(g.add(sm, sm2)), col, scol)
     lv = g.noise(pos, 5.0, 2, 0.5, offset=off)
     col = g.mix(g.mul(g.rng(lv, 0.3, 0.7), 0.25), col, tuple(c * 0.75 for c in base))
-    # weave relief
-    x, y, z = g.sep(pos)
-    k = 2 * math.pi / 0.0035
-    wv = g.add(g.add(g.m('SINE', g.mul(x, k)), g.m('SINE', g.mul(y, k))), g.m('SINE', g.mul(z, k)))
-    h = g.add(g.mul(wv, 0.08 * weave), g.mul(fl, 0.4))
+    # irregular yarn relief (a regular weave would alias into plaid moire at game texel density)
+    yr = g.noise(pos, 1.0, 2, 0.6, stretch=(260.0, 260.0, 260.0), offset=off)
+    h = g.add(g.mul(yr, 0.25 * weave), g.mul(fl, 0.35))
     rough = g.add(0.86, g.mul(fl, 0.08))
     # sun fade on up-facing areas + worn/threadbare convex areas
     up = mk.up(0.2, 0.9)
@@ -730,9 +729,9 @@ def mat_fabric(name, base, alt=None, *, pattern='tweed', fade=0.4, stains=0.5, d
 
 
 def mat_metal(name, color, *, rough=0.45, metal=0.9, tarnish=0.5, tarnish_col=None, rust=0.0, dust=0.4,
-              grime=0.9, bevel_r=0.003, seed=0.0, pitting=0.3, brushed=0.0):
+              grime=0.9, bevel_r=0.003, seed=0.0, pitting=0.3, brushed=0.0, period=None):
     mat = new_material(name)
-    g = G(mat)
+    g = G(mat, period)
     mk = Masks(g, bevel_r, 0.05)
     pos = g.pos()
     tn = g.noise(pos, 7.0, 4, 0.6, offset=(seed, 0, 0))
@@ -847,6 +846,53 @@ def mat_laminate(name, color, specks, *, period=None, dust=0.5, grime=0.8, stain
     return mat
 
 
+def mat_wiremesh(name, *, rust=0.8, seed=0.0):
+    """Diamond wire lattice (bed link-spring), dark rusty iron: pattern only, geometry is a slab."""
+    mat = new_material(name)
+    g = G(mat)
+    mk = Masks(g, 0.003, 0.06)
+    pos = g.pos()
+    x, y, z = g.sep(pos)
+    k = 2 * math.pi / 0.035
+    a = g.m('ABSOLUTE', g.m('SINE', g.mul(g.add(x, y), k)))
+    b = g.m('ABSOLUTE', g.m('SINE', g.mul(g.sub(x, y), k)))
+    wire = g.vmax(g.rng(a, 0.12, 0.0), g.rng(b, 0.12, 0.0))
+    rn = g.noise(pos, 8.0, 3, 0.6, offset=(seed, 0, 0))
+    wcol = g.mix(g.rng(rn, 0.3, 0.7), hexc('3a3430'), hexc('7a4220'))
+    col = g.mix(wire, hexc('0a0908'), wcol)
+    rough = g.mixf(wire, 0.9, 0.6)
+    metal = g.mul(wire, g.rng(rn, 0.6, 0.3, 0.2, 0.6))
+    h = g.mul(wire, 1.0)
+    col, rough, h = age(g, mk, col, rough, h, dust=0.4, grime=0.6, wear=0.0, scratch=0.0, film=0.05, floor=0.0)
+    _finish(g, mk, col, rough, h, metal, bump_dist=0.002)
+    return mat
+
+
+def mat_mirror(name, *, seed=0.0):
+    """Old silvered mirror: desilvering (black, rough) spots creeping in from the edges, grime film."""
+    mat = new_material(name)
+    g = G(mat)
+    mk = Masks(g, 0.003, 0.08)
+    pos = g.pos()
+    lp = g.attr('lp')
+    lx, ly, lz = g.sep(lp)
+    edge_d = g.vmin(g.vmin(lx, g.inv(lx)), g.vmin(lz, g.inv(lz)))
+    n = g.noise(pos, 6.0, 4, 0.65, offset=(seed, 0, 0))
+    spots = g.voronoi(pos, 40.0, 'F1', offset=(seed, 2, 0))
+    rot = g.clamp(g.add(g.rng(edge_d, 0.12, 0.0), g.mul(g.rng(n, 0.55, 0.75), 0.8)))
+    rot = g.vmax(rot, g.mul(g.rng(spots, 0.12, 0.04), g.rng(n, 0.4, 0.6)))
+    col = g.mix(rot, hexc('8a8880'), hexc('17140f'))
+    rough = g.mixf(rot, 0.06, 0.7)
+    metal = g.mixf(rot, 1.0, 0.1)
+    film = g.mul(g.rng(g.noise(pos, 2.5, 3, 0.5), 0.3, 0.8), 0.6)
+    rough = g.mixf(film, rough, 0.35)
+    col = g.mix(g.mul(film, 0.3), col, hexc('5a5040'))
+    h = g.mul(rot, 0.2)
+    col, rough, h = age(g, mk, col, rough, h, dust=0.4, grime=0.6, wear=0.0, scratch=0.5, film=0.08, floor=0.0)
+    _finish(g, mk, col, rough, h, metal, bump_dist=0.0004)
+    return mat
+
+
 def mat_glass(name, tint=(0.02, 0.025, 0.02), *, dust=0.8, grime=0.6, seed=0.0):
     """Opaque 'dusty glass': near-black glossy with a grimy film, streaks and corners caked."""
     mat = new_material(name)
@@ -898,11 +944,13 @@ def _link(name: str, bm: bmesh.types.BMesh) -> bpy.types.Object:
 
 
 def _xf(loc=(0, 0, 0), rot=(0, 0, 0), pivot=None):
-    m = Matrix.Translation(Vector(loc)) @ Euler([math.radians(a) for a in rot], 'XYZ').to_matrix().to_4x4()
-    if pivot is not None:
-        p = Vector(pivot)
-        m = Matrix.Translation(p) @ m @ Matrix.Translation(-p)
-    return m
+    """Without pivot: rotate about the part's own origin, then move to loc.
+    With pivot (world point): move to loc first, then rotate about the pivot (hinges, leaning)."""
+    R = Euler([math.radians(a) for a in rot], 'XYZ').to_matrix().to_4x4()
+    if pivot is None:
+        return Matrix.Translation(Vector(loc)) @ R
+    p = Vector(pivot)
+    return Matrix.Translation(p) @ R @ Matrix.Translation(-p) @ Matrix.Translation(Vector(loc))
 
 
 class Piece:
@@ -917,10 +965,11 @@ class Piece:
         self.rng = random.Random(seed)
         self.hard: list[bpy.types.Object] = []
         self.groups: list[dict] = []  # soft/decal groups: {'low': [...], 'high': [...], 'ext': m}
+        self.frames: dict = {}        # part pointer -> procedural grain frame (for matching decals)
         self._n = 0
 
     # -- attribute stamping (local part frame) ------------------------------------------------
-    def _stamp(self, obj, grain='x', pv=None, offset=None):
+    def _stamp(self, obj, grain='x', pv=None, offset=None, tilts=None):
         me = obj.data
         n = len(me.vertices)
         co = np.empty(n * 3, dtype=np.float32)
@@ -934,8 +983,9 @@ class Piece:
             offset = (r.uniform(-50, 50), r.choice((-1, 1)) * r.uniform(0.04, 0.35), r.choice((-1, 1)) * r.uniform(0.04, 0.35))
         gc = co[:, perm]
         # tilt the log axis a little against the board so rings sweep across it (cathedral figure)
-        tilt = self.rng.uniform(0.015, 0.06) * self.rng.choice((-1, 1))
-        tilt2 = self.rng.uniform(-0.02, 0.02)
+        if tilts is None:
+            tilts = (self.rng.uniform(0.015, 0.06) * self.rng.choice((-1, 1)), self.rng.uniform(-0.02, 0.02))
+        tilt, tilt2 = tilts
         gc = gc + np.stack([np.zeros(len(gc)), gc[:, 0] * tilt2, gc[:, 0] * tilt], 1)
         gc = gc + np.array(offset, dtype=np.float32)
         if pv is None:
@@ -948,6 +998,7 @@ class Piece:
         for extra in ('tear', 'use'):
             if extra not in me.attributes:
                 me.attributes.new(extra, 'FLOAT', 'POINT')
+        self.frames[obj.as_pointer()] = (grain, tuple(offset), tuple(tilts), float(pv))
         return offset, pv
 
     def _mats(self, obj, mats, local_normals=None):
@@ -983,7 +1034,8 @@ class Piece:
 
     # -- primitives -------------------------------------------------------------------------
     def box(self, size, loc=(0, 0, 0), mat=None, *, rot=(0, 0, 0), bevel=0.004, segs=1, skip=(), grain='x',
-            taper=None, pivot=None, origin='center', pv=None, shear=None, name='box', hard=True, gc_offset=None):
+            taper=None, pivot=None, origin='center', pv=None, shear=None, name='box', hard=True, gc_offset=None,
+            flip=False):
         """Beveled box. size=(x,y,z) meters; origin 'center' or 'bottom' (loc = bottom center).
         taper=(sx, sy) scales the bottom face (legs); shear=(dx, dy) offsets the top face."""
         w, d, h = size
@@ -1008,6 +1060,9 @@ class Piece:
             bm.normal_update()
             kill = [f for f in bm.faces if any(f.normal.dot(_DIRS[s]) > 0.99 for s in skip)]
             bmesh.ops.delete(bm, geom=kill, context='FACES')
+        if flip:  # inside-out (basins, bowls seen from within)
+            bmesh.ops.reverse_faces(bm, faces=list(bm.faces))
+            bm.normal_update()
         obj = _link(self._name(name), bm)
         self._stamp(obj, grain, pv, gc_offset)
         if mat is not None:
@@ -1060,7 +1115,7 @@ class Piece:
         pts = [Vector(p) for p in pts]
         bm = bmesh.new()
         rings = []
-        up_ref = Vector((0, 0, 1))
+        u_prev = None
         for i, p in enumerate(pts):
             if i == 0:
                 t = (pts[1] - pts[0]).normalized()
@@ -1068,8 +1123,12 @@ class Piece:
                 t = (pts[-1] - pts[-2]).normalized()
             else:
                 t = ((pts[i] - pts[i - 1]).normalized() + (pts[i + 1] - pts[i]).normalized()).normalized()
-            ref = up_ref if abs(t.dot(up_ref)) < 0.9 else Vector((1, 0, 0))
-            u = t.cross(ref).normalized()
+            if u_prev is None:
+                ref = Vector((0, 0, 1)) if abs(t.z) < 0.9 else Vector((1, 0, 0))
+                u = t.cross(ref).normalized()
+            else:  # parallel transport: no twisting between rings
+                u = (u_prev - t * t.dot(u_prev)).normalized()
+            u_prev = u
             v = t.cross(u).normalized()
             scale = 1.0
             if 0 < i < len(pts) - 1:
@@ -1087,7 +1146,6 @@ class Piece:
                         off = off + md * off.dot(md) * (scale - 1.0)
                 ring.append(bm.verts.new(p + off))
             rings.append(ring)
-            up_ref = v
         for a, b in zip(rings, rings[1:]):
             for k in range(segs):
                 j = (k + 1) % segs
@@ -1104,12 +1162,14 @@ class Piece:
         return self.add(obj) if hard else obj
 
     def mesh(self, verts, faces, loc=(0, 0, 0), mat=None, *, rot=(0, 0, 0), name='mesh', grain='x', pv=None,
-             hard=True, bevel=0.0):
+             hard=True, bevel=0.0, recalc=True):
         bm = bmesh.new()
         vs = [bm.verts.new(v) for v in verts]
         for f in faces:
             bm.faces.new([vs[i] for i in f])
         bm.normal_update()
+        if recalc:
+            bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
         if bevel > 0:
             bmesh.ops.bevel(bm, geom=list(bm.edges), offset=bevel, segments=1, profile=0.5, affect='EDGES',
                             clamp_overlap=True)
@@ -1227,12 +1287,14 @@ class Piece:
             tear = 0.0
             # wrinkles: ridged noise, stronger toward edges and in dents
             u, v, s = p.x / (w / 2), p.y / (d / 2), p.z / (h / 2)
-            edge_f = max(abs(u), abs(v), abs(s)) ** 2
+            # distance toward the panel border, measured in-plane (ignore the axis along the normal)
+            edge_f = max(abs(u) * (1 - abs(n.x)), abs(v) * (1 - abs(n.y)), abs(s) * (1 - abs(n.z))) ** 2
             pp = p * 9.0 + nseed
             rn = 1.0 - abs(noise.noise(pp))
             rn2 = 1.0 - abs(noise.noise(p * 23.0 + nseed * 1.3))
-            disp += wrinkle * ((rn ** 6) * (0.4 + 1.2 * edge_f) + 0.35 * rn2 ** 8 - 0.25)
-            disp += wrinkle * 0.6 * noise.noise(p * 4.0 + nseed)
+            # creases gather near the edges/seams; the middle of a panel stays fairly smooth
+            disp += wrinkle * ((rn ** 8) * (0.15 + 1.6 * edge_f ** 2) + 0.25 * rn2 ** 10 * edge_f - 0.1)
+            disp += wrinkle * 0.3 * noise.noise(p * 3.0 + nseed)
             for (dx, dy, dep, rad) in dents:
                 rd = math.hypot(p.x - dx, p.y - dy)
                 if s > 0 and rd < rad * 1.8:
@@ -1402,6 +1464,35 @@ class Piece:
                 poly.use_smooth = True
         return self.soft(low, high, ext)
 
+    def decal_like(self, part, verts_world, faces, mat, origin, name='decal'):
+        """Decal mesh whose procedural grain matches `part` (created at `origin` without rotation)."""
+        grain, offset, tilts, pv = self.frames[part.as_pointer()]
+        o = Vector(origin)
+        bm = bmesh.new()
+        vs = [bm.verts.new(Vector(v) - o) for v in verts_world]
+        for f in faces:
+            bm.faces.new([vs[i] for i in f])
+        obj = _link(self._name(name), bm)
+        self._stamp(obj, grain, pv, offset, tilts)
+        obj.data.materials.append(mat)
+        self._place(obj, origin, (0, 0, 0))
+        return obj
+
+    def ribbon(self, part, pts, width, z, mat, origin, name='trail'):
+        """Flat strip along a 2D polyline at height z (finger trails in dust, wipe marks)."""
+        verts, faces = [], []
+        P2 = [Vector((x, y, 0)) for x, y in pts]
+        for i, p in enumerate(P2):
+            t = (P2[min(i + 1, len(P2) - 1)] - P2[max(i - 1, 0)]).normalized()
+            nrm = Vector((-t.y, t.x, 0))
+            taper = math.sin(math.pi * (i / (len(P2) - 1)) * 0.98 + 0.01) ** 0.4
+            for sd in (-1, 1):
+                q = p + nrm * sd * width / 2 * taper
+                verts.append((q.x, q.y, z))
+        for i in range(len(P2) - 1):
+            faces.append((2 * i, 2 * i + 1, 2 * i + 3, 2 * i + 2))
+        return self.decal_like(part, verts, faces, mat, origin, name)
+
     def decal_group(self, lows, decals, ext=0.004):
         """Bake `lows` from (copies of themselves + decal meshes) so stencils/labels land in the texture.
         The copies are made after UV layout (so they can sample the mask texture)."""
@@ -1440,6 +1531,11 @@ class Piece:
             a = o.data.attributes.get('grp') or o.data.attributes.new('grp', 'INT', 'FACE')
             a.data.foreach_set('value', np.full(len(o.data.polygons), i, dtype=np.int32))
         allL = join_all(parts, name + '_L')
+        # n-gons -> triangles BEFORE baking so bake and export share the same tangent frames
+        tri = allL.modifiers.new('tri', 'TRIANGULATE')
+        tri.min_vertices = 5
+        tri.keep_custom_normals = True
+        C.apply_modifiers(allL)
         uv_layout(allL, size, back_hidden, weights)
         # split back into groups
         pieces = split_by_attr(allL, 'grp', len(parts))
@@ -1816,7 +1912,8 @@ def mask_material():
     """Emission = (AO 12 cm, AO 3 cm, bevel-edge mask): baked once, sampled by hard materials."""
     mat = new_material('__mask_mat__')
     g = G(mat)
-    d = g.v('DOT_PRODUCT', g.bevel(MASK_BEVEL), g.geo('True Normal'))
+    # against the SMOOTH shading normal: facets of smooth-shaded cylinders are not edges
+    d = g.v('DOT_PRODUCT', g.bevel(MASK_BEVEL), g.geo('Normal'))
     edge = g.rng(d, 0.985, 0.80, smooth=True)
     col = g.comb(g.ao(MASK_AO), g.ao(MASK_AO_SMALL), edge)
     em = g.node('ShaderNodeEmission', {'Color': col, 'Strength': 1.0})
@@ -1862,6 +1959,12 @@ def bake_masks(objs, size, samples):
     acc[3::4] = 1.0
     img.pixels.foreach_set(acc)
     img.pack()
+    dump = os.environ.get('FURN_DUMP')
+    if dump:
+        os.makedirs(dump, exist_ok=True)
+        img.filepath_raw = os.path.join(dump, 'masks.png')
+        img.file_format = 'PNG'
+        img.save()
     for m in bpy.data.materials:
         if m.node_tree:
             n = m.node_tree.nodes.get('__maskimg__')

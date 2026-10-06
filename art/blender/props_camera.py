@@ -112,6 +112,20 @@ def _decals():
     d.text(512, 22, 'VESPAR-ANASTIGMAT   1:8   f = 114 mm   No. 418873', 29, (1, 1, 1), kind='sans_bold',
            spacing=1.1)
     imgs['bezel'] = d.render()
+    # Paper film sticker on the back (full color).
+    d = L.Decal('cam_sticker', 512, 448, bg=(0.56, 0.50, 0.36, 1))
+    red, ink = (0.30, 0.03, 0.02, 1), (0.03, 0.025, 0.02, 1)
+    d.rect(0, 340, 512, 448, red)
+    d.text(256, 394, 'VESPER', 74, (0.62, 0.56, 0.42, 1), kind='serif_bold', spacing=1.1)
+    d.text(256, 292, 'INSTANT 70 FILM', 40, ink, kind='sans_bold', spacing=1.15)
+    d.text(256, 240, '8 EXPOSURES  \u2022  ASA 400', 28, ink, kind='sans_bold', spacing=1.1)
+    d.rect(36, 196, 476, 199, ink)
+    d.text(48, 150, 'LOADED:', 30, ink, kind='sans_bold', align='LEFT')
+    d.text(250, 148, 'oct 3', 44, (0.04, 0.05, 0.16, 1), kind='serif', align='LEFT', rot=-3.0)
+    d.text(48, 84, 'EXPOSED:', 30, ink, kind='sans_bold', align='LEFT')
+    d.text(262, 84, '\u2716 \u2716 \u2716 \u2716 \u2716', 28, (0.04, 0.05, 0.16, 1), kind='sans', align='LEFT')
+    d.rect(0, 0, 512, 26, red)
+    imgs['sticker'] = d.render()
     return imgs
 
 
@@ -155,7 +169,32 @@ def _materials(imgs):
         x, y, z = k.xyz(k.coord())
         d = k.vmath('LENGTH', k.vmath('SUBTRACT', k.coord(), (-BW / 2, FRONT, Z_BOT)), out=1)
         n = k.noise(scale=140, detail=6, rough=0.7)
-        return k.ramp_f(k.add(d, k.mul(n, 0.012)), 0.0215, 0.0205)
+        return k.ramp_f(k.add(d, k.mul(n, 0.008)), 0.0142, 0.0138)
+
+    stk = dict(cx=0.040, cz=0.033, w=0.032, h=0.028)
+
+    def sticker_mask(k):
+        x, y, z = k.xyz(k.coord())
+        r = k.box_mask((stk['cx'] - stk['w'] / 2, BACK - 0.003, stk['cz'] - stk['h'] / 2),
+                       (stk['cx'] + stk['w'] / 2, BACK + 0.0006, stk['cz'] + stk['h'] / 2), soft=0.0002)
+        # a corner torn away + ragged edge
+        n = k.noise(scale=500, detail=4)
+        torn = k.ramp_f(k.add(k.sub(x, z), k.mul(n, 0.004)), stk['cx'] + stk['w'] / 2 - stk['cz'] - stk['h'] / 2 + 0.010,
+                        stk['cx'] + stk['w'] / 2 - stk['cz'] - stk['h'] / 2 + 0.0095)
+        return k.mul(r, torn)
+
+    def sticker_color(k):
+        c = k.decal(imgs['sticker'], k.plane_uv((stk['cx'], BACK, stk['cz']), (1, 0, 0), (0, 0, 1), stk['w'], stk['h']))
+        n = k.noise(scale=220, detail=5)
+        dirt = k.mul(k.ramp_f(n, 0.45, 0.75), 0.5)
+        c = k.mix(dirt, c, (0.20, 0.16, 0.10))
+        return k.mix(k.mul(k.ramp_f(k.noise(scale=900, detail=2), 0.6, 0.7), 0.6), c, (0.70, 0.66, 0.55))
+
+    def peel_rim(k):
+        d = k.vmath('LENGTH', k.vmath('SUBTRACT', k.coord(), (-BW / 2, FRONT, Z_BOT)), out=1)
+        n = k.noise(scale=140, detail=6, rough=0.7)
+        v = k.add(d, k.mul(n, 0.008))
+        return k.mul(k.ramp_f(v, 0.0138, 0.0142), k.ramp_f(v, 0.0152, 0.0146))
 
     def slot(k):
         return k.box_mask((-0.040, FRONT, 0.0032), (0.026, FRONT + 0.003, 0.0052), soft=0.00012)
@@ -191,7 +230,9 @@ def _materials(imgs):
     mats = dict(
         leather=M.leatherette('cam_leather', marks=[
             dict(mask=door_seam, color=(0.008, 0.007, 0.006), rough=0.8, height=-1.2),
-            dict(mask=peel, color=(0.42, 0.42, 0.40), rough=0.45, metal=1.0, height=-0.8),
+            dict(mask=peel_rim, color=(0.16, 0.13, 0.09), rough=0.85, height=0.8),
+            dict(mask=peel, color=(0.52, 0.52, 0.50), rough=0.38, metal=1.0, height=-1.0),
+            dict(mask=sticker_mask, color=sticker_color, rough=0.8, metal=0.0, height=0.5),
         ]),
         alu_top=M.aluminum('cam_alu_top', brush_axis='X', marks=[
             M.engraved(top_front, color=black_fill),

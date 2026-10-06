@@ -45,11 +45,12 @@ def brass(name: str, s: float = 1.0, tarnish: float = 0.55, stamp: Mask = None, 
         fine = k.noise(scale=1400 / s, detail=2, rough=0.5)
         cav = k.cavity(dist=0.005 * s, lo=0.45, hi=0.98)
         edge = k.edges(dist=0.0012 * s, lo=0.5, hi=0.93)
-        tar = k.ramp_f(k.add(k.mul(big, 0.9), k.mul(mid, 0.25)), 0.48 - tarnish * 0.25, 0.70 - tarnish * 0.2)
-        tar = k.minf(k.add(k.mul(tar, tarnish + 0.25), k.mul(cav, 0.5)), 1.0)
+        patch = k.ramp_f(k.add(k.mul(big, 0.85), k.mul(mid, 0.35)), 0.40, 0.66)
+        tar = k.minf(k.add(k.mul(patch, tarnish), k.mul(cav, 0.55)), 1.0)
         polish = k.mul(k.mul(edge, k.inv(cav)), polish_edges)
         bright = (0.78 * warm, 0.56 * warm, 0.24 * warm)
-        col = k.mix(tar, bright, (0.30, 0.20, 0.075))
+        col = k.ramp(tar, [(0.0, bright), (0.45, (0.46, 0.32, 0.12)), (0.8, (0.20, 0.135, 0.05)),
+                           (1.0, (0.12, 0.085, 0.035))])
         col = k.mix(k.mul(k.ramp_f(mid, 0.3, 0.75), 0.25), col, (0.42, 0.24, 0.06))  # coppery mottling
         col = k.mix(polish, col, (0.90, 0.72, 0.38))
         scr = k.maxf(k.scratches(scale=55 / s, density=0.55, width=0.010, angle=20, seed=1),
@@ -59,7 +60,7 @@ def brass(name: str, s: float = 1.0, tarnish: float = 0.55, stamp: Mask = None, 
         verd = k.mul(k.mul(cav, k.ramp_f(big, 0.55, 0.75)), 0.55 * grime)
         col = k.mix(verd, col, (0.10, 0.20, 0.13))
         col = k.mix(g, col, (0.035, 0.026, 0.016))
-        rough = k.add(0.26, k.mul(tar, 0.22))
+        rough = k.add(0.24, k.mul(tar, 0.30))
         rough = k.add(rough, k.mul(fine, 0.08))
         rough = k.sub(rough, k.mul(polish, 0.12))
         rough = k.add(rough, k.mul(k.maxf(g, verd), 0.45))
@@ -359,14 +360,18 @@ def painted_steel(name: str, paint=(0.115, 0.150, 0.120), s: float = 1.0, chips:
         nz = k.xyz(k.geo('Normal'))[2]
         # chips: along edges (noisy) + a few random spots; red-oxide primer ring around bare steel
         spot_n = k.noise(scale=38 / s, detail=6, rough=0.7)
-        spots = k.ramp_f(spot_n, 0.700, 0.715)
+        spot_n2 = k.noise(scale=110 / s, detail=5, rough=0.7)
+        spots = k.maxf(k.ramp_f(spot_n, 0.690, 0.705), k.ramp_f(spot_n2, 0.72, 0.73))
+        scr = k.maxf(k.scratches(scale=9 / s, density=0.5, width=0.012, angle=70, seed=41),
+                     k.scratches(scale=14 / s, density=0.45, width=0.010, angle=-20, seed=42))
         chipf = k.add(k.mul(edge, 0.9), k.mul(n2, 0.45))
-        chip_primer = k.mul(k.maxf(k.ramp_f(chipf, 0.80, 0.83), spots), chips)
-        chip_bare = k.mul(k.maxf(k.ramp_f(chipf, 0.88, 0.91), k.ramp_f(spot_n, 0.725, 0.74)), chips)
-        rustm = k.mul(k.ramp_f(k.add(k.mul(cav, 0.6), k.mul(n1, 0.45)), 0.66, 0.82), rust)
-        rustm = k.maxf(rustm, k.mul(chip_bare, k.ramp_f(n2, 0.4, 0.6)))
+        chip_primer = k.mul(k.maxf(k.maxf(k.ramp_f(chipf, 0.80, 0.83), spots), scr), chips)
+        chip_bare = k.mul(k.maxf(k.ramp_f(chipf, 0.88, 0.91), k.maxf(k.ramp_f(spot_n, 0.712, 0.728),
+                                                                     k.ramp_f(spot_n2, 0.735, 0.745))), chips)
+        rustm = k.mul(k.ramp_f(k.add(k.mul(cav, 0.6), k.mul(n1, 0.5)), 0.62, 0.80), rust)
+        rustm = k.maxf(rustm, k.mul(chip_bare, k.ramp_f(n2, 0.35, 0.55)))
         streak_n = k.noise(scale=22 / s, detail=5, vec=k.mapping(scale=(30, 30, 1.2)))
-        streak = k.mul(k.mul(k.ramp_f(streak_n, 0.60, 0.74), k.ramp_f(n1, 0.45, 0.7)), 0.6 * rust)
+        streak = k.mul(k.mul(k.ramp_f(streak_n, 0.56, 0.72), k.ramp_f(n1, 0.42, 0.68)), 0.7 * rust)
         dustm = k.mul(k.mul(k.ramp_f(nz, 0.45, 0.9), k.add(0.45, k.mul(n2, 0.6))), dust)
         dustm = k.minf(k.add(dustm, k.mul(cav, 0.15 * dust)), 1.0)
         # paint color: slight variation + hammer-tone cells
@@ -498,7 +503,7 @@ def _grain(k: Kit, axis: str, s: float, rot: float = 0.0, scale: float = 1.0):
 
 def painted_wood(name: str, paint=(0.040, 0.055, 0.045), under=(0.40, 0.37, 0.28), wood=(0.17, 0.11, 0.06),
                  grain: str = 'Z', s: float = 1.0, peel: float = 1.0, grime: float = 1.0, crack: float = 1.0,
-                 rot: float = 0.0, marks: Sequence[dict] = ()) -> 'bpy.types.Material':
+                 rot: float = 0.0, flakes: float = 1.0, marks: Sequence[dict] = ()) -> 'bpy.types.Material':
     """Old paint on wood: two coats (top + cream undercoat) peeling in flakes with lifted edges,
     alligator cracking, bare grey wood where both coats are gone, grime low down and in
     crevices, exterior faces (normal -Y) sun-bleached and more weathered."""
@@ -515,9 +520,9 @@ def painted_wood(name: str, paint=(0.040, 0.055, 0.045), under=(0.40, 0.37, 0.28
         cav = k.cavity(dist=0.02 * s, lo=0.5, hi=0.97)
         low = k.ramp_f(z, 0.45, 0.05)          # kick zone near the floor
         # paint loss
-        pv = k.add(k.add(k.mul(n1, 0.62), k.mul(n2, 0.30)), k.mul(edge, 0.30))
+        pv = k.add(k.add(k.mul(n1, 0.62 + 0.3 * (1 - flakes)), k.mul(n2, 0.30 * flakes)), k.mul(edge, 0.30))
         pv = k.add(pv, k.mul(low, 0.10))
-        pv = k.add(pv, k.mul(ext, 0.10))
+        pv = k.add(pv, k.mul(ext, 0.07))
         pv = k.add(pv, k.mul(g, 0.06))         # flakes follow the grain a little
         th = 0.74 - 0.10 * peel
         top_gone = k.ramp_f(pv, th, th + 0.008)

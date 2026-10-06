@@ -27,11 +27,15 @@ export class ModelLibrary {
   /**
    * Load the given models in parallel, skipping any not listed in models/manifest.json (generated
    * by the Vite config from public/models). Broken files are skipped with a warning.
+   * `prefixes` also loads every manifest entry starting with one of them (e.g. 'dressing_'), so
+   * new set-dressing pieces are picked up without a code change.
    */
-  async load(names: readonly string[]): Promise<void> {
+  async load(names: readonly string[], prefixes: readonly string[] = []): Promise<void> {
     const available = await this.manifest();
+    const wanted = new Set(names);
+    if (available) for (const n of available) if (prefixes.some((p) => n.startsWith(p))) wanted.add(n);
     await Promise.all(
-      names.map(async (name) => {
+      [...wanted].map(async (name) => {
         if (available && !available.has(name)) return;
         if (this.models.has(name)) return;
         try {
@@ -130,6 +134,38 @@ export function bakeObject(root: THREE.Object3D, out: THREE.BufferGeometry[], of
 function isVisible(o: THREE.Object3D): boolean {
   for (let p: THREE.Object3D | null = o; p; p = p.parent) if (!p.visible) return false;
   return true;
+}
+
+/** Every mesh under `root` (depth first). */
+export function meshesOf(root: THREE.Object3D): THREE.Mesh[] {
+  const out: THREE.Mesh[] = [];
+  root.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh) out.push(o as THREE.Mesh);
+  });
+  return out;
+}
+
+/** Bounds of all meshes under `root`, in `root`'s own frame (ignores root's transform). */
+export function localBounds(root: THREE.Object3D, out = new THREE.Box3()): THREE.Box3 {
+  out.makeEmpty();
+  root.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const m = new THREE.Matrix4();
+  const b = new THREE.Box3();
+  for (const mesh of meshesOf(root)) {
+    const g = mesh.geometry;
+    if (!g.boundingBox) g.computeBoundingBox();
+    b.copy(g.boundingBox!).applyMatrix4(m.multiplyMatrices(inv, mesh.matrixWorld));
+    out.union(b);
+  }
+  return out;
+}
+
+/** `extras.size` = [w, h, d] if present and valid, else null. */
+export function extrasSize(extras: Record<string, unknown>): THREE.Vector3 | null {
+  const s = extras.size;
+  if (Array.isArray(s) && s.length === 3 && s.every((v) => typeof v === 'number' && v > 0)) return new THREE.Vector3(s[0], s[1], s[2]);
+  return null;
 }
 
 /** Find a node by exact name anywhere under `root`. */
