@@ -929,10 +929,13 @@ function paintGeo(g: THREE.BufferGeometry, color: number): THREE.BufferGeometry 
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Static Blender models merge per source mesh within XZ cells of this size (m), so rooms behind
- * the viewer are frustum culled (Quest triangle budget) at the cost of a few draw calls.
+ * Static Blender models merge per source mesh within a grid of roughly this cell size (m) over the
+ * level, so parts of the house behind the viewer (or lost in the fog) are culled (Quest triangle
+ * budget) at the cost of a few draw calls.
  */
-const STATIC_CHUNK = 5.5;
+const STATIC_CHUNK = 7;
+
+const _cc = new THREE.Vector3();
 
 export class LevelView {
   readonly group = new THREE.Group();
@@ -946,11 +949,13 @@ export class LevelView {
   private readonly furnitureModels: FurnitureSet | null;
   /** Set dressing scattered through the house (null = no dressing models). */
   readonly dressing: DressingSet | null;
+  /** Merged static Blender models (chunked; see STATIC_CHUNK). */
+  private readonly statics = new THREE.Group();
 
   constructor(level: LevelData, models: ModelLibrary | null = null) {
     this.group.name = 'level';
     // Every static Blender model (furniture, dressing, fuse box body, door frame) merges here.
-    const batcher = new StaticBatcher(STATIC_CHUNK);
+    const batcher = new StaticBatcher(level.bounds, STATIC_CHUNK);
     this.furnitureModels = models ? new FurnitureSet(models, batcher) : null;
     const wallBoxes = level.boxes.filter((b) => b.kind === 'wall');
     const floorBoxes = level.boxes.filter((b) => b.kind === 'floor');
@@ -1089,7 +1094,7 @@ export class LevelView {
       const mesh = bucket.build(mat, name);
       if (mesh) this.group.add(mesh);
     };
-    const statics = new THREE.Group();
+    const statics = this.statics;
     statics.name = 'models';
     batcher.build(statics);
     this.group.add(statics);
@@ -1135,6 +1140,19 @@ export class LevelView {
   /** Walls (+ the exit door while it is closed) that block line of sight. */
   blockers(): Aabb[] {
     return this.exitOpen ? this.walls : [...this.walls, this.door.box];
+  }
+
+  /**
+   * Hide static chunks that lie entirely beyond `fogFar` in view depth from the eye (fully fogged:
+   * they would draw as flat fog color anyway). `forward` = unit view direction.
+   */
+  cullFogged(eye: THREE.Vector3, forward: THREE.Vector3, fogFar: number): void {
+    for (const c of this.statics.children) {
+      const s = (c as THREE.Mesh).geometry?.boundingSphere;
+      if (!s) continue;
+      const depth = _cc.copy(s.center).sub(eye).dot(forward);
+      c.visible = depth - s.radius < fogFar;
+    }
   }
 
   update(state: WorldState, dt: number, time: number): void {

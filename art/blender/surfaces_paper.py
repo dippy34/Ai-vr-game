@@ -297,7 +297,7 @@ def wallpaper_a(n: int = 1024, seed: int = 11) -> dict:
 
     ground = hexc('#6b6546')
     ground2 = hexc('#5e583b')
-    motif_c = hexc('#978a63')
+    motif_c = hexc('#8c8160')
     key_c = hexc('#4a4530')
     # mottled ground (hand-printed look): two tones through mid noise
     gmix = sstep(-0.4, 0.6, T.fbm(14, octaves=3))
@@ -328,7 +328,7 @@ def wallpaper_a(n: int = 1024, seed: int = 11) -> dict:
     G.drip(L, 0.66, 0.47, 0.17, 0.006, strength=0.45)
     G.drip(L, 0.10, 0.18, 0.12, 0.007, strength=0.4)
     # mildew around the larger stain and in a corner of the second
-    G.mildew(L, F, 0.70, 0.52, 0.10, density=1.0)
+    G.mildew(L, F, 0.70, 0.52, 0.09, density=0.75)
     G.mildew(L, F, 0.05, 0.22, 0.07, density=0.8)
     G.mildew(L, F, 0.40, 0.95, 0.05, density=0.5)
     # hip-height rubs (v 0.80..0.98)

@@ -251,6 +251,14 @@ export class GameRenderer implements IGameRenderer {
     this.nearLight.position.set(0, -0.1, -0.15).applyQuaternion(this.headQuat).add(this.headPos);
 
     this.level?.update(state, dt, this.time);
+    const fog = this.ctx.scene.fog;
+    if (this.level && fog instanceof THREE.Fog) {
+      // Anything beyond the fog's far depth is flat fog color: don't draw those static chunks.
+      // Margin: the XR eyes sit a few cm off the head and the view direction keeps moving.
+      this.level.cullFogged(this.headPos, _d.set(0, 0, -1).applyQuaternion(this.headQuat), fog.far + 1.5);
+    } else {
+      this.level?.cullFogged(this.headPos, _d.set(0, 0, -1), Infinity);
+    }
 
     // Local hands straight from the freshest local pose (zero lag).
     this.localLeft.setPose(localPose.left);

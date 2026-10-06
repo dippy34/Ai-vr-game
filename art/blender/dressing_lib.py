@@ -500,8 +500,10 @@ def mat_paint(name, color, under, *, gloss=0.55, chip=0.5, dust=0.5, grime=0.8, 
     mat = new_material(name)
     g = G(mat)
     p = g.pos()
-    pn = g.noise(p, 6.0, 4, 0.65, offset=(seed, 1.0, 2.0))
-    chipm = g.rng(g.add(pn, g.mul(g.convex(), 0.3)), 0.72 - chip * 0.25, 0.74 - chip * 0.25, smooth=False)
+    pn = g.noise(p, 16.0, 5, 0.7, offset=(seed, 1.0, 2.0))
+    big = g.noise(p, 3.0, 2, 0.5, offset=(seed, 4.0, 0.0))
+    chipm = g.rng(g.add(g.add(pn, g.mul(g.convex(), 0.45)), g.mul(g.sub(big, 0.5), 0.3)),
+                  0.74 - chip * 0.18, 0.755 - chip * 0.18, smooth=False)
     if base_is_wood:
         ucol, uh = wood_pattern(g, under, g.hsv(under, v=0.6), seed=seed)
     else:

@@ -15,11 +15,11 @@ def build() -> None:
 # --- shared materials ---------------------------------------------------------------------------
 
 def walnut(name='walnut', seed=0.0, **kw):
-    args = dict(finish=0.36, ring=0.007, figure=0.7, pores=0.6, dust=0.65, grime=0.85, wear=0.7,
+    args = dict(finish=0.36, ring=0.006, figure=1.1, pores=0.9, dust=0.6, grime=0.85, wear=0.7,
                 raw=hexc('8a6a4a'), scratch=0.5, seed=seed, tide=0.08, bevel_r=0.004, peel=0.25,
-                peel_col=hexc('8a7354'), stains=0.3, crack=0.2)
+                peel_col=hexc('8a7354'), stains=0.3, crack=0.2, tone=0.3)
     args.update(kw)
-    return F.mat_wood(name, hexc('5c3d26'), hexc('2a1a10'), **args)
+    return F.mat_wood(name, hexc('6a4529'), hexc('24150b'), **args)
 
 
 def oak(name='oak', seed=0.0, **kw):

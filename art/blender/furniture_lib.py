@@ -1583,6 +1583,11 @@ class Piece:
                 if key != 'color':
                     tmp.colorspace_settings.name = 'Non-Color'
                 t0 = time.time()
+                # hard passes read prebaked AO/edge masks -> deterministic except the bevel normal;
+                # soft (high->low) passes trace AO/bevel inline and need more samples
+                spp = {'color': 4, 'rough': 4, 'normal': 8, 'metal': 2} if hi_ is None or ext_ < 0.01 else \
+                      {'color': 12, 'rough': 8, 'normal': 10, 'metal': 2}
+                scene.cycles.samples = max(1, spp[key] // (2 if DRAFT else 1))
                 _bake_pass(key, tmp, lo_, hi_, ext_, 0, clear=True)
                 t1 = time.time()
                 px = np.empty(sz * sz * 4, dtype=np.float32)

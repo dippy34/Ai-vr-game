@@ -130,7 +130,7 @@ def build_table_coffee():
         for sy in (-1, 1):
             J.round_leg(P, sx * (W / 2 - 0.15), sy * (D / 2 - 0.1), H - t, H - t, wood, ferrule=brass, r_top=0.022,
                         r_bot=0.012, splay=9)
-    P.finish(tex=1024, max_tris=2500, fit=(W, H, D), preview_yaw=30, preview_pitch=28)
+    P.finish(tex=512, max_tris=2500, fit=(W, H, D), preview_yaw=30, preview_pitch=28)
 
 
 def build_desk():

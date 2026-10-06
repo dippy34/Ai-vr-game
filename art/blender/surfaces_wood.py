@@ -31,13 +31,16 @@ def ring_grain(xl, yl, *, pith_y, depth, tilt, spacing, wobble, late=0.25, texel
     xl, yl: meters along / across the board. Returns (rings 0..1 latewood, ring coordinate)."""
     z = depth + tilt * xl
     r = np.sqrt((yl - pith_y) ** 2 + z * z) + wobble
-    f = (r / spacing) % 1.0
+    q = r / spacing
+    q = q + 0.45 * np.sin(q * 0.31) + 0.25 * np.sin(q * 0.113 + 1.7)  # uneven growth years
+    f = q % 1.0
     lw = sstep(1 - late - 0.12, 1 - late, f) * (1 - sstep(0.97, 1.0, f))
     if texel:
-        # band-limit: where rings get closer than ~3 px, fade them to their average (no aliasing)
+        # band-limit: where rings get closer than ~5 px, fade them to their average (no aliasing,
+        # no corduroy look)
         gy = np.abs(yl - pith_y) / np.maximum(r, 1e-6)
         cyc = gy * texel / spacing
-        k = sstep(0.42, 0.22, cyc)
+        k = sstep(0.36, 0.16, cyc)
         lw = lw * k + (late * 0.75) * (1 - k)
     return lw.astype(F32), r
 
@@ -103,7 +106,7 @@ def wood_floor(n: int = 1024, seed: int = 41) -> dict:
         'tone': rng.normal(1.0, 0.09, npieces).clip(0.75, 1.25),
         'warm': rng.normal(0.0, 0.04, npieces),
         'pith': rng.uniform(-0.12, 0.2, npieces),
-        'depth': rng.uniform(0.01, 0.09, npieces),
+        'depth': rng.uniform(0.004, 0.05, npieces),
         'tilt': rng.normal(0, 0.035, npieces),
         'spacing': rng.uniform(0.004, 0.008, npieces),
         'cup': rng.uniform(0.0001, 0.0005, npieces),
@@ -114,16 +117,16 @@ def wood_floor(n: int = 1024, seed: int = 41) -> dict:
 
     wob = (T.fbm(3, 40, octaves=4) * 0.006 + T.fbm(12, 160, octaves=2) * 0.0012).astype(F32)
     late, rr = ring_grain(xl, yl, pith_y=g('pith'), depth=g('depth'), tilt=g('tilt'), spacing=g('spacing'),
-                          wobble=wob, texel=T.texel)
+                          wobble=wob, texel=T.texel, late=0.33)
     # oak pores: fine dark dashes along the grain, denser in earlywood
     # (lattice periods stay below the pixel Nyquist limit: 512 cells across 1024 px)
-    pores = T.perlin(70, 420) * 0.6 + T.perlin(40, 260) * 0.4
-    pores = sstep(0.3, 0.75, pores) * (1 - late * 0.6)
+    pores = T.spectral(beta=1.0, fmin=20, fmax=260, aniso=(10.0, 1.0))
+    pores = sstep(0.6, 1.8, pores) * (1 - late * 0.6)
     fine = T.perlin(16, 200) * 0.5 + 0.5  # subtle streaky figure
 
     early_c = hexc('#664a33')
     late_c = hexc('#423020')
-    base = lerp(T.full(early_c), T.full(late_c), late * 0.85)
+    base = lerp(T.full(early_c), T.full(late_c), late * 0.7)
     base = base * (0.9 + 0.12 * fine)[..., None]
     base = lerp(base, T.full(hexc('#3a2818')), pores * 0.55)
     tone = g('tone')[..., None]
@@ -174,9 +177,9 @@ def wood_floor(n: int = 1024, seed: int = 41) -> dict:
 
     # --- scratches + gouges --------------------------------------------------------------------
     sc = T.zeros()
-    for _ in range(420):
+    for _ in range(300):
         x, y = rng.random(2) * n
-        ln = T.px(rng.uniform(0.03, 0.4))
+        ln = T.px(rng.uniform(0.02, 0.22))
         a = rng.normal(0, 0.12) if rng.random() < 0.75 else rng.uniform(0, math.pi)
         a += math.pi if rng.random() < 0.5 else 0
         pts = T.crack_path(x, y, ln, a, step=5, wiggle=0.04)
@@ -189,7 +192,7 @@ def wood_floor(n: int = 1024, seed: int = 41) -> dict:
         pts = [(cx + r * math.cos(a0 + t), cy + r * math.sin(a0 + t)) for t in np.linspace(0, rng.uniform(0.6, 2.5), 20)]
         T.stroke(swirl, pts, 0.8, soft=0.6, value=0.6)
     scr = np.clip(sc + swirl, 0, 1)
-    L.paint(scr, hexc('#8c7258'), 0.45, rough=0.75)
+    L.paint(scr, hexc('#80684f'), 0.3, rough=0.75)
     L.height -= scr * 0.00012
     gouge = T.zeros()
     for _ in range(14):
@@ -219,8 +222,8 @@ def wood_floor(n: int = 1024, seed: int = 41) -> dict:
     L.height -= nails * 0.0002
 
     # --- stains: a dark spill, a pale ring where a pot stood, a few drips -------------------------
-    G.water_stain(L, F, 0.70, 0.30, 0.16, stretch=(1.3, 0.9), strength=0.7, rings=2,
-                  tint=(0.70, 0.64, 0.58), tide=(0.15, 0.10, 0.06), warp=0.5)
+    G.water_stain(L, F, 0.70, 0.30, 0.16, stretch=(1.3, 0.9), strength=0.45, rings=2,
+                  tint=(0.78, 0.72, 0.66), tide=(0.15, 0.10, 0.06), warp=0.7)
     G.water_stain(L, F, 0.22, 0.78, 0.07, strength=0.6, rings=1, tint=(0.95, 0.92, 0.86), tide=(0.24, 0.17, 0.10))
     G.fly_specks(L, 200, color=(0.08, 0.06, 0.04), size_px=(0.5, 1.4), opacity=0.6)
 
@@ -272,16 +275,17 @@ def wood_trim(n: int = 1024, seed: int = 53) -> dict:
     # green coat around it, then the cream top coat with a lifted, light edge -------------------------
     warp_u = T.fbm(8, octaves=3) * 0.02
     warp_v = T.fbm(8, octaves=3, ) * 0.02
-    chip_n = T.fbm(9, octaves=6, gain=0.62, u=T.u + warp_u, v=T.v + warp_v)
-    zone = sstep(0.05, 0.6, T.fbm(3, octaves=3) + 0.2 * F.warp_lo)
-    thr1 = 0.5 - 0.42 * zone
-    top_lost = sstep(thr1, thr1 + 0.008, chip_n)
-    wood_bare = sstep(thr1 + 0.035, thr1 + 0.043, chip_n)
+    from surfaces_lib import standardize
+    chip_n = standardize(T.fbm(9, octaves=6, gain=0.62, u=T.u + warp_u, v=T.v + warp_v))
+    zone = sstep(-0.1, 0.5, T.fbm(3, octaves=3) + 0.2 * F.warp_lo)
+    thr1 = 1.9 - 1.6 * zone  # in std units: ~3% coverage outside the peeling zones, ~35% inside
+    top_lost = sstep(thr1, thr1 + 0.04, chip_n)
+    wood_bare = sstep(thr1 + 0.3, thr1 + 0.34, chip_n)
     # a scatter of tiny knocks (irregular) everywhere
-    knock_n = T.fbm(60, octaves=3, gain=0.6)
-    knocks = sstep(0.42, 0.45, knock_n) * sstep(0.1, 0.4, F.detail * 0.5 + 0.5)
+    knock_n = standardize(T.fbm(60, octaves=3, gain=0.6))
+    knocks = sstep(2.3, 2.4, knock_n) * sstep(0.1, 0.4, F.detail * 0.5 + 0.5)
     top_lost = np.clip(top_lost + knocks, 0, 1)
-    wood_bare = np.clip(wood_bare + knocks * sstep(0.47, 0.5, knock_n), 0, 1) * top_lost
+    wood_bare = np.clip(wood_bare + knocks * sstep(2.6, 2.7, knock_n), 0, 1) * top_lost
 
     L.color = L.color + (green - L.color) * top_lost[..., None]
     L.rough = L.rough + (0.55 - L.rough) * top_lost

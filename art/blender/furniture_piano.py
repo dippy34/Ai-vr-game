@@ -29,7 +29,7 @@ def mat_ivory(name):
     pos = g.pos()
     x, y, z = g.sep(pos)
     f = g.m('FRACT', g.mul(g.sub(x, X0), 1.0 / KW))
-    gap = g.vmax(g.rng(f, 0.035, 0.0), g.rng(f, 0.965, 1.0))
+    gap = g.vmax(g.rng(f, 0.05, 0.02), g.rng(f, 0.95, 0.98))
     # per-key tone
     kid = g.m('FLOOR', g.mul(g.sub(x, X0), 1.0 / KW))
     kr = g.m('FRACT', g.mul(g.m('SINE', g.mul(kid, 12.9898)), 43758.5453))
@@ -157,8 +157,13 @@ def build_piano():
                 grain='y')
     n = (0.0, math.cos(math.radians(18)), math.sin(math.radians(18)))
     tl = (0.0, KB - 0.02 + n[1] * 0.0096, KZ + KT + 0.05 + n[2] * 0.0096)
-    P.decal_group([fb], [P.text('HALLSTROM & SONS', 0.017, tl, gilt_case, rot=(90 - 18, 0, 180))], ext=0.006)
-    P.finish(tex=1024, max_tris=3000, fit=(W, H, D), preview_yaw=30, preview_pitch=14)
+    P.decal_group([fb], [P.text('HALLSTROM & SONS', 0.021, tl, gilt_case, rot=(90 - 18, 0, 180))], ext=0.006)
+    def weights(n, cen, area):
+        # keyboard + fallboard get much more texture space (key gaps, gilt name)
+        if abs(cen.x) < NW * KW / 2 + 0.01 and KB - 0.05 < cen.y < KF + 0.03 and KZ - 0.01 < cen.z < KZ + 0.12:
+            return 5.0
+        return 1.0
+    P.finish(tex=1024, max_tris=3000, fit=(W, H, D), preview_yaw=30, preview_pitch=14, weights=weights)
 
 
 def _gilt():

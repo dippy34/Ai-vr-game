@@ -171,4 +171,4 @@ def build_bench():
     P.cushion((W, D, H - z_top_frame), (0, 0, z_top_frame + (H - z_top_frame) / 2), fab, radius=0.04,
               bulge=(0.006, 0.008, 0.018), wrinkle=0.004, piping=0.004, lowres=(3, 1, 0), flat_bottom=True,
               seed=31, name='top', tufts=tufts, tears=[(0.42, 0.12, 0.05)], sag=(0.02, 0.35, 0.5))
-    P.finish(tex=1024, max_tris=2500, fit=(W, H, D), preview_yaw=30)
+    P.finish(tex=512, max_tris=2500, fit=(W, H, D), preview_yaw=30)

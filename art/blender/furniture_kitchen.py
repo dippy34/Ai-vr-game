@@ -103,7 +103,7 @@ def build_counter_module():
     paint, inner, kick, lam, trim, chrome = _mats(1.0)
     _carcass(P, paint, inner, kick, chrome, door_open=0.0)
     _top(P, lam, trim)
-    P.finish(tex=1024, tileable=True, max_tris=2500, fit=(W, H, D), preview_yaw=30, preview_pitch=20)
+    P.finish(tex=512, tileable=True, max_tris=2500, fit=(W, H, D), preview_yaw=30, preview_pitch=20)
 
 
 def build_counter_sink():
@@ -161,7 +161,7 @@ def build_counter_sink():
             faces.append((2 * i, 2 * i + 1, 2 * i + 3, 2 * i + 2))
         trail.append(P.decal_like(bowl, verts, faces, rust, (0, 0, 0), name='rust'))
     P.decal_group([bowl], trail, ext=0.003)
-    P.finish(tex=1024, tileable=True, max_tris=2500, fit=(W, H, D), preview_yaw=25, preview_pitch=35)
+    P.finish(tex=512, tileable=True, max_tris=2500, fit=(W, H, D), preview_yaw=25, preview_pitch=35)
 
 
 def build_counter_stove():
@@ -230,4 +230,4 @@ def build_counter_stove():
     ck = [o for o in P.hard if o.name.startswith('cooktop')][0]
     decals = [P.decal_like(ck, v, f, burnt, (0, 0, 0), name='burn') for v, f in rings]
     P.decal_group([ck], decals, ext=0.003)
-    P.finish(tex=1024, tileable=True, max_tris=2500, fit=(W, H, D), preview_yaw=30, preview_pitch=22)
+    P.finish(tex=512, tileable=True, max_tris=2500, fit=(W, H, D), preview_yaw=30, preview_pitch=22)

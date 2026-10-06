@@ -1,0 +1,68 @@
+{
+  "wallpaper_a": {
+    "tile": [
+      1.0,
+      1.0
+    ],
+    "maps": [
+      "color",
+      "normal",
+      "orm"
+    ]
+  },
+  "wallpaper_b": {
+    "tile": [
+      1.0,
+      1.0
+    ],
+    "maps": [
+      "color",
+      "normal",
+      "orm"
+    ]
+  },
+  "plaster_ceiling": {
+    "tile": [
+      2.0,
+      2.0
+    ],
+    "maps": [
+      "color",
+      "normal",
+      "orm"
+    ]
+  },
+  "wood_floor": {
+    "tile": [
+      2.0,
+      2.0
+    ],
+    "maps": [
+      "color",
+      "normal",
+      "orm"
+    ]
+  },
+  "tile_floor": {
+    "tile": [
+      1.0,
+      1.0
+    ],
+    "maps": [
+      "color",
+      "normal",
+      "orm"
+    ]
+  },
+  "wood_trim": {
+    "tile": [
+      0.5,
+      0.5
+    ],
+    "maps": [
+      "color",
+      "normal",
+      "orm"
+    ]
+  }
+}

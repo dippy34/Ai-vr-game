@@ -380,13 +380,16 @@ def save_image(path: str, arr: np.ndarray, quality: int = 90) -> str:
 
 
 def seam_report(name: str, a: np.ndarray) -> str:
-    """Compare the jump across the wrap edges with typical neighbor differences (1.0 = seamless)."""
+    """Seam check: the mean jump across the wrap edge vs. the jumps between every other pair of
+    adjacent columns / rows. Seamless if the wrap is no worse than the worst interior line (pattern
+    edges that fall on the wrap, like plank gaps, are legitimately as strong as their copies)."""
     if a.ndim == 3:
         a = lum(a)
-    inner_x = np.abs(np.diff(a, axis=1)).mean()
-    inner_y = np.abs(np.diff(a, axis=0)).mean()
-    wrap_x = np.abs(a[:, 0] - a[:, -1]).mean()
-    wrap_y = np.abs(a[0, :] - a[-1, :]).mean()
-    rx = wrap_x / max(inner_x, 1e-9)
-    ry = wrap_y / max(inner_y, 1e-9)
-    return f'{name}: wrap/inner u={rx:.2f} v={ry:.2f}'
+    out = []
+    for axis, label in ((1, 'u'), (0, 'v')):
+        d = np.abs(np.diff(a, axis=axis, append=np.take(a, [0], axis=axis))).mean(axis=1 - axis)
+        wrap, inner = float(d[-1]), d[:-1]
+        ok = wrap <= float(inner.max()) * 1.001 + 1e-6
+        out.append(f'{label}: wrap {wrap:.4f} / median {float(np.median(inner)):.4f} / max {float(inner.max()):.4f}'
+                   f' {"ok" if ok else "SEAM?"}')
+    return f'{name}: ' + ', '.join(out)

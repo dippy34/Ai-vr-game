@@ -26,12 +26,23 @@ export class StaticBatcher {
   private readonly batches = new Map<string, Batch>();
   private tris = 0;
 
+  private readonly grid: { x0: number; z0: number; sx: number; sz: number; nx: number; nz: number } | null;
+
   /**
-   * `chunkSize` > 0 splits merged meshes into square XZ cells of that size (by where each copy's
-   * center lands), so cells outside the view frustum are culled: a few more draw calls, far fewer
-   * triangles per view. 0 = one merged mesh per source mesh for the whole level.
+   * With `area` (XZ bounds) and `cell` (target size, m), merged meshes are split into a grid of
+   * roughly cell-sized chunks aligned to the area (by where each copy's center lands), so chunks
+   * outside the view are culled: a few more draw calls, far fewer triangles per view. Without
+   * them, one merged mesh per source mesh for the whole level.
    */
-  constructor(private readonly chunkSize = 0) {}
+  constructor(area?: { min: { x: number; z: number }; max: { x: number; z: number } }, cell = 0) {
+    if (area && cell > 0) {
+      const w = area.max.x - area.min.x, d = area.max.z - area.min.z;
+      const nx = Math.max(1, Math.round(w / cell)), nz = Math.max(1, Math.round(d / cell));
+      this.grid = { x0: area.min.x, z0: area.min.z, sx: w / nx, sz: d / nz, nx, nz };
+    } else {
+      this.grid = null;
+    }
+  }
 
   /**
    * Queue every visible mesh under `root` (taken in root's own frame, i.e. root's transform is
@@ -56,10 +67,13 @@ export class StaticBatcher {
     g.applyMatrix4(world);
     // A mirrored copy would flip its winding (back faces out); placements never mirror, but be safe.
     if (world.determinant() < 0) flipWinding(g);
-    if (!chunk && this.chunkSize > 0) {
+    const grid = this.grid;
+    if (!chunk && grid) {
       g.computeBoundingBox();
       g.boundingBox!.getCenter(_c);
-      chunk = `${Math.floor(_c.x / this.chunkSize)},${Math.floor(_c.z / this.chunkSize)}`;
+      const i = Math.min(grid.nx - 1, Math.max(0, Math.floor((_c.x - grid.x0) / grid.sx)));
+      const k = Math.min(grid.nz - 1, Math.max(0, Math.floor((_c.z - grid.z0) / grid.sz)));
+      chunk = `${i},${k}`;
     }
     const key = `${mesh.geometry.uuid}|${uuidOf(mesh.material)}|${chunk}`;
     let b = this.batches.get(key);
