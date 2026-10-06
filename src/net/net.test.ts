@@ -4,7 +4,7 @@ import { hostRoom, isRoomTransport, isValidRoomCode, joinRoom, normalizeRoomCode
 import type { NetMessage } from './protocol';
 import type { Transport } from './transport';
 
-const FAST: NetOptions = { pingIntervalMs: 40, peerTimeoutMs: 250, joinTimeoutMs: 300 };
+const FAST: NetOptions = { pingIntervalMs: 40, peerTimeoutMs: 250, joinTimeoutMs: 300, joinGraceMs: 0 };
 
 const open: Transport[] = [];
 afterEach(() => {
@@ -164,6 +164,26 @@ describe("'local' transport", () => {
       expect(h.roster).toEqual([h.selfId]);
     } finally {
       ch.close();
+    }
+  });
+
+  it('gives a freshly joined client a grace period while it loads the level', async () => {
+    const h = (await hostRoom('local', { ...FAST, joinGraceMs: 700 })) as RoomTransport;
+    const left: string[] = [];
+    h.onPeerLeave((id) => left.push(id));
+    const ch = new BroadcastChannel('mute-vr-local-' + h.roomCode);
+    try {
+      ch.postMessage({ c: 'join', f: 'loader', to: h.selfId });
+      await until(() => h.roster.includes('loader'));
+      // Silent for longer than peerTimeoutMs (250) but within the grace: still in the room.
+      await new Promise((r) => setTimeout(r, 450));
+      expect(left).toEqual([]);
+      // ...but a client that never speaks up is dropped once the grace is over.
+      await until(() => left.length === 1, 1500);
+      expect(left).toEqual(['loader']);
+    } finally {
+      ch.close();
+      h.close();
     }
   });
 

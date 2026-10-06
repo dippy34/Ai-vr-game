@@ -43,13 +43,20 @@ export interface StarTiming {
   pingIntervalMs: number;
   /** A peer we haven't heard from for this long is dropped. */
   peerTimeoutMs: number;
+  /**
+   * A peer that joined less than this long ago gets this much silence before being dropped
+   * instead of peerTimeoutMs: right after joining, a client builds the whole level (models,
+   * merged meshes, shaders), which can freeze its main thread for seconds on a headset.
+   */
+  joinGraceMs?: number;
   /** Frames whose JSON is bigger than this (UTF-8 bytes) are chunked. */
   maxFrameBytes: number;
 }
 
 export const DEFAULT_TIMING: StarTiming = {
   pingIntervalMs: 2000,
-  peerTimeoutMs: 8000,
+  peerTimeoutMs: 15000,
+  joinGraceMs: 30000,
   // PeerJS' JSON serializer refuses messages >= 16300 bytes (util.chunkedMTU).
   maxFrameBytes: 16000,
 };
@@ -124,6 +131,8 @@ export class Signal<A extends unknown[]> {
 interface PeerEntry {
   link: Link;
   lastHeard: number;
+  /** When the peer joined (for the join grace period). */
+  joinedAt: number;
   lastSent: number;
   /** Outgoing chunk sequence number. */
   chunkSeq: number;
@@ -272,7 +281,7 @@ export class StarTransport implements RoomTransport {
     }
     if (this.peers.has(id)) this.dropPeer(id, 'replaced');
     const t = now();
-    this.peers.set(id, { link, lastHeard: t, lastSent: 0, chunkSeq: 0, inbox: new Map() });
+    this.peers.set(id, { link, lastHeard: t, joinedAt: t, lastSent: 0, chunkSeq: 0, inbox: new Map() });
     if (this.isHost) {
       this.setRoster([...this._roster.filter((p) => p !== id), id]);
       this.joinSig.emit(id);
@@ -440,7 +449,9 @@ export class StarTransport implements RoomTransport {
     const suspended = gap > this.timing.pingIntervalMs * 3;
     for (const [id, entry] of [...this.peers]) {
       if (suspended) entry.lastHeard = t;
-      if (t - entry.lastHeard > this.timing.peerTimeoutMs) {
+      const grace = this.timing.joinGraceMs ?? 0;
+      const limit = t - entry.joinedAt < grace ? Math.max(grace, this.timing.peerTimeoutMs) : this.timing.peerTimeoutMs;
+      if (t - entry.lastHeard > limit) {
         this.dropPeer(id, 'timeout');
         continue;
       }

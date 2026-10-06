@@ -16,8 +16,10 @@ import type { Transport, TransportKind } from './transport';
 export interface NetOptions {
   /** Keepalive interval (default 2000 ms). */
   pingIntervalMs?: number;
-  /** Drop a peer after this long without any traffic (default 8000 ms). */
+  /** Drop a peer after this long without any traffic (default 15000 ms). */
   peerTimeoutMs?: number;
+  /** Extra silence allowed right after a peer joins, while it builds the level (default 30000 ms). */
+  joinGraceMs?: number;
   /** Max wait for the host to answer a join (default: 10000 ms peerjs, 2000 ms local). */
   joinTimeoutMs?: number;
   /** PeerJS only: max wait for the signaling server (default 10000 ms). */
@@ -28,6 +30,7 @@ function timing(opts: NetOptions): StarTiming {
   return {
     ...DEFAULT_TIMING,
     ...(opts.pingIntervalMs !== undefined ? { pingIntervalMs: opts.pingIntervalMs } : {}),
+    ...(opts.joinGraceMs !== undefined ? { joinGraceMs: opts.joinGraceMs } : {}),
     ...(opts.peerTimeoutMs !== undefined ? { peerTimeoutMs: opts.peerTimeoutMs } : {}),
   };
 }

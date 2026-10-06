@@ -136,7 +136,7 @@ vi.mock('peerjs', () => ({ Peer: fake.FakePeer, default: fake.FakePeer }));
 
 const { hostRoom, joinRoom } = await import('./index');
 
-const FAST = { pingIntervalMs: 40, peerTimeoutMs: 400, joinTimeoutMs: 500, signalingTimeoutMs: 500 };
+const FAST = { pingIntervalMs: 40, peerTimeoutMs: 400, joinTimeoutMs: 500, signalingTimeoutMs: 500, joinGraceMs: 0 };
 const open: Transport[] = [];
 afterEach(() => {
   for (const t of open.splice(0)) t.close();
