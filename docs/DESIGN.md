@@ -68,6 +68,7 @@ fists, open palm "stop", thumbs up/down, counting 1–5, "come here" waves and s
 | Sneak (quiet) | Crouch in real life | Hold C (crouch) or Ctrl |
 | Sprint (loud) | Click left stick | Shift |
 | Grab / drop | Grip near item | E |
+| Read a note | Lean in close | Aim at it, E (leans in; E again or move to stand up) |
 | Flash | Trigger while holding camera | Left click while holding camera |
 | Hand signs | Your actual hands / fingers | Keys 1–6 |
 | Talk | Just talk (mic is always on) | Just talk |
@@ -91,7 +92,19 @@ fists, open palm "stop", thumbs up/down, counting 1–5, "come here" waves and s
 ## Roadmap after this prototype
 
 1. Playtest the core: is signing in flashes fun? Tune `src/config.ts`.
-2. More houses/levels, item randomization, a smarter monster (it already remembers noisy areas;
-   next: learning hiding spots).
-3. Proper sound design pass, possibly recorded assets.
-4. Ship: Meta Horizon Store (PWA wrapper or native port), then Steam. See `docs/PORTING.md`.
+2. **A map board, not a linear campaign.** Pick which house to enter; escaping unlocks bigger ones
+   (farmhouse, motel, school, hospital) with more fuses and new trouble. Every round reshuffles
+   fuses and the monster, so no house is ever "done". Difficulty = how well it hears (Nightmare:
+   it hears whispers). The notes tie the houses into one family story.
+3. **A darkroom hub** between rounds: the photos you flashed get developed and hang on a line
+   (shareable moments).
+4. **Second chance** (rules + tests written, shelved in commit `99e544d`; revert its revert to
+   resume): the first time it reaches you each round it grabs you instead, and you get ~1.6 s to
+   get out. Pry its jaws apart (VR: grab both glowing spots and pull; desktop: the two keys
+   shown, a wrong key fumbles), or Last Flash point-blank (costs film), or a teammate makes a big
+   noise and it drops you for them. Loud Mode (lobby option, off by default) lets a real scream
+   count. Screaming must never be the only way out: players in apartments.
+5. **The Nest** (story finale, later): a secret cellar where you finally fight it with sound, flash
+   and hand-signed timing. Rule until then: you can hurt it, but you can't kill it.
+6. Proper sound design pass, possibly recorded assets.
+7. Ship: Meta Horizon Store (PWA wrapper or native port), then Steam. See `docs/PORTING.md`.
