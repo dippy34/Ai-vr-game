@@ -33,6 +33,11 @@ void isVRSupported().then((ok) => (vrSupported = ok));
 input.setEnabled(false);
 ui.showTitle();
 
+// Dev-only handle for automated browser tests and console poking.
+if (import.meta.env.DEV) {
+  (window as unknown as { __mute: unknown }).__mute = { renderer, input, audio, ui, game };
+}
+
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }

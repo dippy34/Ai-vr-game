@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
-    "assets": ".blender-venv/bin/python art/build.py"
+    "assets": ".blender-venv/bin/python art/build.py",
+    "test:e2e": "node tests/e2e/smoke.cjs"
   },
   "license": "UNLICENSED",
   "dependencies": {
