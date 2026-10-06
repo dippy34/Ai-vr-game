@@ -18,7 +18,7 @@ import { ModelLibrary } from './assets';
 import { SkinnedMonster } from './SkinnedMonster';
 import { FURNITURE_MODEL_NAMES } from './FurnitureModels';
 import { NoiseMeter } from './NoiseMeter';
-import { CameraProp, FilmProp, FuseProp, type Prop } from './Props';
+import { CameraProp, FilmProp, FuseProp, type HoldStyle, type Prop } from './Props';
 import { AvatarKit, RemoteAvatar } from './RemoteAvatar';
 import { DRESSING_PREFIX } from './Dressing';
 import { setTextureAnisotropy } from './textures';
@@ -329,7 +329,7 @@ export class GameRenderer implements IGameRenderer {
       prop.group.visible = it.where !== 'used';
       if (it.where === 'used') continue;
       if (it.where === 'held' && this.handFrame(it.holder, it.hand, localId, localPose, _a, _q)) {
-        prop.placeInHand(it.hand!, _a, _q);
+        prop.placeInHand(it.hand!, _a, _q, this.holdStyle(state, it.holder!, localId));
       } else {
         prop.placeInWorld(it.position.x, it.position.y, it.position.z, it.yaw);
       }
@@ -347,11 +347,17 @@ export class GameRenderer implements IGameRenderer {
     cp.group.visible = true;
     cp.setFilm(cam.film);
     if (cam.holder && this.handFrame(cam.holder, cam.hand, localId, localPose, _a, _q)) {
-      cp.placeInHand(cam.hand!, _a, _q);
+      cp.placeInHand(cam.hand!, _a, _q, this.holdStyle(state, cam.holder, localId));
     } else {
       cp.placeInWorld(cam.position.x, cam.position.y, cam.position.z, cam.yaw);
     }
     cp.update(this.time, cp.group.position.distanceTo(this.headPos));
+  }
+
+  /** Desktop hands rest palm down; VR hands hold things in a natural grip. */
+  private holdStyle(state: WorldState, holder: PlayerId, localId: PlayerId): HoldStyle {
+    if (holder === localId) return this.ctx.renderer.xr.isPresenting ? 'grip' : 'palmDown';
+    return state.players[holder]?.isDesktop ? 'palmDown' : 'grip';
   }
 
   setRemotePose(id: PlayerId, pose: PlayerPose): void {

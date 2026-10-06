@@ -22,7 +22,10 @@ import {
 } from './textures';
 import { aabbOf, damp, disposeTree, rayAabb, unitCapsule, type Aabb } from './util';
 import type { ModelLibrary } from './assets';
+import { StaticBatcher } from './batch';
+import { DressingSet } from './Dressing';
 import { FurnitureSet } from './FurnitureModels';
+import { FuseProp } from './Props';
 
 // ---------------------------------------------------------------------------------------------
 // Geometry buckets (one merged mesh per material)
@@ -468,13 +471,26 @@ const _lampC = new THREE.Color();
 const _lampM = new THREE.Matrix4();
 const LAMP_OFF = new THREE.Color(0x4a0808);
 const LAMP_ON = new THREE.Color(0x5cff7e);
+const HALO_FACING_NEG_Z = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+const _one = new THREE.Vector3(1, 1, 1);
+
+/** fusebox.glb parts the view drives (everything else is merged into the static batch). */
+interface FuseBoxModel {
+  lamps: { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial; pos: THREE.Vector3 }[];
+  /** One fuse per slot, shown once that many fuses are in. */
+  fuses: THREE.Object3D[];
+  props: FuseProp[];
+}
 
 class FuseBoxView {
   readonly group = new THREE.Group();
+  /** World point at the center of the box's back, on the wall. */
+  readonly mount: THREE.Vector3;
   private slots: THREE.InstancedMesh | null = null;
   private lamps: THREE.InstancedMesh | null = null;
   private halos: THREE.InstancedMesh | null = null;
   private fuses: THREE.InstancedMesh | null = null;
+  private model: FuseBoxModel | null = null;
   private required = -1;
   private inserted = -1;
   private litAt: number[] = [];
@@ -485,7 +501,7 @@ class FuseBoxView {
   private readonly slotMat = new THREE.MeshLambertMaterial({ color: 0x141414 });
   private readonly fuseMat = new THREE.MeshBasicMaterial({ color: 0x8a5a22 });
 
-  constructor(level: LevelData, wallBoxes: Aabb[], metal: Bucket) {
+  constructor(level: LevelData, wallBoxes: Aabb[], metal: Bucket, models: ModelLibrary | null, batcher: StaticBatcher) {
     const fb = level.fuseBox;
     const fwd = new THREE.Vector3(-Math.sin(fb.yaw), 0, -Math.cos(fb.yaw));
     // Mount on the wall behind `position` if there is one close by.
@@ -494,7 +510,15 @@ class FuseBoxView {
     let t = Infinity;
     for (const w of wallBoxes) t = Math.min(t, rayAabb(o, back, w));
     const mount = t < 0.6 ? o.clone().addScaledVector(back, t) : o.clone();
+    this.mount = mount;
     this.group.position.copy(mount);
+    if (models?.has('fusebox')) {
+      // fusebox.glb: origin = center of the back face, faces -Z (= the level's facing yaw).
+      this.group.rotation.y = fb.yaw;
+      this.group.updateMatrixWorld(true);
+      this.model = this.buildModel(models, batcher);
+      return;
+    }
     this.group.rotation.y = fb.yaw + Math.PI; // local +Z = facing direction
     this.group.updateMatrixWorld(true);
     // Body (merged into the static metal bucket) + conduit pipe going up.
@@ -513,7 +537,80 @@ class FuseBoxView {
     this.group.add(plate);
   }
 
+  private buildModel(models: ModelLibrary, batcher: StaticBatcher): FuseBoxModel {
+    const inst = models.instance('fusebox')!;
+    const byIndex = (prefix: string): THREE.Object3D[] => {
+      const out: THREE.Object3D[] = [];
+      for (let i = 0; ; i++) {
+        const n = inst.getObjectByName(`${prefix}${i}`);
+        if (!n) break;
+        out.push(n);
+      }
+      return out;
+    };
+    const lampNodes = byIndex('lamp_');
+    const slotNodes = byIndex('slot_');
+    const isLamp = (m: THREE.Object3D): boolean => lampNodes.some((l) => l === m || l.getObjectById(m.id) !== undefined);
+    // Static parts (body, door, lever) -> one merged mesh per material in the level batch.
+    batcher.add(inst, this.group.matrixWorld, '', (m) => !isLamp(m));
+    // The instance root is never parented, so its "world" space is the model = group-local space.
+    inst.updateMatrixWorld(true);
+    const lamps: FuseBoxModel['lamps'] = [];
+    for (const node of lampNodes) {
+      const mesh = (node as THREE.Mesh).isMesh ? (node as THREE.Mesh) : (node.getObjectByProperty('isMesh', true) as THREE.Mesh | undefined);
+      if (!mesh) continue;
+      const src = mesh.material as THREE.Material;
+      const mat = src instanceof THREE.MeshStandardMaterial ? src.clone() : new THREE.MeshStandardMaterial({ roughness: 0.15 });
+      mat.userData = {};
+      mat.fog = false;
+      mesh.material = mat;
+      // Lamp position in the group frame (for the glow halo).
+      const pos = new THREE.Vector3().setFromMatrixPosition(mesh.matrixWorld);
+      const geo = mesh.geometry;
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      pos.z += geo.boundingBox!.min.z - 0.004;
+      lamps.push({ mesh, mat, pos });
+    }
+    // Keep only the lamps (+ slot markers) live; everything else is in the batch.
+    const live = new THREE.Group();
+    live.name = 'fusebox-live';
+    for (const l of lamps) {
+      const m = l.mesh.matrixWorld.clone();
+      l.mesh.removeFromParent();
+      m.decompose(l.mesh.position, l.mesh.quaternion, l.mesh.scale);
+      live.add(l.mesh);
+    }
+    // A fuse model in every slot (hidden until inserted). Slots are vertical, like fuse.glb.
+    const fuses: THREE.Object3D[] = [];
+    const props: FuseProp[] = [];
+    for (const slot of slotNodes) {
+      const prop = new FuseProp(models.has('fuse') ? models : null);
+      const holder = new THREE.Group();
+      slot.matrixWorld.decompose(holder.position, holder.quaternion, holder.scale);
+      // The procedural fuse lies along X: stand it up.
+      if (!prop.modelled) prop.group.rotation.z = Math.PI / 2;
+      // Powered fuses glow faintly warm.
+      prop.setGlint(0.95);
+      holder.add(prop.group);
+      holder.visible = false;
+      live.add(holder);
+      fuses.push(holder);
+      props.push(prop);
+    }
+    this.group.add(live);
+    const n = Math.max(1, lamps.length);
+    this.halos = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.09, 0.09), this.haloMat, n);
+    this.halos.count = 0;
+    this.halos.frustumCulled = false;
+    this.group.add(this.halos);
+    return { lamps, fuses, props };
+  }
+
   update(required: number, inserted: number, time: number): void {
+    if (this.model) {
+      this.updateModel(required, inserted, time);
+      return;
+    }
     if (required !== this.required) this.rebuild(required);
     const n = this.required;
     if (inserted !== this.inserted) {
@@ -544,6 +641,42 @@ class FuseBoxView {
     this.halos.count = lit;
     this.halos.instanceMatrix.needsUpdate = true;
     if (this.lamps.instanceColor) this.lamps.instanceColor.needsUpdate = true;
+  }
+
+  private updateModel(required: number, inserted: number, time: number): void {
+    const model = this.model!;
+    const n = model.lamps.length;
+    if (required !== this.required || inserted !== this.inserted) {
+      if (required !== this.required) this.litAt = new Array(n).fill(-1);
+      this.required = required;
+      for (let i = 0; i < n; i++) {
+        if (i < inserted && !(this.litAt[i] >= 0)) this.litAt[i] = time;
+        if (i >= inserted) this.litAt[i] = -1;
+      }
+      this.inserted = inserted;
+      model.fuses.forEach((f, i) => (f.visible = i < inserted));
+    }
+    const halos = this.halos!;
+    let lit = 0;
+    for (let i = 0; i < n; i++) {
+      const l = model.lamps[i];
+      // Lamps beyond the fuses this round needs stay dark.
+      l.mesh.visible = true;
+      const on = i < inserted;
+      let k = on ? 1 : 0;
+      if (on) {
+        const age = time - this.litAt[i];
+        if (age < 0.5) k = Math.sin(age * 70) > 0.1 ? 1 : 0.15;
+        _lampM.compose(l.pos, HALO_FACING_NEG_Z, _one);
+        halos.setMatrixAt(lit++, _lampM);
+      }
+      _lampC.copy(LAMP_OFF).lerp(LAMP_ON, k);
+      // Self-lit like an indicator bulb; the dark base keeps a glossy glass look under the flash.
+      l.mat.emissive.copy(_lampC);
+      l.mat.color.copy(_lampC).multiplyScalar(0.25);
+    }
+    halos.count = lit;
+    halos.instanceMatrix.needsUpdate = true;
   }
 
   private lampX(i: number): number {
@@ -591,12 +724,25 @@ class FuseBoxView {
     this.haloMat.dispose();
     this.slotMat.dispose();
     this.fuseMat.dispose();
+    if (this.model) {
+      for (const l of this.model.lamps) l.mat.dispose();
+      for (const p of this.model.props) p.dispose();
+    }
+    if (this.halos && this.model) {
+      this.halos.geometry.dispose();
+      this.halos.dispose();
+    }
   }
 }
 
 // ---------------------------------------------------------------------------------------------
 // Exit door
 // ---------------------------------------------------------------------------------------------
+
+const _doorQ = new THREE.Quaternion();
+const _doorAxis = new THREE.Vector3(0, 1, 0);
+/** How far the Blender door swings open (into the house; more would hit the casing). */
+const MODEL_DOOR_OPEN = THREE.MathUtils.degToRad(95);
 
 class DoorView {
   readonly group = new THREE.Group();
@@ -607,29 +753,97 @@ class DoorView {
   private readonly glowMat: THREE.MeshBasicMaterial;
   private readonly spillMat: THREE.MeshBasicMaterial;
   private readonly openSign: number;
+  /** door.glb's leaf (origin on the hinge axis), or null for the procedural door. */
+  private leaf: THREE.Object3D | null = null;
+  private readonly leafRest = new THREE.Quaternion();
   private open = 0;
   private glowK = 0;
 
-  constructor(level: LevelData, trim: Bucket) {
+  constructor(level: LevelData, trim: Bucket, models: ModelLibrary | null = null, batcher: StaticBatcher | null = null) {
     const door = level.exit.door;
     this.box = aabbOf(door.min, door.max);
     const sx = door.max.x - door.min.x, sz = door.max.z - door.min.z, h = door.max.y - door.min.y;
     const wideX = sx >= sz;
     const width = wideX ? sx : sz;
     const thick = wideX ? sz : sx;
-    const t = Math.min(0.05, thick);
     const cx = (door.min.x + door.max.x) / 2, cz = (door.min.z + door.max.z) / 2;
     const zone = level.exit.zone;
     const zc = wideX ? (zone.min.z + zone.max.z) / 2 - cz : (zone.min.x + zone.max.x) / 2 - cx;
     const outSign = zc >= 0 ? 1 : -1;
-    // Pivot at the hinge edge; local +X runs along the door, local Z across it.
-    if (wideX) this.pivot.position.set(door.min.x, door.min.y, cz);
-    else this.pivot.position.set(cx, door.min.y, door.min.z);
-    this.pivot.rotation.y = wideX ? 0 : -Math.PI / 2;
+    const out = wideX ? new THREE.Vector3(0, 0, outSign) : new THREE.Vector3(outSign, 0, 0);
     const localOut = wideX ? outSign : -outSign;
     this.openSign = -localOut;
-    this.group.add(this.pivot);
 
+    if (models?.has('door') && batcher) {
+      this.buildModel(models, batcher, new THREE.Vector3(cx, door.min.y, cz), out, width, h, thick);
+    } else {
+      // Pivot at the hinge edge; local +X runs along the door, local Z across it.
+      if (wideX) this.pivot.position.set(door.min.x, door.min.y, cz);
+      else this.pivot.position.set(cx, door.min.y, door.min.z);
+      this.pivot.rotation.y = wideX ? 0 : -Math.PI / 2;
+      this.group.add(this.pivot);
+      this.buildProcedural(trim, door, wideX, width, thick, h, cx, cz);
+    }
+
+    // Cold glow beyond the doorway + light spilling onto the floor inside.
+    this.glowMat = new THREE.MeshBasicMaterial({
+      map: doorGlowTexture(), color: 0x9fb6e4, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    });
+    this.glow = new THREE.Mesh(new THREE.PlaneGeometry(width * 1.05, h), this.glowMat);
+    this.glow.position.set(cx, door.min.y + h / 2, cz).addScaledVector(out, thick / 2 + 0.06);
+    this.glow.lookAt(this.glow.position.clone().sub(out));
+    this.glow.visible = false;
+    this.group.add(this.glow);
+    this.spillMat = new THREE.MeshBasicMaterial({
+      map: shaftTexture(), color: 0x7f97c4, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    // Floor quad inside the room, v = 0 (bright) at the door, v = 1 fading 1.8 m into the room.
+    const spillLen = 1.8;
+    const side = wideX ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1);
+    const base = new THREE.Vector3(cx, door.min.y + 0.006, cz).addScaledVector(out, -thick / 2);
+    const far = base.clone().addScaledVector(out, -spillLen);
+    const hw = width * 0.6;
+    const sp = [
+      base.clone().addScaledVector(side, -hw), base.clone().addScaledVector(side, hw),
+      far.clone().addScaledVector(side, hw), far.clone().addScaledVector(side, -hw),
+    ];
+    const sg = new THREE.BufferGeometry();
+    sg.setAttribute('position', new THREE.Float32BufferAttribute(sp.flatMap((p) => [p.x, p.y, p.z]), 3));
+    sg.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+    sg.setIndex([0, 1, 2, 0, 2, 3]);
+    sg.computeBoundingSphere();
+    this.spill = new THREE.Mesh(sg, this.spillMat);
+    this.spillMat.side = THREE.DoubleSide;
+    this.spill.visible = false;
+    this.group.add(this.spill);
+  }
+
+  /** door.glb: the frame is merged into the static batch; the leaf swings on its hinge-edge origin. */
+  private buildModel(models: ModelLibrary, batcher: StaticBatcher, base: THREE.Vector3, out: THREE.Vector3, width: number, h: number, thick: number): void {
+    const inst = models.instance('door')!;
+    const op = models.get('door')!.extras.opening;
+    const [ow, oh, od] = Array.isArray(op) && op.length === 3 && op.every((v) => typeof v === 'number' && v > 0) ? (op as number[]) : [1.2, 2.4, 0.2];
+    // Model -Z faces into the house, so model +Z points outside.
+    const root = new THREE.Group();
+    root.name = 'door-model';
+    root.position.copy(base);
+    root.rotation.y = Math.atan2(out.x, out.z);
+    root.scale.set(width / ow, h / oh, thick / od);
+    root.updateMatrixWorld(true);
+    const leaf = inst.getObjectByName('door_leaf');
+    const underLeaf = (m: THREE.Object3D): boolean => !!leaf && (m === leaf || leaf.getObjectById(m.id) !== undefined);
+    batcher.add(inst, root.matrixWorld, '', (m) => !underLeaf(m));
+    if (leaf) {
+      leaf.removeFromParent();
+      root.add(leaf);
+      this.leaf = leaf;
+      this.leafRest.copy(leaf.quaternion);
+    }
+    this.group.add(root);
+  }
+
+  private buildProcedural(trim: Bucket, door: Box, wideX: boolean, width: number, thick: number, h: number, cx: number, cz: number): void {
+    const t = Math.min(0.05, thick);
     // Panel: slab + raised panels on both faces + knobs, vertex colored, one mesh.
     const parts: THREE.BufferGeometry[] = [];
     const add = (g: THREE.BufferGeometry, col: number): void => {
@@ -675,47 +889,19 @@ class DoorView {
       trim.add(boxGeo(x0, door.min.y, door.max.z, x1, door.max.y + cw, door.max.z + cw), 0x2e2016);
       trim.add(boxGeo(x0, door.max.y, door.min.z, x1, door.max.y + cw, door.max.z), 0x2e2016);
     }
-
-    // Cold glow beyond the doorway + light spilling onto the floor inside.
-    const out = wideX ? new THREE.Vector3(0, 0, outSign) : new THREE.Vector3(outSign, 0, 0);
-    this.glowMat = new THREE.MeshBasicMaterial({
-      map: doorGlowTexture(), color: 0x9fb6e4, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
-    });
-    this.glow = new THREE.Mesh(new THREE.PlaneGeometry(width * 1.05, h), this.glowMat);
-    this.glow.position.set(cx, door.min.y + h / 2, cz).addScaledVector(out, thick / 2 + 0.06);
-    this.glow.lookAt(this.glow.position.clone().sub(out));
-    this.glow.visible = false;
-    this.group.add(this.glow);
-    this.spillMat = new THREE.MeshBasicMaterial({
-      map: shaftTexture(), color: 0x7f97c4, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false,
-    });
-    // Floor quad inside the room, v = 0 (bright) at the door, v = 1 fading 1.8 m into the room.
-    const spillLen = 1.8;
-    const side = wideX ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1);
-    const base = new THREE.Vector3(cx, door.min.y + 0.006, cz).addScaledVector(out, -thick / 2);
-    const far = base.clone().addScaledVector(out, -spillLen);
-    const hw = width * 0.6;
-    const sp = [
-      base.clone().addScaledVector(side, -hw), base.clone().addScaledVector(side, hw),
-      far.clone().addScaledVector(side, hw), far.clone().addScaledVector(side, -hw),
-    ];
-    const sg = new THREE.BufferGeometry();
-    sg.setAttribute('position', new THREE.Float32BufferAttribute(sp.flatMap((p) => [p.x, p.y, p.z]), 3));
-    sg.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
-    sg.setIndex([0, 1, 2, 0, 2, 3]);
-    sg.computeBoundingSphere();
-    this.spill = new THREE.Mesh(sg, this.spillMat);
-    this.spillMat.side = THREE.DoubleSide;
-    this.spill.visible = false;
-    this.group.add(this.spill);
   }
 
   update(exitOpen: boolean, dt: number): void {
     const target = exitOpen ? 1 : 0;
     // Heavy door: slow start, settles.
     this.open += (target - this.open) * damp(exitOpen ? 1.6 : 4, dt);
-    const a = this.open * THREE.MathUtils.degToRad(105);
-    this.pivot.children[0].rotation.y = this.openSign * a;
+    if (this.leaf) {
+      // door.glb: rotation.y = +angle swings the leaf into the house.
+      this.leaf.quaternion.copy(this.leafRest).multiply(_doorQ.setFromAxisAngle(_doorAxis, this.open * MODEL_DOOR_OPEN));
+    } else {
+      const a = this.open * THREE.MathUtils.degToRad(105);
+      this.pivot.children[0].rotation.y = this.openSign * a;
+    }
     this.glowK += ((exitOpen ? 1 : 0) - this.glowK) * damp(0.9, dt);
     const k = this.glowK;
     this.glow.visible = this.spill.visible = k > 0.01;
@@ -752,10 +938,14 @@ export class LevelView {
 
   /** Blender furniture placed into the level (null = all procedural). */
   private readonly furnitureModels: FurnitureSet | null;
+  /** Set dressing scattered through the house (null = no dressing models). */
+  readonly dressing: DressingSet | null;
 
   constructor(level: LevelData, models: ModelLibrary | null = null) {
     this.group.name = 'level';
-    this.furnitureModels = models ? new FurnitureSet(models) : null;
+    // Every static Blender model (furniture, dressing, fuse box body, door frame) merges here.
+    const batcher = new StaticBatcher();
+    this.furnitureModels = models ? new FurnitureSet(models, batcher) : null;
     const wallBoxes = level.boxes.filter((b) => b.kind === 'wall');
     const floorBoxes = level.boxes.filter((b) => b.kind === 'floor');
     for (const w of wallBoxes) this.walls.push(aabbOf(w.min, w.max));
@@ -801,9 +991,27 @@ export class LevelView {
       }
     }
 
+    // Fuse box and door add to the static buckets / batch, so build them before merging.
+    this.fuseBox = new FuseBoxView(level, this.walls, plain, models, batcher);
+    this.door = new DoorView(level, wood, models, batcher);
+    this.group.add(this.fuseBox.group, this.door.group);
+
+    // Set dressing (decides which windows get boarded up before the moonlight is built).
+    this.dressing = models ? new DressingSet(models, batcher) : null;
+    if (this.dressing?.available) {
+      this.dressing.scatter({
+        level,
+        walls: wallBoxes,
+        furniture: level.boxes.filter((b) => b.kind === 'furniture'),
+        placed: this.furnitureModels?.placed ?? [],
+        fuseBoxMount: this.fuseBox.mount,
+      });
+    }
+    const boarded = this.dressing?.boarded ?? new Set<number>();
+
     // Windows: pane + frame + mullions + sill, and a cheap additive moonlight shaft + floor patch.
-    const shaftPos: number[] = [], shaftUv: number[] = [], shaftIdx: number[] = [];
-    const patchPos: number[] = [], patchUv: number[] = [], patchIdx: number[] = [];
+    const shaftPos: number[] = [], shaftUv: number[] = [], shaftIdx: number[] = [], shaftCol: number[] = [];
+    const patchPos: number[] = [], patchUv: number[] = [], patchIdx: number[] = [], patchCol: number[] = [];
     const isInside = (x: number, z: number): boolean => {
       const bd = level.bounds;
       if (x < bd.min.x || x > bd.max.x || z < bd.min.z || z > bd.max.z) return false;
@@ -811,7 +1019,9 @@ export class LevelView {
       return !insideAny(wallBoxes, { x, y: 1, z });
     };
     const elev = THREE.MathUtils.degToRad(38);
-    for (const win of level.windows) {
+    for (const [wi, win] of level.windows.entries()) {
+      // Boarded windows only leak a little light between the planks.
+      const light = boarded.has(wi) ? 0.3 : 1;
       const f = new THREE.Vector3(-Math.sin(win.yaw), 0, -Math.cos(win.yaw));
       const n = Math.abs(f.x) > Math.abs(f.z) ? new THREE.Vector3(Math.sign(f.x), 0, 0) : new THREE.Vector3(0, 0, Math.sign(f.z));
       const c = new THREE.Vector3(win.center.x, win.center.y, win.center.z);
@@ -851,7 +1061,11 @@ export class LevelView {
       const ftl = toFloor(tl), ftr = toFloor(tr), fbl = toFloor(bl), fbr = toFloor(br);
       const quad = (pos: number[], uvs: number[], idx: number[], a: THREE.Vector3, b: THREE.Vector3, cc: THREE.Vector3, dd: THREE.Vector3, ua: number[]): void => {
         const base = pos.length / 3;
-        for (const p of [a, b, cc, dd]) pos.push(p.x, p.y, p.z);
+        const col = pos === shaftPos ? shaftCol : patchCol;
+        for (const p of [a, b, cc, dd]) {
+          pos.push(p.x, p.y, p.z);
+          col.push(light, light, light);
+        }
         uvs.push(...ua);
         idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
       };
@@ -868,14 +1082,10 @@ export class LevelView {
       const mesh = bucket.build(mat, name);
       if (mesh) this.group.add(mesh);
     };
-    // Fuse box and door add to the static buckets, so build them before merging.
-    this.fuseBox = new FuseBoxView(level, this.walls, plain);
-    this.door = new DoorView(level, wood);
-    this.group.add(this.fuseBox.group, this.door.group);
-    if (this.furnitureModels) {
-      this.furnitureModels.build();
-      this.group.add(this.furnitureModels.group);
-    }
+    const statics = new THREE.Group();
+    statics.name = 'models';
+    batcher.build(statics);
+    this.group.add(statics);
 
     mk(walls, new THREE.MeshLambertMaterial({ map: wallpaperTexture(), vertexColors: true }), 'walls');
     mk(floors, new THREE.MeshLambertMaterial({ map: floorTexture(), vertexColors: true }), 'floors');
@@ -889,10 +1099,11 @@ export class LevelView {
       const sg = new THREE.BufferGeometry();
       sg.setAttribute('position', new THREE.Float32BufferAttribute(shaftPos, 3));
       sg.setAttribute('uv', new THREE.Float32BufferAttribute(shaftUv, 2));
+      sg.setAttribute('color', new THREE.Float32BufferAttribute(shaftCol, 3));
       sg.setIndex(shaftIdx);
       sg.computeBoundingSphere();
       const shafts = new THREE.Mesh(sg, new THREE.MeshBasicMaterial({
-        map: shaftTexture(), color: 0x151d30, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+        map: shaftTexture(), color: 0x151d30, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
       }));
       shafts.name = 'moonShafts';
       shafts.renderOrder = 2;
@@ -900,11 +1111,12 @@ export class LevelView {
       const pgeo = new THREE.BufferGeometry();
       pgeo.setAttribute('position', new THREE.Float32BufferAttribute(patchPos, 3));
       pgeo.setAttribute('uv', new THREE.Float32BufferAttribute(patchUv, 2));
+      pgeo.setAttribute('color', new THREE.Float32BufferAttribute(patchCol, 3));
       pgeo.setIndex(patchIdx);
       pgeo.computeVertexNormals();
       pgeo.computeBoundingSphere();
       const patches = new THREE.Mesh(pgeo, new THREE.MeshBasicMaterial({
-        map: moonPatchTexture(), color: 0x2f3d5c, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
+        map: moonPatchTexture(), color: 0x2f3d5c, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
       }));
       patches.name = 'moonPatches';
       patches.renderOrder = 1;

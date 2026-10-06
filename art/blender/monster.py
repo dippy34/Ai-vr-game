@@ -153,8 +153,8 @@ def masks(V, Q, labels, J, info):
     # mouth slit + cavity, nostrils, ear canals, skull pits -> near-black wet red
     dark = np.zeros(nv)
     head = np.isin(labels, [A.LAB['head'], A.LAB['jaw_L'], A.LAB['jaw_R']])
-    slit = S.Ellipsoid(S.v3(0, 0.366, 2.045), S.v3(0.0042, 0.024, 0.050)).eval(V.astype(np.float32))
-    cav = S.Ellipsoid(S.v3(0, 0.336, 2.045), S.v3(0.0140, 0.024, 0.044)).eval(V.astype(np.float32))
+    slit = S.Ellipsoid(*A.MOUTH_SLIT).eval(V.astype(np.float32))
+    cav = S.Ellipsoid(*A.MOUTH_CAV).eval(V.astype(np.float32))
     dm = np.minimum(slit, cav)
     dark = np.maximum(dark, (1 - ss(0.0005, 0.0045, dm)) * head)
     for p, nrm, r in info['holes']:
@@ -166,8 +166,8 @@ def masks(V, Q, labels, J, info):
         dark = np.maximum(dark, 1 - ss(0.0, 0.004, d))
         for s2 in (1,):
             pass
-    for s_ in (1, -1):
-        rc = S.RoundCone(S.v3(0.0055 * s_, 0.366, 2.098), S.v3(0.0085 * s_, 0.360, 2.116), 0.0030, 0.0026)
+    for (na, nb_) in A.NOSTRILS:
+        rc = S.RoundCone(na, nb_, 0.0030, 0.0026)
         dark = np.maximum(dark, 1 - ss(0.0, 0.002, rc.eval(V.astype(np.float32))))
     # inflamed rims: around pits, gums, mouth
     infl = np.zeros(nv)
@@ -177,8 +177,8 @@ def masks(V, Q, labels, J, info):
     infl = np.maximum(infl, (1 - ss(0.002, 0.010, dm)) * head)
     # sockets (bruised, stretched)
     sock = np.zeros(nv)
-    for s_ in (1, -1):
-        d = S.Ellipsoid(S.v3(0.030 * s_, 0.364, 2.140), S.v3(0.024, 0.020, 0.019)).eval(V.astype(np.float32))
+    for (sc_, sr_) in A.SOCKETS:
+        d = S.Ellipsoid(sc_, sr_).eval(V.astype(np.float32))
         sock = np.maximum(sock, (1 - ss(-0.004, 0.012, d)) * head)
     # extremities: fingers/toes darken toward the tips; knees/elbows grimy
     ext = np.zeros(nv)
@@ -477,14 +477,14 @@ def build_teeth_claws(J, high_sdf) -> tuple[bpy.types.Object, dict]:
     rng = np.random.RandomState(5)
     # needle teeth: two interlocking rows on each lip of the vertical slit
     for side, s in (('L', -1), ('R', 1)):
-        for row, (bx, by, n_, lenf) in enumerate(((0.0138, 0.349, 16, 1.0), (0.0168, 0.333, 13, 0.85))):
-            span = 2.090 - 1.992
-            zs = np.linspace(1.992, 2.090, n_) + (0.5 if (row + (s > 0)) % 2 else 0.0) * (span / n_)
+        for row, (bx, by, n_, lenf) in enumerate(((0.0162, 0.349, 17, 1.0), (0.0195, 0.332, 14, 0.85))):
+            span = 2.090 - 1.978
+            zs = np.linspace(1.978, 2.090, n_) + (0.5 if (row + (s > 0)) % 2 else 0.0) * (span / n_)
             for i, zz in enumerate(zs):
                 if zz > 2.092:
                     continue
-                mid = max(0.0, 1 - abs((zz - 2.041) / 0.052) ** 2)
-                L = (0.013 + 0.011 * mid) * lenf * (0.85 + 0.3 * rng.rand())
+                mid = max(0.0, 1 - abs((zz - 2.034) / 0.060) ** 2)
+                L = (0.015 + 0.013 * mid) * lenf * (0.85 + 0.3 * rng.rand())
                 base = S.v3(s * bx, by, zz)
                 d = S.normalize(S.v3(-s * 1.0, 0.38 + 0.25 * rng.rand() - 0.18 * row, (rng.rand() - 0.5) * 0.4))
                 tip = base + d * L

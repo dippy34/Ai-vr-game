@@ -96,7 +96,7 @@ def _case_wood():
 
 
 def _back_mat():
-    return F.mat_plain('shelf_back', hexc('3a2a1e'), 0.8, dust=0.3, grime=1.0, noise_amt=0.4)
+    return F.mat_plain('shelf_back', hexc('241a12'), 0.85, dust=0.15, grime=1.0, noise_amt=0.4)
 
 
 # --- case ---------------------------------------------------------------------------------------
@@ -291,7 +291,8 @@ def build_shelf_module_b():
     # shelf 1: sparse leaning books
     _fill(P, rng, cloth, pages, x0, x1, tops[1], gaps[1] - 0.02, 'sparse')
     # shelf 2: heap of books under the fallen shelf (lying, jumbled), a few still standing at the left
-    _fill(P, rng, cloth, pages, x0, -0.15, tops[2], gaps[2] - 0.02, 'mixed')
+    # (the fallen board slopes down to the right, so only short books fit under its high end)
+    _fill(P, rng, cloth, pages, x0, -0.24, tops[2], 0.21, 'mixed')
     zz = tops[2]
     for k in range(7):
         t = rng.uniform(0.025, 0.045)

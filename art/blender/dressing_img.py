@@ -682,13 +682,20 @@ def _roman(cv, ch, x, y, size, ang, ink):
             cv.stroke([P(u - 0.12, 0.0), P(u + 0.12, 0.0)], thin, ink, 0.95, 0.8)
 
 
-def regulator_glass(w=256, h=96, seed=4):
-    """Gold-leaf 'REGULATOR' lettering for the lower glass: RGB = gold, A in [..., 0] mask."""
+def regulator_glass(w=256, h=256, seed=4):
+    """Gold-leaf 'REGULATOR' lettering mask for the lower door pane (texture's lower half = that pane;
+    the upper half stays clear for the dial window)."""
     cv = Canvas(w, h, (0, 0, 0), seed)
-    cv.text('REGULATOR', w / 2, h * 0.68, h * 0.42, h * 0.07, (1, 1, 1), 1.0, 0.0, 1.32, align='center')
+    cv.text('REGULATOR', w / 2, h * 0.87, h * 0.055, h * 0.014, (1, 1, 1), 1.0, 0.0, 1.3, align='center',
+            fit=w * 0.74)
+    # thin gold border line around the lower pane
+    yy, xx = cv.yy, cv.xx
+    b = ((np.abs(xx - w * 0.06) < 0.8) | (np.abs(xx - w * 0.94) < 0.8)) & (yy > h * 0.53) & (yy < h * 0.95)
+    b |= ((np.abs(yy - h * 0.53) < 0.8) | (np.abs(yy - h * 0.95) < 0.8)) & (xx > w * 0.06) & (xx < w * 0.94)
+    cv.a[b] = 1.0
     m = cv.a[..., 0]
     flake = vnoise(w, h, 4, seed, 3)
-    m = m * (1 - smooth(flake, 0.62, 0.68))
+    m = m * (1 - smooth(flake, 0.7, 0.74))
     # thin border line
     return np.clip(m, 0, 1)
 

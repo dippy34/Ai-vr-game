@@ -910,7 +910,9 @@ def sweep(name, profile, path, closed=True, M=None, grain='path'):
     bm.normal_update()
     obj = _link(bm, name)
     at = obj.data.attributes.new('gc', 'FLOAT_VECTOR', 'POINT')
-    at.data.foreach_set('vector', (np.array(gcs, dtype=np.float32) + np.float32(random.uniform(-3, 3))).ravel())
+    gca = np.array(gcs, dtype=np.float32)
+    gca[:, 0] += np.float32(random.uniform(0, 3))  # offset along the path only: (d, h) stay exact
+    at.data.foreach_set('vector', gca.ravel())
     if M is not None:
         obj.data.transform(M)
     return obj

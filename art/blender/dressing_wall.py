@@ -61,15 +61,21 @@ def mat_gilt(name, *, ornament='oval', seed=0.0, dust=0.8, bole=0.5):
     rp = g.mul(g.add(g.sin(g.mul(g.add(Lc, g.mul(d, 1.5)), 2 * math.pi / 0.007)), 1.0), 0.5)
     rope = g.mul(rope, rp)
     carve = g.add(g.add(g.mul(leaf, 0.9), g.add(g.mul(vein, -0.3), pearl)), g.mul(rope, 0.6))
+    if ornament == 'shell':
+        # scallop shell: radial ribs fanning from the hinge (gc = local coords, hinge at origin)
+        ang = g.m('ARCTAN2', d, Lc)
+        rad = g.m('SQRT', g.add(g.mul(Lc, Lc), g.mul(d, d)))
+        ribs = g.mul(g.add(g.sin(g.mul(ang, 22.0)), 1.0), 0.5)
+        carve = g.add(g.mul(ribs, g.rng(rad, 0.004, 0.012)), g.mul(g.rng(rad, 0.03, 0.036), 0.0))
     # damage: chipped gesso chunks exposing dark wood
     ch = g.noise(p, 9.0, 4, 0.65, offset=(seed, 1.0, 2.0))
     chip = g.rng(g.add(ch, g.mul(g.convex(), 0.3)), 0.70, 0.72, smooth=False)
-    gold = hexc('8c6a2c')
-    tarn = hexc('4a3a1e')
+    gold = hexc('a07a34')
+    tarn = hexc('5a4624')
     tn = g.noise(p, 6.0, 3, 0.6, offset=(seed, 4.0, 0))
     col = g.mix(g.rng(tn, 0.35, 0.7), gold, tarn)
     rough = g.mixf(g.rng(tn, 0.35, 0.7), 0.32, 0.55)
-    metal = g.add(0.95, 0.0)
+    metal = g.add(0.65, 0.0)  # no env map in game: keep a diffuse share so the gilt reads
     # rubbed through on high points of the carving and convex edges
     rub = g.clamp(g.add(g.mul(carve, 0.55), g.mul(g.convex(), 0.8)))
     rubn = g.noise(p, 30.0, 3, 0.6, offset=(0, seed, 0))
@@ -91,7 +97,7 @@ def mat_gilt(name, *, ornament='oval', seed=0.0, dust=0.8, bole=0.5):
     col, rough, h = L.age(g, col, rough, h, dust=dust, grime=0.0, wear=0.0, scratch=0.15, seed=seed, film=0.18,
                           up_lo=0.15)
     metal = g.mixf(g.mul(g.up(0.15, 0.9), dust * 0.8), metal, 0.0)
-    return g.finish(col, rough, h, metal=metal, bump_dist=0.0012)
+    return g.finish(col, rough, h, metal=metal, bump_dist=0.0028)
 
 
 def mat_backing(name, seed=0.0):
@@ -208,16 +214,8 @@ def build_frame_landscape():
     M = WALL @ lean @ crooked
     frame = L.sweep('frame', prof, path, M=M)
     # subdivide the long sides a little so the carving bakes evenly (and silhouettes stay crisp)
-    P.add(frame, mat_gilt('landscape_gilt', ornament='rect', seed=3.0, bole=0.6), smooth=40, weight=1.0)
+    P.add(frame, mat_gilt('landscape_gilt', ornament='rect', seed=3.0, bole=0.35), smooth=40, weight=1.0)
     # corner cartouches (raised shells) on the four corners
-    for sx in (-1, 1):
-        for sy in (-1, 1):
-            bm = bmesh.new()
-            bmesh.ops.create_uvsphere(bm, u_segments=8, v_segments=4, radius=0.03)
-            o = L._link(bm, f'shell_{sx}_{sy}')
-            L.displace(o, lambda v: Vector((v.x * 1.0, v.y * 1.0, max(v.z, -0.002) * 0.35)))
-            L.place(o, M @ xf((sx * (W - 0.036), sy * (H - 0.036), 0.040), (0, 0, 45 * sx * sy)))
-            P.add(o, mat_gilt('landscape_gilt_c', ornament='rect', seed=4.0 + sx + sy, bole=0.7), smooth=60, weight=0.6)
     back = L.box('backboard', (2 * W - 0.01, 2 * H - 0.01, 0.006), M @ xf((0, 0, 0.004)), bevel=0.002)
     P.add(back, mat_backing('landscape_back'), weight=0.2)
     # canvas on its stretcher, painting via src UV (+ slash bump)
@@ -229,13 +227,13 @@ def build_frame_landscape():
     sl = g.sep(g.img(slash)[0])[0]
     uv = g.uv('src')
     # craquelure (fine crack network in the old varnish) + brush strokes
-    cr = g.vor(g.vmul(uv, (1.0, 0.69, 1.0)), 38.0, 'DISTANCE_TO_EDGE')
-    crack = g.rng(cr, 0.03, 0.0)
-    col = g.mix(g.mul(crack, 0.55), c, hexc('15100a'))
-    brush = g.noise(g.vmul(uv, (1.0, 6.0, 1.0)), 60.0, 3, 0.6)
-    h = g.add(g.mul(brush, 0.35), g.mul(crack, -0.5))
+    cr = g.vor(g.vmul(uv, (1.0, 0.69, 1.0)), 34.0, 'DISTANCE_TO_EDGE')
+    crack = g.mul(g.rng(cr, 0.018, 0.0), g.rng(g.noise(uv, 3.0, 2, 0.5), 0.35, 0.6))
+    col = g.mix(g.mul(crack, 0.45), c, hexc('15100a'))
+    brush = g.noise(g.vmul(uv, (1.0, 5.0, 1.0)), 28.0, 3, 0.5)
+    h = g.add(g.mul(brush, 0.25), g.mul(crack, -0.3))
     h = g.add(h, g.mul(sl, 1.2))
-    rough = g.add(g.mixf(crack, 0.42, 0.7), g.mul(g.inv(sl), 0.4))
+    rough = g.add(g.mixf(crack, 0.55, 0.75), g.mul(g.inv(sl), 0.35))
     col, rough, h = L.age(g, col, rough, h, dust=0.5, grime=0.6, wear=0.0, scratch=0.05, seed=5.0, film=0.1,
                           up_lo=0.1)
     g.finish(col, rough, h, bump_dist=0.0008)
@@ -244,3 +242,134 @@ def build_frame_landscape():
     P.add(can, mat, flat=True, uv='src', weight=3.5)
     wire_and_nail(P, H, 0.16, M)
     P.finish(previews=dict(yaw=15, pitch=5))
+
+
+# =============================================================================================
+# Pendulum regulator wall clock: stopped, glass door ajar
+# =============================================================================================
+
+def mat_clock_glass(name, letters):
+    """Dusty door glass with gold-leaf REGULATOR lettering (letters: image in src UV, R = mask)."""
+    mat = L.new_material(name)
+    g = G(mat)
+    mat['glass'] = 1
+    p = g.pos()
+    lm = g.sep(g.img(letters)[0])[0]
+    dn = g.noise(p, 5.0, 3, 0.6, offset=(2.0, 3.0, 0))
+    smear = g.noise(p, 2.0, 4, 0.7, stretch=(1.0, 3.0, 1.0))
+    d = g.clamp(g.add(g.mul(g.rng(smear, 0.4, 0.75), 0.35), g.mul(g.rng(dn, 0.5, 0.8), 0.2)))
+    # a wiped streak where someone's hand dragged across the glass
+    x, y, z = g.sep(p)
+    streak = g.mul(g.rng(g.absf(g.sub(z, g.add(0.42, g.mul(x, 0.6)))), 0.03, 0.0), g.rng(x, -0.1, 0.05))
+    d = g.mul(d, g.inv(g.mul(streak, 0.8)))
+    col = g.mix(d, hexc('1c201c'), L.DUST)
+    gold = g.mix(g.noise(p, 40.0, 2, 0.5), hexc('b8924a'), hexc('8a6a32'))
+    col = g.mix(lm, col, gold)
+    a = g.clamp(g.add(g.add(0.08, g.mul(d, 0.55)), lm))
+    r = g.mixf(d, 0.05, 0.8)
+    r = g.mixf(lm, r, 0.4)
+    return g.finish(col, r, None, alpha=a, metal=g.mul(lm, 0.3))
+
+
+def hand_outline(length, width, tail, kind):
+    """Flat clock hand outline (y along the hand). kind 'hour' = spade tip, 'minute' = slim pointer."""
+    w = width / 2
+    if kind == 'hour':
+        return [(0, -tail), (w * 0.8, -tail * 0.6), (w * 0.5, 0), (w * 0.35, length * 0.62), (w * 1.6, length * 0.72),
+                (w * 0.9, length * 0.86), (0, length), (-w * 0.9, length * 0.86), (-w * 1.6, length * 0.72),
+                (-w * 0.35, length * 0.62), (-w * 0.5, 0), (-w * 0.8, -tail * 0.6)]
+    return [(0, -tail), (w * 0.8, -tail * 0.7), (w * 0.45, 0), (w * 0.25, length * 0.85), (w * 0.7, length * 0.88),
+            (0, length), (-w * 0.7, length * 0.88), (-w * 0.25, length * 0.85), (-w * 0.45, 0), (-w * 0.8, -tail * 0.7)]
+
+
+def build_clock():
+    P = L.Piece('clock', 'wall', tex=512, glass_tex=512, max_tris=1500, ao=0.08, bevel=0.003, ao_small=0.01)
+    M = WALL @ xf((0, 0, 0)) @ Matrix.Rotation(math.radians(1.2), 4, 'Z')
+    wood = L.mat_wood('clock_wood', hexc('4a2c18'), hexc('1e1008'), gloss=0.3, ring=0.005, figure=0.7, dust=0.9,
+                      grime=0.9, wear=0.6, scratch=0.4, fade=0.15, seed=6.0, peel=0.2, peel_col=hexc('6e5034'),
+                      film=0.08)
+    dark = L.mat_plain('clock_inside', hexc('22180f'), 0.85, dust=0.4, grime=0.9, noise_amt=0.3, seed=1.0, wear=0.1)
+    brass = L.mat_metal('clock_brass', hexc('a8843e'), rough=0.36, tarnish=0.65, tarnish_col=hexc('3e3216'),
+                        dust=0.5, seed=2.0, wear=0.6)
+    steel = L.mat_metal('clock_hands', hexc('1a1816'), rough=0.45, tarnish=0.3, rust=0.25, dust=0.2, seed=3.0)
+    W, H, D = 0.30, 0.70, 0.11
+    # back board + inner back panel
+    P.add(L.box('back', (W - 0.01, H - 0.02, 0.012), M @ xf((0, 0, 0.006)), bevel=0.0), dark, weight=0.5)
+    # sides, with a small cove at the front
+    for sx in (-1, 1):
+        P.add(L.box(f'side_{sx}', (0.018, H - 0.06, D), M @ xf((sx * (W / 2 - 0.009), 0, D / 2)), bevel=0.003), wood)
+    # crown: cornice + arched pediment + three turned finials
+    P.add(L.box('cornice_a', (W + 0.04, 0.022, D + 0.025), M @ xf((0, H / 2 - 0.03, (D + 0.025) / 2)), bevel=0.004), wood)
+    P.add(L.box('cornice_b', (W + 0.06, 0.014, D + 0.035), M @ xf((0, H / 2 - 0.012, (D + 0.035) / 2)), bevel=0.003), wood)
+    arch = [(-0.15, 0.0), (0.15, 0.0)] + [(0.15 * math.cos(math.radians(a)), 0.075 * math.sin(math.radians(a)))
+                                          for a in range(15, 166, 15)]
+    o = L.prism('pediment', arch, 0.018, bevel=0.003)
+    L.place(o, M @ xf((0, H / 2 - 0.005, D - 0.01), (0, 0, 0)))
+    P.add(o, wood, weight=0.8)
+    fin = [(0, 0), (0.012, 0), (0.014, 0.008), (0.008, 0.016), (0.011, 0.028), (0.006, 0.04), (0.002, 0.05), (0, 0.052)]
+    for fx, fh in ((-0.16, 0.0), (0.16, 0.0), (0.0, 0.07)):
+        o = L.lathe(f'finial_{fx}', fin, segs=8, M=M @ xf((fx, H / 2 - 0.005 + fh, D - 0.01), (-90, 0, 0)))
+        P.add(o, wood, smooth=50, weight=0.5)
+    # base + drop finial
+    P.add(L.box('base_a', (W + 0.03, 0.02, D + 0.02), M @ xf((0, -H / 2 + 0.03, (D + 0.02) / 2)), bevel=0.004), wood)
+    P.add(L.box('base_b', (W + 0.01, 0.014, D + 0.01), M @ xf((0, -H / 2 + 0.013, (D + 0.01) / 2)), bevel=0.003), wood)
+    drop = [(0, 0), (0.012, 0.004), (0.016, 0.02), (0.01, 0.034), (0.013, 0.045), (0.018, 0.05), (0.0, 0.052)]
+    o = L.lathe('drop', drop, segs=8, M=M @ xf((0, -H / 2 + 0.006, D / 2), (90, 0, 0)))
+    P.add(o, wood, smooth=50, weight=0.5)
+    # dial board + dial + brass bezel
+    dial_y = H / 2 - 0.175
+    P.add(L.box('dial_board', (W - 0.04, 0.26, 0.012), M @ xf((0, dial_y, 0.07)), bevel=0.0), dark, weight=0.5)
+    dimg = L.np_image('clock_dial', I.clock_dial(512))
+    R = 0.108
+    pts = L.ellipse_pts(R, R, 32)
+    o = L.mesh('dial', [(x_, y_, 0.0) for x_, y_ in pts], [list(range(len(pts)))], M=M @ xf((0, dial_y, 0.078)),
+               uvs=[((x_ + R) / (2 * R), (y_ + R) / (2 * R)) for x_, y_ in pts])
+    P.add(o, L.mat_image('clock_dial', dimg, rough=0.5, dust=0.3, grime=0.6, seed=4.0), flat=True, uv='src', weight=3.2)
+    bez = [(R - 0.002, 0.0), (R + 0.006, 0.006), (R + 0.003, 0.013), (R - 0.004, 0.011)]
+    P.add(L.lathe('bezel', [(r, z) for r, z in bez], segs=24, M=M @ xf((0, dial_y, 0.075)), cap_top=False,
+                  cap_bot=False), brass, smooth=40)
+    # hands, stopped at 4:47 (hour hand just short of the V)
+    for kind, length, width, ang, z in (('hour', 0.062, 0.008, (4 + 47 / 60) / 12 * 360, 0.0805),
+                                        ('minute', 0.09, 0.006, 47 / 60 * 360, 0.082)):
+        o = L.prism(f'hand_{kind}', hand_outline(length, width, 0.016, kind), 0.0012)
+        L.place(o, M @ xf((0, dial_y, z), (0, 0, -ang)))
+        P.add(o, steel, flat=True, weight=0.6)
+    P.add(L.lathe('arbor', [(0, 0), (0.004, 0), (0.004, 0.006), (0.0025, 0.009), (0, 0.009)], segs=8,
+                  M=M @ xf((0, dial_y, 0.078))), brass, smooth=40)
+    # pendulum: flat rod + lens bob, hanging still
+    rod_top, bob_y = dial_y - 0.07, -H / 2 + 0.16
+    P.add(L.box('rod', (0.008, rod_top - bob_y, 0.002), M @ xf((0.002, (rod_top + bob_y) / 2, 0.05)), bevel=0.0005), brass,
+          weight=0.6)
+    lens = [(0.0, -0.006), (0.032, -0.0035), (0.043, 0.0), (0.032, 0.0035), (0.0, 0.006)]
+    o = L.lathe('bob', lens, segs=14, M=M @ xf((0.002, bob_y, 0.05)))
+    P.add(o, brass, smooth=50, weight=1.2)
+    # door (frame + glass), hinged on the left, standing ajar ~24 degrees
+    dw, dh, fw, ft = W - 0.012, H - 0.075, 0.024, 0.016
+    hinge = Matrix.Translation((-dw / 2, 0, D + ft / 2)) @ Matrix.Rotation(math.radians(-36), 4, 'Y') \
+        @ Matrix.Translation((dw / 2, 0, -(D + ft / 2)))
+    DM = M @ hinge
+    for nm, sz, loc in (('door_l', (fw, dh, ft), (-dw / 2 + fw / 2, 0, D + ft / 2)),
+                        ('door_r', (fw, dh, ft), (dw / 2 - fw / 2, 0, D + ft / 2)),
+                        ('door_t', (dw - 2 * fw, fw, ft), (0, dh / 2 - fw / 2, D + ft / 2)),
+                        ('door_b', (dw - 2 * fw, fw, ft), (0, -dh / 2 + fw / 2, D + ft / 2)),
+                        ('door_m', (dw - 2 * fw, fw * 0.8, ft * 0.8), (0, dial_y - 0.135, D + ft / 2))):
+        P.add(L.box(nm, sz, DM @ xf(loc), bevel=0.003), wood, weight=0.8)
+    # tiny brass knob + keyhole escutcheon on the free edge
+    P.add(L.lathe('knob', [(0, 0), (0.006, 0), (0.007, 0.006), (0.004, 0.012), (0, 0.013)], segs=8,
+                  M=DM @ xf((dw / 2 - fw / 2, -0.02, D + ft))), brass, smooth=40)
+    letters = L.np_image('clock_regulator', I.regulator_glass(256, 256), non_color=True)
+    gm = mat_clock_glass('clock_glass', letters)
+    gx0, gx1 = -dw / 2 + fw * 0.6, dw / 2 - fw * 0.6
+    # upper pane (dial window) and lower pane (pendulum window, gold lettering near its bottom)
+    up0, up1 = dial_y - 0.135, dh / 2 - fw * 0.6
+    lo0, lo1 = -dh / 2 + fw * 0.6, dial_y - 0.135
+    gz = D + ft * 0.4
+    pane = L.grid('pane_up', 1, 1, lambda u, v: (gx0 + (gx1 - gx0) * u, up0 + (up1 - up0) * v, gz), M=DM)
+    for d_ in pane.data.uv_layers['src'].data:
+        d_.uv = (d_.uv[0], 0.5 + d_.uv[1] * 0.5)  # upper half of the glass texture: no letters
+    P.add(pane, gm, flat=True, uv='src')
+    pane = L.grid('pane_lo', 1, 1, lambda u, v: (gx0 + (gx1 - gx0) * u, lo0 + (lo1 - lo0) * v, gz), M=DM)
+    for d_ in pane.data.uv_layers['src'].data:
+        d_.uv = (d_.uv[0], d_.uv[1] * 0.5)
+    P.add(pane, gm, flat=True, uv='src')
+    P.finish(previews=dict(yaw=28, pitch=6, extra=[dict(tag='front', yaw=0, pitch=0, zoom=1.0)]))

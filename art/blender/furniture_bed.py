@@ -42,10 +42,10 @@ def build_bed():
     brass = F.mat_metal('bed_brass', hexc('94733a'), rough=0.38, metal=0.85, tarnish=0.75,
                         tarnish_col=hexc('2e2914'), pitting=0.4)
     ticking = F.mat_fabric('bed_mattress', hexc('968c74'), hexc('7a705a'), stripe=(hexc('3e4658'), 0.032, 0.18, 'X'),
-                           fade=0.1, stains=2.0, dust=0.5, grime=1.0, wear=0.3, mold=0.9, rust_spots=1.0, seed=3.0,
+                           fade=0.1, stains=1.25, dust=0.5, grime=1.0, wear=0.3, mold=0.9, rust_spots=1.0, seed=3.0,
                            foam=hexc('7a6a48'), use_col=hexc('6a5224'))
-    sheet_m = F.mat_fabric('bed_sheet', hexc('9a958a'), hexc('7f7a6e'), fade=0.1, stains=1.3, dust=0.6, grime=1.0,
-                           wear=0.1, seed=6.0, weave=0.6, mold=0.4)
+    sheet_m = F.mat_fabric('bed_sheet', hexc('8a857a'), hexc('6f6a5e'), fade=0.1, stains=1.4, dust=0.6, grime=1.0,
+                           wear=0.1, seed=6.0, weave=0.6, mold=0.5, ao_dist=0.08)
     pillow_m = F.mat_fabric('bed_pillow', hexc('a49a80'), hexc('8a7f66'), fade=0.1, stains=1.0, dust=0.5,
                             grime=1.0, wear=0.1, seed=9.0, weave=0.5)
     spring_m = F.mat_wiremesh('bed_spring')
@@ -132,9 +132,12 @@ def build_bed():
             return (cx + math.cos(a) * (arc_r + 0.008), y, cz + math.sin(a) * (arc_r + 0.008) * 1.0 + 0.0)
         t = (u - 0.45) / 0.55
         x = x_edge + t * top_len
-        bunch = 0.025 * math.exp(-((t - 0.92) / 0.08) ** 2) * (1.0 + 0.6 * math.sin(y * 9.0))
-        return (x, y, _mattress_top(x, y) + 0.012 + bunch + 0.01 * math.sin(x * 11 + y * 5))
+        # the far edge is bunched up into a ridge of folds; long soft ripples across the rest
+        bunch = 0.05 * math.exp(-((t - 0.9) / 0.09) ** 2) * (1.0 + 0.7 * math.sin(y * 9.0 + 1.3))
+        ripple = 0.018 * max(0.0, math.sin(x * 7.0 + y * 4.0 + 0.5 * math.sin(y * 3.0))) ** 2
+        ripple += 0.012 * max(0.0, math.sin(x * 3.1 - y * 8.5)) ** 3
+        return (x, y, _mattress_top(x, y) + 0.01 + bunch + ripple)
 
-    P.sheet(sheet_fn, 16, 11, (0, 0, 0), sheet_m, hi_mult=7, thickness=0.0, folds=0.012, seed=5, name='sheet',
+    P.sheet(sheet_fn, 18, 13, (0, 0, 0), sheet_m, hi_mult=7, thickness=0.0, folds=0.02, seed=5, name='sheet',
             ext=0.045)
     P.finish(tex=1024, max_tris=3000, fit=(1.6, MTOP, 2.1), preview_yaw=40, preview_pitch=22)

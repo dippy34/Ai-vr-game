@@ -52,7 +52,7 @@ def bone_specs(J) -> list[tuple]:
         B.append((f'jaw_{side}', V((0.016 * s * k, 0.294 * k, 2.052 * k)), V((0.009 * s * k, 0.358 * k, 2.036 * k)), 'jaw', V((0, 0, 1)), False))
     for side in ('L', 'R'):
         base, u, nrm = J[side]['ear']
-        B.append((f'ear_{side}', V(base), V(base + u * 0.10), 'head', V(nrm), False))
+        B.append((f'ear_{side}', V(base), V(base + u * 0.13 * J['scale']), 'head', V(nrm), False))
     for side in ('L', 'R'):
         R = J[side]
         sf = f'_{side}'
@@ -217,7 +217,7 @@ def skin(mesh: bpy.types.Object, arm: bpy.types.Object, labels: np.ndarray, J, e
     # --- hand-authored: split jaw -----------------------------------------------------------
     x, y, z = (co / J['scale']).T     # jaw region is defined in design units
     head_lab = np.isin(labels, [A.LAB['head'], A.LAB['jaw_L'], A.LAB['jaw_R'], A.LAB['neck']])
-    f_jaw = _smooth01(0.288, 0.318, y) * _smooth01(2.104, 2.082, z) * _smooth01(1.955, 1.975, z) * (np.abs(x) < 0.05) * head_lab
+    f_jaw = _smooth01(0.288, 0.318, y) * _smooth01(2.104, 2.082, z) * _smooth01(1.940, 1.962, z) * (np.abs(x) < 0.05) * head_lab
     f_jaw *= _smooth01(0.050, 0.032, np.abs(x))
     side_L = _smooth01(-0.0005, -0.0045, x)
     side_R = _smooth01(0.0005, 0.0045, x)
@@ -624,6 +624,23 @@ def _hand_world(P: Poser, J, side, fwd: Vector, palm: Vector):
     P.orient('hand_' + side, Rm)
 
 
+def _lowest_finger(P: Poser, side) -> float:
+    P.fk()
+    return min(P.tail(f'{f}_{i}_{side}').z for f in A.FINGERS for i in (1, 2, 3))
+
+
+def _arm_floor(P: Poser, J, side, tgt: Vector, pole: Vector, hand_fn, clearance=0.03):
+    """Arm IK to `tgt`, then hand/fingers via hand_fn(); lift the wrist if any finger (claws
+    included via `clearance`) would go through the floor."""
+    for _ in range(3):
+        P.limb_ik('upper_arm_' + side, 'forearm_' + side, tgt, pole)
+        hand_fn()
+        low = _lowest_finger(P, side) - clearance * J['scale']
+        if low >= 0:
+            break
+        tgt = tgt + Vector((0, 0, -low + 0.002))
+
+
 def _hand(P: Poser, side, rx=0.0, ry=0.0, rz=0.0):
     P.set_local('hand_' + side, q_euler(rx, ry, rz))
     P.fk()
@@ -692,29 +709,35 @@ def pose_walk(P: Poser, J, t, T=1.4):
 
 
 def pose_run(P: Poser, J, t, T=22 / 30):
-    """Loping lunge-run at 3.1 m/s: body thrown forward and low, head thrust out, both arms
-    reaching ahead and clawing alternately, long bounding strides with a flight phase."""
+    """Four-limbed loping chase at 3.1 m/s: body thrown forward and low, head up and thrust out,
+    long bounding strides; the arms swing low in alternation, knuckles and claws brushing just
+    above the floor, elbows splayed like a spider's."""
     ph = t / T
     w = 2 * math.pi * ph
     k = J['scale']
-    g = Gait(J, 3.1, T, 0.36, 0.22 * k, stride_offset=0.10 * k, toe_drop=-45, width=0.04 * k)
+    g = Gait(J, 3.1, T, 0.36, 0.20 * k, stride_offset=0.06 * k, toe_drop=-45, width=0.05 * k)
     P.reset()
     bob = math.cos(w * 2)
-    _hips(P, (0.015 * math.sin(w), 0.06 * k, -0.14 * k + 0.035 * bob), pitch=24, yaw=8 * math.sin(w), roll=-4 * math.sin(w))
-    _spine(P, pitch=(8, 12, 14 + 4 * bob), yaw=(-4 * math.sin(w), -6 * math.sin(w), -7 * math.sin(w)),
+    _hips(P, (0.015 * math.sin(w), 0.03 * k, -0.20 * k + 0.03 * bob), pitch=34, yaw=6 * math.sin(w), roll=-4 * math.sin(w))
+    _spine(P, pitch=(10, 14, 14 + 4 * bob), yaw=(-4 * math.sin(w), -5 * math.sin(w), -6 * math.sin(w)),
            roll=(2 * math.sin(w), 0, 0), breathe=0.5 + 0.5 * bob)
-    _neck_head(P, neck=(6 - 3 * bob, 0, 0), neck2=(-4, 0, 0), head=(-34 + 4 * bob, 3 * math.sin(w), 0))
-    _jaw(P, open_=8 + 5 * bob)
-    _ears(P, L=(18, 0, 0), R=(18, 0, 0))
+    _neck_head(P, neck=(-10 - 3 * bob, 0, 0), neck2=(-8, 0, 0), head=(-34 + 4 * bob, 3 * math.sin(w), 0))
+    _jaw(P, open_=9 + 6 * bob)
+    _ears(P, L=(20, 0, 0), R=(20, 0, 0))
+    _shoulders(P, L=(8, 0, 0), R=(8, 0, 0))
     for side, s in (('L', -1), ('R', 1)):
-        sw = math.sin(w + (math.pi if side == 'L' else 0))
-        P.fk()
-        S0 = P.unposed('upper_arm_' + side).translation
-        reach = (P.length['upper_arm_' + side] + P.length['forearm_' + side]) * 0.93
-        d = Vector((s * 0.22, 0.75 + 0.45 * sw, -0.62 + 0.25 * sw)).normalized()
-        P.limb_ik('upper_arm_' + side, 'forearm_' + side, S0 + d * reach, Vector((s * 0.8, -0.4, 0.6)))
-        _hand(P, side, rx=-15 - 15 * sw, ry=s * -20)
-        _fingers(P, side, curl=10 + 25 * max(0, -sw), spread=10)
+        pa = 2 * math.pi * (ph + (0.5 if side == 'L' else 0.0) + 0.08)
+        front = 0.5 + 0.5 * math.cos(pa)                       # 1 = hand fully forward (lowest)
+        tgt = Vector((s * 0.30 * k, (0.12 + 0.62 * front) * k, (0.40 - 0.24 * front + 0.05 * max(0.0, math.sin(pa))) * k))
+        c = 30 + 22 * front
+
+        def hand_fn(side=side, s=s, front=front, c=c):
+            _hand_world(P, J, side, Vector((s * 0.15, 0.55 + 0.35 * front, -1.0)), Vector((0, -1.0, 0.25)))
+            for i, f in enumerate(A.FINGERS):                   # claws curled under, knuckles leading
+                P.set_local(f'{f}_1_{side}', q_euler(c * 0.6, 0, (i - 2) * 3 * s))
+                P.set_local(f'{f}_2_{side}', q_euler(c))
+                P.set_local(f'{f}_3_{side}', q_euler(c * 0.7))
+        _arm_floor(P, J, side, tgt, Vector((s * 0.9, -0.3, 0.6)), hand_fn, clearance=0.012)
     _legs(P, g, ph, ph + 0.5, knee_out=0.30)
 
 
@@ -800,13 +823,15 @@ def pose_feed(P: Poser, J, t, T=2.4):
     for side, s in (('L', -1), ('R', 1)):
         P.fk()
         tgt = Vector((s * 0.26, 0.50 + 0.03 * s, 0.050 + 0.012 * max(0, math.sin(w * 2 + s)))) * k
-        P.limb_ik('upper_arm_' + side, 'forearm_' + side, tgt, Vector((s * 1.0, -0.2, 0.8)))
-        _hand_world(P, J, side, Vector((s * 0.35, 1.0, 0.10)), Vector((0, 0.1, -1)))
         c = 10 * tear * (1 if s > 0 else 0.5)
-        for i, f in enumerate(A.FINGERS):     # spider-arched fingers: knuckles up, claw tips down
-            P.set_local(f'{f}_1_{side}', q_euler(-18 + c * 0.3, 0, (i - 2) * 4 * s))
-            P.set_local(f'{f}_2_{side}', q_euler(30 + c))
-            P.set_local(f'{f}_3_{side}', q_euler(26 + c))
+
+        def hand_fn(side=side, s=s, c=c):
+            _hand_world(P, J, side, Vector((s * 0.35, 1.0, 0.10)), Vector((0, 0.1, -1)))
+            for i, f in enumerate(A.FINGERS):     # spider-arched fingers: knuckles up, claw tips down
+                P.set_local(f'{f}_1_{side}', q_euler(-18 + c * 0.3, 0, (i - 2) * 4 * s))
+                P.set_local(f'{f}_2_{side}', q_euler(30 + c))
+                P.set_local(f'{f}_3_{side}', q_euler(26 + c))
+        _arm_floor(P, J, side, tgt, Vector((s * 1.0, -0.2, 0.8)), hand_fn, clearance=0.006)
     _plant(P, J, 'L', -1, dy=0.02 * k, dx=0.06, knee_out=0.5)
     _plant(P, J, 'R', 1, dy=-0.06 * k, dx=0.06, knee_out=0.5, pitch=-10)
 

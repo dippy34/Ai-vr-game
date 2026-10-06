@@ -221,11 +221,17 @@ class ModelBody {
   }
 }
 
+/**
+ * How the holder's hand is posed: 'grip' = a VR hand/controller (natural handshake orientation,
+ * thumb up), 'palmDown' = a desktop player's resting hand (palm down, back of the hand up).
+ */
+export type HoldStyle = 'grip' | 'palmDown';
+
 export interface Prop {
   readonly group: THREE.Group;
   /** Update the glint for the viewer distance. */
   setGlint(distance: number): void;
-  placeInHand(hand: Handedness, wristPos: THREE.Vector3, wristQuat: THREE.Quaternion): void;
+  placeInHand(hand: Handedness, wristPos: THREE.Vector3, wristQuat: THREE.Quaternion, style?: HoldStyle): void;
   placeInWorld(x: number, y: number, z: number, yaw: number): void;
   dispose(): void;
 }
@@ -284,6 +290,11 @@ export class FuseProp implements Prop {
     this.group.add(new THREE.Mesh(r.fuseMetal, r.metalMat), new THREE.Mesh(r.fuseCore, this.coreMat), glass);
   }
 
+  /** True when this is the Blender model (long axis = Y), false for the procedural one (axis X). */
+  get modelled(): boolean {
+    return this.model !== null;
+  }
+
   setGlint(distance: number): void {
     const k = glintFactor(distance);
     if (this.coreMat) this.coreMat.emissiveIntensity = 0.9 * k;
@@ -293,7 +304,8 @@ export class FuseProp implements Prop {
   placeInHand(hand: Handedness, p: THREE.Vector3, q: THREE.Quaternion): void {
     if (this.model) {
       // Lying across the palm, the fingers closing around it.
-      placeHeld(this.group, hand, p, q, ACROSS_PALM[hand], ZERO, [0.004, PALM_Y - this.radius - 0.002, -0.06]);
+      // Shifted toward the thumb so one end pokes out past it (visible, like gripping a stick).
+      placeHeld(this.group, hand, p, q, ACROSS_PALM[hand], ZERO, [-0.022, PALM_Y - this.radius - 0.002, -0.058]);
       return;
     }
     placeHand(this.group, hand, p, q, [0.002, -0.03, -0.058], IDENT);
@@ -353,7 +365,7 @@ export class FilmProp implements Prop {
 
   placeInHand(hand: Handedness, p: THREE.Vector3, q: THREE.Quaternion): void {
     if (this.model) {
-      placeHeld(this.group, hand, p, q, ACROSS_PALM[hand], this.hold, [0.004, PALM_Y - this.radius - 0.002, -0.06]);
+      placeHeld(this.group, hand, p, q, ACROSS_PALM[hand], this.hold, [-0.03, PALM_Y - this.radius - 0.002, -0.058]);
       return;
     }
     placeHand(this.group, hand, p, q, [-0.025, -0.032, -0.058], ROT_Z_NEG90);
@@ -390,6 +402,8 @@ export class CameraProp implements Prop {
   private readonly rest: THREE.Vector3 | null = null;
   /** Model points that rest in the palm, per hand (the end of the body on that hand's side). */
   private readonly grip: Record<Handedness, THREE.Vector3> | null = null;
+  /** Palm-down holds: the point on top of the camera under the palm, per hand. */
+  private readonly top: Record<Handedness, THREE.Vector3> | null = null;
   private readonly ownGeo: THREE.BufferGeometry[] = [];
 
   constructor(lib: ModelLibrary | null = null) {
@@ -434,6 +448,13 @@ export class CameraProp implements Prop {
       this.grip = {
         right: new THREE.Vector3(b.max.x, 0, b.min.z),
         left: new THREE.Vector3(b.min.x, 0, b.min.z),
+      };
+      // Palm-down: the hand on top of the end on its side, the body reaching toward the other hand.
+      const zc = (b.min.z + b.max.z) / 2;
+      const xr = b.max.x - 0.04, xl = b.min.x + 0.04;
+      this.top = {
+        right: new THREE.Vector3(xr, topAt(root, xr, zc, b) ?? b.max.y, zc),
+        left: new THREE.Vector3(xl, topAt(root, xl, zc, b) ?? b.max.y, zc),
       };
     } else {
       const r = res();
@@ -528,7 +549,12 @@ export class CameraProp implements Prop {
     void distance;
   }
 
-  placeInHand(hand: Handedness, p: THREE.Vector3, q: THREE.Quaternion): void {
+  placeInHand(hand: Handedness, p: THREE.Vector3, q: THREE.Quaternion, style: HoldStyle = 'grip'): void {
+    if (this.top && style === 'palmDown') {
+      // Upright under a palm-down hand, gripped from above (lens along the fingers).
+      placeHeld(this.group, hand, p, q, IDENT, this.top[hand], [0, PALM_Y + 0.004, -0.065]);
+      return;
+    }
     // Held by its right/left end, lens along the fingers (-Z), top toward the thumb.
     if (this.grip) {
       placeHeld(this.group, hand, p, q, CAM_HOLD[hand], this.grip[hand], [0, PALM_Y, CAM_FRONT_Z]);
@@ -549,6 +575,14 @@ export class CameraProp implements Prop {
     for (const g of this.ownGeo) g.dispose();
     this.model?.dispose();
   }
+}
+
+/** Height of the model's top surface at (x, z) (model frame), by raycasting down. */
+function topAt(root: THREE.Object3D, x: number, z: number, b: THREE.Box3): number | null {
+  root.updateMatrixWorld(true);
+  const rc = new THREE.Raycaster(new THREE.Vector3(x, b.max.y + 0.1, z), new THREE.Vector3(0, -1, 0));
+  const hit = rc.intersectObject(root, true)[0];
+  return hit ? hit.point.y : null;
 }
 
 /**
