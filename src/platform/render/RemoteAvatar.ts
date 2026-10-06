@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { Handedness, PlayerPose, PlayerStatus } from '../../core/types';
-import { HandModel } from './HandModel';
+import type { Hand, HandFactory } from './hands';
 import { damp, ensureIndexed, paint, positionNormalOnly, setQ, setV } from './util';
 
 const HEAD_CENTER = new THREE.Vector3(0, 0.028, 0.07);
@@ -80,8 +80,8 @@ const _fwd = new THREE.Vector3();
 
 export class RemoteAvatar {
   readonly group = new THREE.Group();
-  readonly left: HandModel;
-  readonly right: HandModel;
+  readonly left: Hand;
+  readonly right: Hand;
   readonly headPos = new THREE.Vector3();
   readonly headQuat = new THREE.Quaternion();
   readonly hands: Record<Handedness, SmoothHand>;
@@ -98,15 +98,15 @@ export class RemoteAvatar {
   private readonly handMat: THREE.MeshLambertMaterial;
   private color = -1;
 
-  constructor(readonly id: string, color: number, private readonly ghostMat: THREE.Material) {
+  constructor(readonly id: string, color: number, private readonly ghostMat: THREE.Material, hands: HandFactory) {
     this.group.name = `avatar-${id}`;
     this.head = new THREE.Mesh(headParts(color, true), this.headMat);
     this.torso = new THREE.Mesh(torsoGeometry(color), this.torsoMat);
     // Gloves tinted toward the player's color so you can tell who is signing in the flash.
     const glove = new THREE.Color(0x7d6e63).lerp(new THREE.Color(color), 0.3);
     this.handMat = new THREE.MeshLambertMaterial({ color: glove });
-    this.left = new HandModel('left', this.handMat);
-    this.right = new HandModel('right', this.handMat);
+    this.left = hands.create('left', this.handMat);
+    this.right = hands.create('right', this.handMat);
     this.group.add(this.head, this.torso, this.left.mesh, this.right.mesh);
     const mk = (): SmoothHand => ({ pos: new THREE.Vector3(), quat: new THREE.Quaternion(), curls: [0, 0, 0, 0, 0], tracked: false });
     this.hands = { left: mk(), right: mk() };

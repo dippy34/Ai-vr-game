@@ -10,7 +10,7 @@ import type {
 } from '../../core/types';
 import type { IGameRenderer, RenderContext } from '../types';
 import { FlashEffect } from './FlashEffect';
-import { HandModel } from './HandModel';
+import { HandFactory, type Hand } from './hands';
 import { LevelView } from './LevelView';
 import { MessagePanel } from './MessagePanel';
 import { MonsterModel } from './MonsterModel';
@@ -38,7 +38,7 @@ const NEAR_LIGHT = { intensity: 0.016, distance: 2.2, decay: 2 };
 const FOG_COLOR = 0x04060b;
 const AFTERIMAGE_MIN_DOT = 0.1;
 /** GLB models the renderer knows how to use (public/models/<name>.glb). */
-const MODEL_NAMES = ['monster', ...FURNITURE_MODEL_NAMES];
+const MODEL_NAMES = ['monster', 'hand_left', 'hand_right', ...FURNITURE_MODEL_NAMES];
 
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
@@ -56,8 +56,10 @@ export class GameRenderer implements IGameRenderer {
   private level: LevelView | null = null;
   private levelData: LevelData | null = null;
   private readonly localHandMat: THREE.MeshLambertMaterial;
-  private readonly localLeft: HandModel;
-  private readonly localRight: HandModel;
+  private localLeft: Hand;
+  private localRight: Hand;
+  /** Makes GLB hands once loaded, procedural ones until then. */
+  private readonly hands = new HandFactory();
   private readonly ghostMat: THREE.MeshBasicMaterial;
   private readonly avatars = new Map<PlayerId, RemoteAvatar>();
   private readonly pendingPoses = new Map<PlayerId, PlayerPose>();
@@ -114,8 +116,8 @@ export class GameRenderer implements IGameRenderer {
 
     // Local hands: faintly self-lit so you can see your own hands in the dark.
     this.localHandMat = new THREE.MeshLambertMaterial({ color: 0xb8a493, emissive: 0x16120f, emissiveIntensity: 1 });
-    this.localLeft = new HandModel('left', this.localHandMat);
-    this.localRight = new HandModel('right', this.localHandMat);
+    this.localLeft = this.hands.create('left', this.localHandMat);
+    this.localRight = this.hands.create('right', this.localHandMat);
     this.localLeft.visible = this.localRight.visible = false;
     this.dynamic.add(this.localLeft.mesh, this.localRight.mesh);
 
@@ -154,6 +156,24 @@ export class GameRenderer implements IGameRenderer {
       old.dispose();
       this.monster = next;
       this.dynamic.add(next.object);
+    }
+    // Rigged hands: replace the local ones; remote avatars get rebuilt with them next frame.
+    if (this.hands.use(this.models)) {
+      for (const side of ['left', 'right'] as const) {
+        const old = side === 'left' ? this.localLeft : this.localRight;
+        const next = this.hands.create(side, this.localHandMat);
+        next.visible = old.visible;
+        this.dynamic.remove(old.mesh);
+        old.dispose();
+        this.dynamic.add(next.mesh);
+        if (side === 'left') this.localLeft = next;
+        else this.localRight = next;
+      }
+      for (const av of this.avatars.values()) {
+        this.dynamic.remove(av.group);
+        av.dispose();
+      }
+      this.avatars.clear();
     }
     // A level built before the models arrived gets rebuilt with them.
     if (this.levelData && this.models.names().some((n) => n.startsWith('furniture_'))) this.loadLevel(this.levelData);
@@ -236,7 +256,7 @@ export class GameRenderer implements IGameRenderer {
       const p = state.players[id];
       let av = this.avatars.get(id);
       if (!av) {
-        av = new RemoteAvatar(id, p.color, this.ghostMat);
+        av = new RemoteAvatar(id, p.color, this.ghostMat, this.hands);
         this.avatars.set(id, av);
         this.dynamic.add(av.group);
         const pending = this.pendingPoses.get(id);
@@ -367,10 +387,10 @@ export class GameRenderer implements IGameRenderer {
         if (k <= 0) continue;
         setQ(_q, h.rotation);
         let from = parts.length;
-        HandModel.bakePose(side, _a, _q, h.curls, parts, 1.04);
+        this.hands.bakePose(side, _a, _q, h.curls, parts, 1.04);
         push(parts, from, k);
         from = halo.length;
-        HandModel.bakePose(side, _a, _q, h.curls, halo, 1.45);
+        this.hands.bakePose(side, _a, _q, h.curls, halo, 1.45);
         push(halo, from, k);
       }
     }

@@ -582,7 +582,7 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
     for pi_, (_, wt, _) in enumerate(pre):
         ring = rings_th[1 + pi_]
         for i, vid in enumerate(ring):
-            g = {HOLE[0]: 0.35 + 0.3 * pi_, HOLE[0] + 1: 0.65 + 0.2 * pi_}.get(ring_r[i], 1.0)
+            g = {HOLE[0]: 0.12 + 0.16 * pi_, HOLE[0] + 1: 0.45 + 0.2 * pi_, HOLE[0] + 2: 0.85}.get(ring_r[i], 1.0)
             w = wt * g
             hm.weights[vid] = {'thumb_1': w, 'wrist': 1 - w}
 

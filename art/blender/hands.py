@@ -7,9 +7,14 @@ Pipeline (all code, no GUI):
   2. Low-poly object + armature (bones wrist, thumb_1..3, index_1..3, middle_1..3, ring_1..3,
      pinky_1..3). Every bone's local +Z points toward the palm (the direction it bends), so a curl
      is a positive rotation about the bone's local X axis.
-  3. High-poly = low-poly subdivided + procedural sculpt detail (nails, knuckle wrinkles, palm
-     creases, tendons, veins, knit cuff) -> baked to color / roughness / normal (1024, WebP).
-  4. Mirror to the left hand, export both, render posed previews.
+  3. Texel-space "sculpt" (hands_tex + hands_detail): every texel is baked to its 3D position, then
+     analytic anatomy functions give height / albedo / roughness (nails, knuckle wrinkles, flexion
+     and palm creases, tendons, veins, weathering, knit cuff); the height becomes a MikkTSpace
+     tangent normal map. One material: color / roughness / normal 1024 px (WebP in the GLB).
+  4. Mirror to the left hand (exact mirror, flipped winding), export both, render posed previews.
+
+Dev stages (HANDS_STAGE): shape | pose | tex (review renders into HANDS_SCRATCH), export (no
+previews), full (default).
 
 Canonical frame (three.js): origin = wrist, fingers -Z, back of hand +Y, thumb -X (right) / +X
 (left). Blender: fingers +Y, back +Z, right thumb -X.
@@ -35,7 +40,7 @@ import hands_tex as ht  # noqa: E402
 import hands_util as hu  # noqa: E402
 import numpy as np  # noqa: E402
 
-STAGE = os.environ.get('HANDS_STAGE', 'full')  # 'shape' = quick geometry review renders only
+STAGE = os.environ.get('HANDS_STAGE', 'full')
 SCRATCH = os.environ.get('HANDS_SCRATCH', os.path.join(common.REPO, 'art', 'previews'))
 
 BONES = ['wrist'] + [f'{f}_{i}' for f in ('thumb', 'index', 'middle', 'ring', 'pinky') for i in (1, 2, 3)]
@@ -47,7 +52,7 @@ CURL_ANGLES = {
     'middle': [1.55, 1.80, 1.22],
     'ring': [1.60, 1.80, 1.20],
     'pinky': [1.66, 1.76, 1.15],
-    'thumb': [None, 0.80, 1.05],  # thumb_1 uses its own oblique axis (see thumb_curl)
+    'thumb': [None, 0.80, 1.05],  # thumb_1 uses its own oblique axis (see thumb_curl_rotation)
 }
 
 
