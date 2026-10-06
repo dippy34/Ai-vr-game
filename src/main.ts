@@ -35,8 +35,9 @@ ui.showTitle();
 audio.setMicSensitivity(ui.micSensitivity);
 ui.onMicSensitivity = (db) => audio.setMicSensitivity(db);
 
-// Dev-only handle for automated browser tests and console poking.
-if (import.meta.env.DEV) {
+// Handle for automated browser tests and console poking: dev server, or a build made with
+// VITE_TEST_HOOKS=1 (never set for real deploys).
+if (import.meta.env.DEV || import.meta.env.VITE_TEST_HOOKS === '1') {
   (window as unknown as { __mute: unknown }).__mute = { renderer, input, audio, ui, game };
 }
 
