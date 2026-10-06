@@ -121,6 +121,8 @@ export interface IAudioManager {
    * to other players as voice, or null if denied/unavailable. Starts the loudness meter.
    */
   startMic(): Promise<MediaStream | null>;
+  /** Level geometry, so walls can muffle the monster and voices in other rooms (null = none). */
+  setLevel(level: LevelData | null): void;
   /** Smoothed local mic loudness 0..1 using the MIC config mapping. 0 below MIC.gate or without a mic. */
   getMicLevel(): number;
   /** Spatialize another player's voice. */

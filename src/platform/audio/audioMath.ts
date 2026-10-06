@@ -210,3 +210,14 @@ export function makeDriveCurve(drive: number, samples = 1024): Float32Array<Arra
   }
   return curve;
 }
+
+/**
+ * How much walls between a sound and the listener muffle it: [gain multiplier, lowpass Hz].
+ * One wall = clearly "next room"; three or more = a distant thump through the house.
+ */
+export function occlusionMix(walls: number, nyquist: number): [number, number] {
+  if (!(walls > 0)) return [1, nyquist];
+  if (walls < 2) return [0.55, 1500];
+  if (walls < 3) return [0.35, 750];
+  return [0.22, 450];
+}

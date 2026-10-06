@@ -14,7 +14,8 @@
 
 import { PLAYER } from '../../config';
 import { dist3, distXZ } from '../../core/math';
-import type { GamePhase, HeadPose, PlayerId, SimEvent, Vec3, WorldState } from '../../core/types';
+import { wallsBetween } from '../../core/physics';
+import type { GamePhase, HeadPose, LevelData, PlayerId, SimEvent, Vec3, WorldState } from '../../core/types';
 import type { IAudioManager } from '../types';
 import { headVectors, heartbeatIntensity } from './audioMath';
 import { Ambience } from './ambience';
@@ -62,6 +63,7 @@ export class AudioManager implements IAudioManager {
   private phase: GamePhase | null = null;
   private listener: Vec3 = { x: 0, y: PLAYER.eyeHeight, z: 0 };
   private warned = false;
+  private level: LevelData | null = null;
 
   // -------------------------------------------------------------------------------------------
   // Lifecycle
@@ -184,6 +186,11 @@ export class AudioManager implements IAudioManager {
   // Per frame
   // -------------------------------------------------------------------------------------------
 
+  /** The level geometry, so walls can muffle the monster and voices in other rooms. */
+  setLevel(level: LevelData | null): void {
+    this.level = level;
+  }
+
   update(state: WorldState, localId: PlayerId, head: HeadPose, dt: number): void {
     const e = this.live();
     try {
@@ -209,9 +216,13 @@ export class AudioManager implements IAudioManager {
 
       const m = state.monster;
       const fear = m && state.phase === 'playing' ? heartbeatIntensity(distXZ(head.position, m.position), m.alert) : 0;
+      const level = this.level;
+      const opts = { exitOpen: !!state.exitOpen };
+      const wallsTo = (p: Vec3): number => (level ? wallsBetween(level, this.listener, p, opts) : 0);
+      if (m) this.monster?.setOcclusion(wallsTo({ x: m.position.x, y: m.position.y + 2, z: m.position.z }), now);
       this.monster?.update(state, step, now);
       this.heart?.update(state.phase === 'playing' && status === 'alive' && !this.ghost, fear, step, now);
-      this.remotes?.update(state, localId, this.listener, step, now, this.ghost);
+      this.remotes?.update(state, localId, this.listener, step, now, this.ghost, wallsTo);
       this.ambience?.update(this.listener, now, fear);
     } catch (err) {
       this.warn('update failed', err);

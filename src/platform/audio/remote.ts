@@ -8,7 +8,7 @@
  */
 
 import { NOISE } from '../../config';
-import { headVectors, footstepLoudness, smoothFactor } from './audioMath';
+import { headVectors, footstepLoudness, occlusionMix, smoothFactor } from './audioMath';
 import { SPATIAL, approach, makePanner, setPannerOrientation, setPannerPosition, type Engine } from './engine';
 import { sfxWoodStep } from './sfx';
 import type { PlayerId, PlayerStatus, Vec3, WorldState } from '../../core/types';
@@ -116,7 +116,16 @@ export class RemotePlayers {
     }
   }
 
-  update(state: WorldState, localId: PlayerId, listener: Vec3, dt: number, now: number, localGhost: boolean): void {
+  update(
+    state: WorldState,
+    localId: PlayerId,
+    listener: Vec3,
+    dt: number,
+    now: number,
+    localGhost: boolean,
+    /** Walls between the listener and a point (muffles voices in other rooms). */
+    wallsTo: (p: Vec3) => number = () => 0,
+  ): void {
     this.listener = listener;
     const players = state.players ?? {};
     const k = smoothFactor(12, dt);
@@ -131,7 +140,11 @@ export class RemotePlayers {
         setPannerPosition(v.panner, v.pos);
         setPannerOrientation(v.panner, headVectors(p.pose.head.rotation).forward);
       }
-      const [g, lpHz, hpHz] = voiceMix(p?.status, localGhost, this.eng.nyquistSafe);
+      const [g0, lp0, hpHz] = voiceMix(p?.status, localGhost, this.eng.nyquistSafe);
+      const walls = v.pos && !localGhost ? Math.min(3, wallsTo(v.pos)) : 0;
+      const [og, olp] = occlusionMix(walls, this.eng.nyquistSafe);
+      const g = g0 * og;
+      const lpHz = Math.min(lp0, olp);
       const key = `${g}|${lpHz}|${hpHz}`;
       if (key !== v.mix) {
         const first = v.mix === '';

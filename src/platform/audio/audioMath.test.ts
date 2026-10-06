@@ -15,6 +15,7 @@ import {
   heartbeatIntensity,
   makeDriveCurve,
   monsterStepInterval,
+  occlusionMix,
   rmsOf,
   rmsToDbfs,
   stepMicLevel,
@@ -164,5 +165,19 @@ describe('movement-derived sounds', () => {
   it('builds a bounded odd drive curve', () => {
     const c = makeDriveCurve(8, 257);
     close(c[0], -1); close(c[256], 1); close(c[128], 0);
+  });
+});
+
+describe('occlusionMix', () => {
+  it('leaves direct sound alone and muffles more with each wall', () => {
+    expect(occlusionMix(0, 20000)).toEqual([1, 20000]);
+    const [g1, lp1] = occlusionMix(1, 20000);
+    const [g2, lp2] = occlusionMix(2, 20000);
+    const [g5, lp5] = occlusionMix(5, 20000);
+    expect(g1).toBeLessThan(1);
+    expect(g2).toBeLessThan(g1);
+    expect(g5).toBeLessThan(g2);
+    expect(lp2).toBeLessThan(lp1);
+    expect(lp5).toBeLessThan(lp2);
   });
 });

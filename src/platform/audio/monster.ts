@@ -8,7 +8,7 @@
 import { GAME, MONSTER } from '../../config';
 import { distXZ, forwardFromYaw } from '../../core/math';
 import type { GamePhase, MonsterMode, Vec3, WorldState } from '../../core/types';
-import { MONSTER_STRIDE, breathPeriod, smoothFactor } from './audioMath';
+import { MONSTER_STRIDE, breathPeriod, occlusionMix, smoothFactor } from './audioMath';
 import {
   SPATIAL,
   approach,
@@ -27,6 +27,10 @@ export class MonsterAudio {
   private readonly head: PannerNode;
   private readonly feet: PannerNode;
   private readonly out: GainNode;
+  /** Walls between the monster and the listener muffle it (lowpass + gain). */
+  private readonly occLp: BiquadFilterNode;
+  private readonly occGain: GainNode;
+  private occWalls = -1;
   private readonly voiceIn: GainNode;
 
   private readonly airGain: GainNode;
@@ -58,7 +62,11 @@ export class MonsterAudio {
     const ctx = eng.ctx;
     this.out = this.keep(ctx.createGain());
     this.out.gain.value = 0;
-    this.out.connect(eng.world);
+    this.occLp = this.keep(ctx.createBiquadFilter());
+    this.occLp.type = 'lowpass';
+    this.occLp.frequency.value = eng.nyquistSafe;
+    this.occGain = this.keep(ctx.createGain());
+    this.out.connect(this.occLp).connect(this.occGain).connect(eng.world);
 
     this.head = this.keep(makePanner(ctx, { ...SPATIAL.monster, cone: [150, 300, 0.55] }));
     this.head.connect(this.out);
@@ -136,6 +144,17 @@ export class MonsterAudio {
     src.start(ctx.currentTime, Math.random() * src.buffer.duration);
     this.sources.push(src);
     return src;
+  }
+
+  /** Number of walls between the monster and the listener (from the level geometry). */
+  setOcclusion(walls: number, now: number): void {
+    const w = Math.min(3, Math.max(0, Math.floor(walls)));
+    if (w === this.occWalls) return;
+    const first = this.occWalls < 0;
+    this.occWalls = w;
+    const [g, lp] = occlusionMix(w, this.eng.nyquistSafe);
+    approach(this.occGain.gain, g, now, first ? 0.01 : 0.12);
+    approach(this.occLp.frequency, lp, now, first ? 0.01 : 0.12);
   }
 
   update(state: WorldState, dt: number, now: number): void {

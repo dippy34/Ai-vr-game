@@ -94,6 +94,7 @@ export class Game {
     this.detach();
     this.session = session;
     this.renderer.loadLevel(session.level);
+    this.audio.setLevel(session.level);
     this.roundEndedAt = -1;
 
     session.callbacks = {
@@ -118,6 +119,7 @@ export class Game {
     for (const id of Object.keys(this.session.state.players)) this.audio.removeRemoteVoice(id);
     this.session.close();
     this.session = null;
+    this.audio.setLevel(null);
   }
 
   /** Host only. */
