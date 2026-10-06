@@ -9,6 +9,7 @@
  */
 
 import type {
+  BreakFreeMethod,
   FingerCurls,
   GamePhase,
   Handedness,
@@ -48,7 +49,8 @@ export interface Bounds {
 }
 
 const PHASES: readonly GamePhase[] = ['lobby', 'playing', 'won', 'lost'];
-const MODES: readonly MonsterMode[] = ['wander', 'investigate', 'chase', 'feeding'];
+const MODES: readonly MonsterMode[] = ['wander', 'investigate', 'chase', 'feeding', 'grab', 'stunned'];
+const BREAK_FREE: readonly BreakFreeMethod[] = ['pry', 'flash', 'scream', 'rescue'];
 const STATUSES: readonly PlayerStatus[] = ['alive', 'caught', 'escaped'];
 const HANDS: readonly Handedness[] = ['left', 'right'];
 const REST_CURL = 0.3;
@@ -198,6 +200,7 @@ function readPlayer(id: string, x: unknown, bounds: Bounds): PlayerState | null 
     color,
     isDesktop: own(x, 'isDesktop') === true,
     status,
+    secondChances: readInt(own(x, 'secondChances'), 0, 99) ?? 0,
     spawn: spawn ? clampToBounds(spawn, bounds, LIMITS.headMargin) : { ...pose.head.position, y: 0 },
     spawnYaw: readNum(own(x, 'spawnYaw')) ?? 0,
     pose,
@@ -260,6 +263,10 @@ export function sanitizeWorldState(x: unknown, bounds: Bounds): WorldState | nul
   }
   const lh = own(x, 'lastHeard');
   const lhPos = isObj(lh) ? readVec3(own(lh, 'position')) : null;
+  const g = own(x, 'grab');
+  const grabId = isObj(g) ? readStr(own(g, 'playerId')) : null;
+  const grabStart = isObj(g) ? readNum(own(g, 'start')) : null;
+  const grabDeadline = isObj(g) ? readNum(own(g, 'deadline')) : null;
 
   return {
     time,
@@ -294,6 +301,11 @@ export function sanitizeWorldState(x: unknown, bounds: Bounds): WorldState | nul
             loudness: clampN(readNum(own(lh, 'loudness')) ?? 0, 0, 1),
             time: readNum(own(lh, 'time')) ?? 0,
           }
+        : null,
+    loudMode: own(x, 'loudMode') === true,
+    grab:
+      grabId !== null && grabStart !== null && grabDeadline !== null
+        ? { playerId: grabId, start: grabStart, deadline: grabDeadline }
         : null,
   };
 }
@@ -347,6 +359,14 @@ export function sanitizeSimEvent(x: unknown, bounds: Bounds): SimEvent | null {
       return id && position ? { type: 'playerCaught', id, position } : null;
     case 'playerEscaped':
       return id ? { type: 'playerEscaped', id } : null;
+    case 'playerGrabbed': {
+      const window = readNum(own(x, 'window'));
+      return id && position && window !== null ? { type: 'playerGrabbed', id, position, window: clampN(window, 0, 10) } : null;
+    }
+    case 'playerBrokeFree': {
+      const method = oneOf(own(x, 'method'), BREAK_FREE);
+      return id && position && method ? { type: 'playerBrokeFree', id, method, position, by } : null;
+    }
     case 'phase': {
       const phase = oneOf(own(x, 'phase'), PHASES);
       return phase ? { type: 'phase', phase } : null;

@@ -66,6 +66,41 @@ export const HEARING = {
   catchRadius: 0.75,
 } as const;
 
+/**
+ * Second chance: the first time the monster reaches you in a round it GRABS you instead, and you
+ * have `window` seconds to get out:
+ *   pry     - everyone, silent: grab its jaws and shove them apart (VR) / hit the two keys shown
+ *             (desktop). Reaction skill; checked on the player's own device.
+ *   flash   - whoever holds the camera: Last Flash point-blank in its face. Costs film, stuns longer.
+ *   scream  - Loud Mode only (lobby option, off by default): yell into your real mic.
+ *   rescue  - a teammate makes a chase-level noise near it: it drops you and goes for them.
+ * Breaking free drops what you carry (Last Flash keeps the camera; rescues keep everything) and
+ * stuns it; then it comes straight for you, furious. Miss the window and you are caught.
+ */
+export const SECOND_CHANCE = {
+  perRound: 1,
+  /** Seconds to break free (what the player is shown). */
+  window: 1.6,
+  /** Extra seconds the host waits past the window: a remote player's input is in flight. */
+  latencyGrace: 0.35,
+  /** Stun (s) after each way out. It is deaf while stunned, then chases the one who got away. */
+  pryStun: 2.2,
+  flashStun: 4,
+  screamStun: 2.8,
+  /** Film Last Flash uses (at least 1 must be left; uses what there is, up to this). */
+  flashFilmCost: 2,
+  /** Loud Mode: mic loudness (0..1, see MIC) that counts as a scream. */
+  screamLevel: 0.75,
+  /** It reels back this far (m) when you break free (pry / flash / scream). */
+  recoil: 0.9,
+  /**
+   * Rescue: a teammate's noise at least this loud (NOISE.itemDrop: smash something, shout, run)
+   * that it hears at chase level makes it drop you. It ignores you for `rescueSpare` s after.
+   */
+  rescueLoudness: 0.3,
+  rescueSpare: 1.2,
+} as const;
+
 export const NOISE = {
   whisper: 0.12,
   talk: 0.5,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GAME, HEARING, MONSTER, NOISE, PLAYER, PLAYER_COLORS } from '../config';
+import { GAME, HEARING, MONSTER, NOISE, PLAYER, PLAYER_COLORS, SECOND_CHANCE } from '../config';
 import { createLevel, roomAt } from './level';
 import { distXZ, v3 } from './math';
 import { circleBlocked, moveCircle, supportHeight } from './physics';
@@ -332,13 +332,16 @@ describe('monster behaviour', () => {
     expect(evs.filter((e) => e.type === 'monsterAlert').length).toBe(0);
   });
 
-  it('notices a silent player it bumps into', () => {
+  it('notices a silent player it bumps into (grabs, then catches when the window runs out)', () => {
     const { sim } = setup(1);
     const m = sim.state.monster;
     placeMonster(sim, 0, 0);
     place(sim, 'p0', 0.3, 0.3);
     const ev = sim.step(1 / 30);
-    expect(has(ev, 'playerCaught')).toBe(true);
+    expect(has(ev, 'playerGrabbed')).toBe(true);
+    expect(m.mode).toBe('grab');
+    const later = runUntil(sim, SECOND_CHANCE.window + SECOND_CHANCE.latencyGrace + 0.2, (e) => has(e, 'playerCaught'));
+    expect(has(later, 'playerCaught')).toBe(true);
     expect(m.mode).toBe('feeding');
   });
 
@@ -351,12 +354,13 @@ describe('monster behaviour', () => {
     expect(distXZ(sim.state.monster.position, sim.state.players.p0.pose.head.position)).toBeLessThan(
       HEARING.catchRadius,
     );
-    expect(has(sim.step(1 / 60), 'playerCaught')).toBe(false);
+    const through = sim.step(1 / 60);
+    expect(has(through, 'playerCaught') || has(through, 'playerGrabbed')).toBe(false);
     expect(sim.state.players.p0.status).toBe('alive');
-    // Same distance on the same side of the wall: caught.
+    // Same distance on the same side of the wall: it gets them.
     placeMonster(sim, -2.6, -1.7);
     place(sim, 'p0', -2.6, -2.3);
-    expect(has(sim.step(1 / 60), 'playerCaught')).toBe(true);
+    expect(has(sim.step(1 / 60), 'playerGrabbed')).toBe(true);
   });
 
   it('chases through doorways and catches a player in the next room', () => {
@@ -555,7 +559,8 @@ describe('items and camera', () => {
     // p1 gets caught -> still a win because someone escaped.
     placeMonster(sim, 0.7, 5.3);
     s.monster.mode = 'wander';
-    const end = sim.step(1 / 30);
+    const end = runUntil(sim, 3, (e) => has(e, 'phase'));
+    expect(end).toContainEqual(expect.objectContaining({ type: 'playerGrabbed', id: 'p1' }));
     expect(end).toContainEqual(expect.objectContaining({ type: 'playerCaught', id: 'p1' }));
     expect(end).toContainEqual({ type: 'phase', phase: 'won' });
     expect(s.phase).toBe('won');
