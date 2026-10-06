@@ -160,7 +160,9 @@ export class UI {
   private readonly startButton: HTMLButtonElement;
   private readonly lobbyError: HTMLElement;
   private readonly pauseStart: HTMLButtonElement;
+  private readonly pauseVR: HTMLButtonElement;
   private readonly pauseInfo: HTMLElement;
+  private readonly pauseError: HTMLElement;
   private readonly shareButton: HTMLButtonElement;
 
   constructor(root: HTMLElement) {
@@ -264,17 +266,23 @@ export class UI {
     // ---------- pause ----------
     const resumeBtn = button('Resume', 'primary');
     this.pauseStart = button('Start round');
+    // Back into the headset mid-round (e.g. after taking it off or pressing the system button).
+    this.pauseVR = button('Enter VR');
+    this.pauseVR.hidden = true;
     const pauseLeave = button('Leave game', 'danger');
     this.pauseInfo = el('p', { class: 'muted' });
+    this.pauseError = el('p', { class: 'error', role: 'alert' });
     resumeBtn.onclick = () => this.onResume();
     this.pauseStart.onclick = () => this.onStartRound();
+    this.pauseVR.onclick = () => this.onEnterVR();
     pauseLeave.onclick = () => this.onLeave();
     this.pause = el('div', { class: 'screen', hidden: '' }, [
       el('div', { class: 'panel' }, [
         el('h1', { class: 'logo', style: 'font-size:48px' }, ['MUTE']),
         this.pauseInfo,
         el('div', { class: 'row' }, [resumeBtn, this.pauseStart]),
-        el('div', { class: 'row', style: 'margin-top:10px' }, [pauseLeave]),
+        el('div', { class: 'row', style: 'margin-top:10px' }, [this.pauseVR, pauseLeave]),
+        this.pauseError,
         el('h2', {}, ['Controls']),
         controlsTable(),
       ]),
@@ -339,6 +347,7 @@ export class UI {
     this.titleError.style.color = '';
     this.titleError.textContent = msg;
     this.lobbyError.textContent = msg;
+    this.pauseError.textContent = msg;
   }
 
   showLobby(info: LobbyInfo): void {
@@ -378,12 +387,16 @@ export class UI {
     this.hud.setMicLevel(level);
   }
 
-  /** Show the pause/round menu (desktop). */
-  showPause(isHost: boolean, phase: GamePhase): void {
+  /** Show the pause/round menu (desktop, or after leaving the headset). */
+  showPause(isHost: boolean, phase: GamePhase, vrSupported = false, code: string | null = null): void {
     this.pauseStart.hidden = !isHost;
+    this.pauseVR.hidden = !vrSupported;
+    this.pauseError.textContent = '';
     this.pauseStart.textContent = phase === 'playing' ? 'Restart round' : phase === 'lobby' ? 'Start round' : 'Play again';
+    // The lobby (with the room code) is gone once you're playing: keep the code findable for invites.
+    const room = code ? ` Room code: ${code}.` : '';
     this.pauseInfo.textContent =
-      phase === 'lobby'
+      (phase === 'lobby'
         ? isHost
           ? 'Everyone in? Start the round.'
           : 'Waiting for the host to start the round.'
@@ -391,7 +404,7 @@ export class UI {
           ? 'Someone got out.'
           : phase === 'lost'
             ? 'Nobody got out.'
-            : 'Paused. (The monster is not.)';
+            : 'Paused. (The monster is not.)') + room;
     this.show(this.pause);
   }
 
@@ -427,6 +440,7 @@ export class Hud {
   private readonly meter: { root: HTMLElement; fill: HTMLElement };
   private readonly toast: HTMLElement;
   private toastTimer = 0;
+  private statusText = '';
 
   constructor() {
     this.status = el('div', { class: 'status' });
@@ -446,10 +460,12 @@ export class Hud {
   }
 
   setStatus(lines: string[]): void {
+    // Called every frame. (Comparing with textContent never matched for multi-line text, since
+    // <br> adds no text, so the HUD was rebuilt 60-90 times a second.)
     const text = lines.join('\n');
-    if (this.status.textContent !== text) {
-      this.status.replaceChildren(...lines.flatMap((l, i) => (i ? [el('br'), l] : [l])));
-    }
+    if (this.statusText === text) return;
+    this.statusText = text;
+    this.status.replaceChildren(...lines.flatMap((l, i) => (i ? [el('br'), l] : [l])));
   }
 
   setFilm(film: number | null): void {

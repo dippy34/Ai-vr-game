@@ -25,6 +25,7 @@ import type { ModelLibrary } from './assets';
 import type { SurfaceLibrary } from './SurfaceTextures';
 import { roomAt } from '../../core/level';
 import { StaticBatcher } from './batch';
+import { DecalSet } from './Decals';
 import { DressingSet } from './Dressing';
 import { FurnitureSet } from './FurnitureModels';
 import { FuseProp } from './Props';
@@ -1016,6 +1017,8 @@ export class LevelView {
   private readonly furnitureModels: FurnitureSet | null;
   /** Set dressing scattered through the house (null = no dressing models). */
   readonly dressing: DressingSet | null;
+  /** Story decals + notes (null = no decal/note models). */
+  readonly decals: DecalSet | null;
   /** Merged static Blender models (chunked; see STATIC_CHUNK). */
   private readonly statics = new THREE.Group();
 
@@ -1098,6 +1101,17 @@ export class LevelView {
     this.door = new DoorView(level, wood, models, batcher);
     this.group.add(this.fuseBox.group, this.door.group);
 
+    // Story decals + notes first: the set dressing then keeps clear of the spots they use.
+    this.decals = models ? new DecalSet(models, batcher) : null;
+    const reserved = this.decals?.available
+      ? this.decals.place({
+        level,
+        walls: wallBoxes,
+        furniture: level.boxes.filter((b) => b.kind === 'furniture'),
+        placed: this.furnitureModels?.placed ?? [],
+        fuseBoxMount: this.fuseBox.mount,
+      })
+      : undefined;
     // Set dressing (decides which windows get boarded up before the moonlight is built).
     this.dressing = models ? new DressingSet(models, batcher) : null;
     if (this.dressing?.available) {
@@ -1107,6 +1121,7 @@ export class LevelView {
         furniture: level.boxes.filter((b) => b.kind === 'furniture'),
         placed: this.furnitureModels?.placed ?? [],
         fuseBoxMount: this.fuseBox.mount,
+        reserved,
       });
     }
     const boarded = this.dressing?.boarded ?? new Set<number>();

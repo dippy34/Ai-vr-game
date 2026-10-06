@@ -12,12 +12,25 @@ import { GameSim } from '../core/sim';
 import type {
   LevelData,
   NoiseEvent,
+  NoiseSource,
   PlayerAction,
   PlayerId,
   PlayerPose,
   SimEvent,
   WorldState,
 } from '../core/types';
+import {
+  clampToward,
+  hasOwn,
+  isObj,
+  isSafeKey,
+  LIMITS,
+  readNum,
+  readVec3,
+  sanitizePose,
+  sanitizeSimEvent,
+  sanitizeWorldState,
+} from '../core/validate';
 import { hostRoom, joinRoom, type Transport, type TransportKind, type VoiceLink } from '../net';
 import { PROTOCOL_VERSION, type LobbyPlayer, type NetMessage } from '../net/protocol';
 
@@ -62,14 +75,76 @@ export interface Session {
   close(): void;
 }
 
-function sanitizeName(name: string): string {
+function sanitizeName(name: unknown): string {
   return (
-    String(name)
+    (typeof name === 'string' ? name : '')
+      .slice(0, 64) // before the regex: names can be huge when they come off the network
       .replace(/[^\p{L}\p{N} _.'-]/gu, '')
       .trim()
       .slice(0, 16) || 'Survivor'
   );
 }
+
+/** Lobby list from the host, cleaned (shown in the DOM and used for colors). */
+function sanitizeLobby(x: unknown): LobbyPlayer[] | null {
+  if (!Array.isArray(x)) return null;
+  const out: LobbyPlayer[] = [];
+  for (const p of x.slice(0, LIMITS.maxPlayers)) {
+    if (!isObj(p) || typeof p.id !== 'string' || !p.id || p.id.length > LIMITS.idLength) continue;
+    const color = readNum(p.color);
+    out.push({
+      id: p.id,
+      name: (typeof p.name === 'string' ? p.name : '').slice(0, LIMITS.nameLength) || 'Survivor',
+      color: color !== null && Number.isInteger(color) && color >= 0 && color <= 0xffffff ? color : 0xffffff,
+      isDesktop: p.isDesktop === true,
+    });
+  }
+  return out;
+}
+
+/** Token bucket: `rate` messages per second on average, bursts of up to `burst`. */
+class RateLimit {
+  private tokens: number;
+  private last: number;
+  constructor(
+    private readonly rate: number,
+    private readonly burst: number,
+    now: number,
+  ) {
+    this.tokens = burst;
+    this.last = now;
+  }
+  take(now: number): boolean {
+    this.tokens = Math.min(this.burst, this.tokens + Math.max(0, now - this.last) * this.rate);
+    this.last = now;
+    if (this.tokens < 1) return false;
+    this.tokens -= 1;
+    return true;
+  }
+}
+
+/**
+ * How many messages per second (and in one burst) the host accepts from each client. Legit clients
+ * send poses at NET.poseRate, voice at NET.voiceRate, a footstep every NOISE.stepLength meters and
+ * an action per button press; anything far above that is a broken or malicious client.
+ */
+const CLIENT_LIMITS = {
+  pose: [NET.poseRate * 2, NET.poseRate],
+  voice: [NET.voiceRate * 3, NET.voiceRate * 2],
+  noise: [20, 10],
+  action: [15, 10],
+} as const;
+type LimitKind = keyof typeof CLIENT_LIMITS;
+
+/** Non-voice noises a client may report (voice goes through 'voice' messages). */
+const CLIENT_NOISES: readonly NoiseSource[] = ['footstep', 'item', 'camera'];
+
+export interface HostSessionOptions {
+  /** Clock in seconds for rate limiting (default: performance.now). */
+  now?: () => number;
+}
+
+const defaultNow = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
 
 function toLobby(state: WorldState): LobbyPlayer[] {
   return Object.values(state.players).map((p) => ({
@@ -92,12 +167,18 @@ export class HostSession implements Session {
 
   private readonly sim: GameSim;
   private snapshotTimer = 0;
+  private poseTimer = 0;
+  private localPoseDirty = false;
+  private readonly now: () => number;
+  private readonly limits = new Map<PlayerId, Record<LimitKind, RateLimit>>();
 
   constructor(
     private readonly transport: Transport | null,
     name: string,
     isDesktop: boolean,
+    opts: HostSessionOptions = {},
   ) {
+    this.now = opts.now ?? defaultNow;
     const seed = Math.floor(Math.random() * 2 ** 31);
     this.level = createLevel(seed);
     this.sim = new GameSim(this.level, {
@@ -113,7 +194,8 @@ export class HostSession implements Session {
     if (transport) {
       transport.onMessage((msg, from) => this.onMessage(msg, from));
       transport.onPeerLeave((id) => {
-        if (!this.sim.state.players[id]) return;
+        this.limits.delete(id);
+        if (!hasOwn(this.sim.state.players, id)) return;
         this.emit(this.sim.removePlayer(id));
         this.broadcastLobby();
       });
@@ -130,7 +212,8 @@ export class HostSession implements Session {
 
   sendPose(pose: PlayerPose): void {
     this.sim.setPlayerPose(this.localId, pose);
-    this.relayPose(this.localId, pose);
+    // Relayed from update() at NET.poseRate (this is called every frame, up to 90+ times/s).
+    this.localPoseDirty = true;
   }
 
   sendVoice(level: number): void {
@@ -156,6 +239,13 @@ export class HostSession implements Session {
   update(dt: number): void {
     this.emit(this.sim.step(dt));
     if (!this.transport) return;
+    this.poseTimer += dt;
+    if (this.localPoseDirty && this.poseTimer >= 1 / NET.poseRate) {
+      this.poseTimer = 0;
+      this.localPoseDirty = false;
+      const me = this.sim.state.players[this.localId];
+      if (me) this.relayPose(this.localId, me.pose);
+    }
     this.snapshotTimer += dt;
     if (this.snapshotTimer >= 1 / NET.snapshotRate) {
       this.snapshotTimer = 0;
@@ -202,8 +292,37 @@ export class HostSession implements Session {
     });
   }
 
+  /** Rate limit for client `from` (see CLIENT_LIMITS). */
+  private allow(from: PlayerId, kind: LimitKind): boolean {
+    const now = this.now();
+    let l = this.limits.get(from);
+    if (!l) {
+      const make = (k: LimitKind) => new RateLimit(CLIENT_LIMITS[k][0], CLIENT_LIMITS[k][1], now);
+      l = { pose: make('pose'), voice: make('voice'), noise: make('noise'), action: make('action') };
+      this.limits.set(from, l);
+    }
+    return l[kind].take(now);
+  }
+
+  /** A client-reported noise, cleaned: a known source, loudness 0..1, next to the player's head. */
+  private clientNoise(from: PlayerId, raw: unknown): NoiseEvent | null {
+    const player = this.sim.state.players[from];
+    if (!player || !isObj(raw)) return null;
+    const source = raw.source as NoiseSource;
+    const pos = readVec3(raw.position);
+    if (!CLIENT_NOISES.includes(source) || !pos) return null;
+    return {
+      source,
+      position: clampToward(player.pose.head.position, pos, LIMITS.noiseReach),
+      loudness: clamp(readNum(raw.loudness) ?? 0, 0, 1),
+      playerId: from,
+    };
+  }
+
+  /** Everything here comes straight off the network from a client: trust nothing. */
   private onMessage(msg: NetMessage, from: PlayerId): void {
-    const known = !!this.sim.state.players[from];
+    if (typeof from !== 'string' || !isSafeKey(from)) return;
+    const known = hasOwn(this.sim.state.players, from);
     switch (msg.t) {
       case 'hello': {
         if (known) return;
@@ -220,25 +339,28 @@ export class HostSession implements Session {
         this.broadcastLobby();
         return;
       }
-      case 'pose':
-        if (!known) return;
-        this.sim.setPlayerPose(from, msg.pose);
-        this.relayPose(from, msg.pose);
-        this.callbacks.onRemotePose(from, msg.pose);
+      case 'pose': {
+        if (!known || !this.allow(from, 'pose')) return;
+        this.sim.setPlayerPose(from, msg.pose, true);
+        // Relay what the sim accepted (sanitized, speed-limited), never the raw message.
+        const pose = this.sim.state.players[from].pose;
+        this.relayPose(from, pose);
+        this.callbacks.onRemotePose(from, pose);
         return;
+      }
       case 'voice':
-        if (known) this.applyVoice(from, Number(msg.level));
+        if (known && this.allow(from, 'voice')) this.applyVoice(from, Number(msg.level));
         return;
-      case 'noise':
-        if (!known || msg.noise.source === 'voice') return;
-        this.sim.reportNoise({
-          ...msg.noise,
-          loudness: clamp(Number(msg.noise.loudness) || 0, 0, 1),
-          playerId: from,
-        });
+      case 'noise': {
+        if (!known || !this.allow(from, 'noise')) return;
+        const noise = this.clientNoise(from, msg.noise);
+        if (noise) this.sim.reportNoise(noise);
         return;
+      }
       case 'action':
-        if (known) this.emit(this.sim.handleAction(from, msg.action));
+        if (known && isObj(msg.action) && this.allow(from, 'action')) {
+          this.emit(this.sim.handleAction(from, msg.action));
+        }
         return;
       default:
         // host -> client messages are never valid from a client
@@ -264,14 +386,26 @@ export class ClientSession implements Session {
 
   private constructor(
     private readonly transport: Transport,
-    welcome: Extract<NetMessage, { t: 'welcome' }>,
+    playerId: PlayerId,
+    level: LevelData,
+    state: WorldState,
   ) {
-    this.localId = welcome.playerId;
-    this._state = welcome.state;
-    this.level = createLevel(welcome.state.levelSeed);
+    this.localId = playerId;
+    this._state = state;
+    this.level = level;
     this.roomCode = transport.roomCode;
     this.voice = transport.voice;
-    this.lobby = toLobby(welcome.state);
+    this.lobby = toLobby(state);
+  }
+
+  /** A session from the host's 'welcome', or null if the welcome is unusable. */
+  private static fromWelcome(transport: Transport, msg: Extract<NetMessage, { t: 'welcome' }>): ClientSession | null {
+    if (typeof msg.playerId !== 'string' || !isObj(msg.state)) return null;
+    const seed = readNum(msg.state.levelSeed);
+    if (seed === null) return null;
+    const level = createLevel(seed);
+    const state = sanitizeWorldState(msg.state, level.bounds);
+    return state ? new ClientSession(transport, msg.playerId, level, state) : null;
   }
 
   /** Connect, say hello, and resolve once the host welcomes us. */
@@ -291,12 +425,16 @@ export class ClientSession implements Session {
         }
         if (msg.t === 'welcome') {
           clearTimeout(timeout);
-          session = new ClientSession(transport, msg);
-          resolve(session);
+          session = ClientSession.fromWelcome(transport, msg);
+          if (session) resolve(session);
+          else {
+            transport.close();
+            reject(new Error('The host sent a game this version can’t read. Refresh the page.'));
+          }
         } else if (msg.t === 'reject') {
           clearTimeout(timeout);
           transport.close();
-          reject(new Error(msg.reason));
+          reject(new Error(readReason(msg.reason)));
         }
       });
       transport.onPeerLeave(() => {
@@ -352,35 +490,56 @@ export class ClientSession implements Session {
     this.transport.close();
   }
 
+  /** Everything here comes straight off the network from the host: validate before use. */
   private onMessage(msg: NetMessage): void {
+    const bounds = this.level.bounds;
     switch (msg.t) {
-      case 'snapshot':
-        this._state = msg.state;
-        return;
-      case 'peerPose': {
-        const p = this._state.players[msg.id];
-        if (p) p.pose = msg.pose;
-        this.callbacks.onRemotePose(msg.id, msg.pose);
+      case 'snapshot': {
+        const state = sanitizeWorldState(msg.state, bounds);
+        if (state) this._state = state;
         return;
       }
-      case 'event':
-        this.callbacks.onEvent(msg.event);
+      case 'peerPose': {
+        // Only for other players we know about (our own pose is ours; strangers would leak).
+        const players = this._state.players;
+        const p =
+          typeof msg.id === 'string' && msg.id !== this.localId && hasOwn(players, msg.id) ? players[msg.id] : undefined;
+        const pose = p ? sanitizePose(msg.pose, bounds) : null;
+        if (!p || !pose) return;
+        p.pose = pose;
+        this.callbacks.onRemotePose(msg.id, pose);
         return;
-      case 'round':
-        this._state = msg.state;
-        this.callbacks.onRound(this._state);
+      }
+      case 'event': {
+        const event = sanitizeSimEvent(msg.event, bounds);
+        if (event) this.callbacks.onEvent(event);
         return;
-      case 'lobby':
-        this.lobby = msg.players;
-        this.callbacks.onLobby(msg.players);
+      }
+      case 'round': {
+        const state = sanitizeWorldState(msg.state, bounds);
+        if (!state) return;
+        this._state = state;
+        this.callbacks.onRound(state);
         return;
+      }
+      case 'lobby': {
+        const players = sanitizeLobby(msg.players);
+        if (!players) return;
+        this.lobby = players;
+        this.callbacks.onLobby(players);
+        return;
+      }
       case 'reject':
-        this.callbacks.onDisconnected(msg.reason);
+        this.callbacks.onDisconnected(readReason(msg.reason));
         return;
       default:
         return;
     }
   }
+}
+
+function readReason(x: unknown): string {
+  return (typeof x === 'string' ? x.slice(0, 200) : '') || 'The host closed the connection.';
 }
 
 // ---------------------------------------------------------------------------------------------

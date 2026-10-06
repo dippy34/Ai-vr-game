@@ -27,7 +27,6 @@ const transportKind: TransportKind =
   new URLSearchParams(location.search).get('net') === 'local' ? 'local' : 'peerjs';
 
 let vrSupported = false;
-let micStarted = false;
 void isVRSupported().then((ok) => (vrSupported = ok));
 
 input.setEnabled(false);
@@ -45,17 +44,47 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** The mic track we watch for 'ended' (device unplugged, taken by another app...). */
+let watchedMic: MediaStreamTrack | null = null;
+let lastMicRetry = -Infinity;
+
+/**
+ * Get (or keep) the microphone and hand it to the game. Returns the same stream while it works, so
+ * calling it again is cheap; after the device went away it asks for the default one again.
+ */
+async function ensureMic(): Promise<void> {
+  const mic = await audio.startMic();
+  ui.setMicStatus(mic ? 'on' : 'blocked');
+  game.setMicStream(mic);
+  const track = mic?.getAudioTracks()[0] ?? null;
+  if (!track || track === watchedMic) return;
+  watchedMic = track;
+  track.addEventListener(
+    'ended',
+    () => {
+      if (watchedMic !== track) return;
+      watchedMic = null;
+      // At most one automatic retry every few seconds, in case a device keeps dropping out.
+      const now = performance.now();
+      if (now - lastMicRetry < 5000) {
+        ui.setMicStatus('blocked');
+        game.setMicStream(null);
+        return;
+      }
+      lastMicRetry = now;
+      setTimeout(() => void ensureMic().catch((e) => console.warn('[mic] re-acquire failed', e)), 500);
+    },
+    { once: true },
+  );
+}
+
 async function begin(mode: SessionMode, name: string, code?: string): Promise<void> {
   ui.setBusy(true, mode === 'join' ? 'Joining…' : mode === 'host' ? 'Opening a room…' : 'Loading…');
   try {
     // Both need the click that got us here (browsers require a user gesture).
     await audio.unlock();
-    if (!micStarted) {
-      const mic = await audio.startMic();
-      micStarted = true;
-      ui.setMicStatus(mic ? 'on' : 'blocked');
-      game.setMicStream(mic);
-    }
+    // Every time: a mic that was unplugged (or denied) since the last game gets another chance.
+    await ensureMic();
     const session = await createSession(mode, { name, isDesktop: !vrSupported, kind: transportKind, code });
     game.attach(session);
     ui.setBusy(false);
@@ -92,7 +121,7 @@ ui.onEnterVR = () => {
     const session = game.current;
     if (session) {
       game.setPaused(true);
-      ui.showPause(session.isHost, session.state.phase);
+      ui.showPause(session.isHost, session.state.phase, vrSupported, session.roomCode);
     }
   })
     .then(() => {
@@ -112,10 +141,11 @@ ui.onStartRound = () => {
 
 game.onMenu = () => {
   const session = game.current;
-  if (!session) return;
+  // Esc while a menu (e.g. the lobby with the room code) is already up must not replace it.
+  if (!session || ui.isMenuOpen()) return;
   input.setEnabled(false);
   game.setPaused(true);
-  ui.showPause(session.isHost, session.state.phase);
+  ui.showPause(session.isHost, session.state.phase, vrSupported, session.roomCode);
 };
 
 game.onDisconnected = (reason) => {

@@ -171,7 +171,11 @@ function isFrame(x: unknown): x is Frame {
   return typeof x === 'object' && x !== null && typeof (x as { k?: unknown }).k === 'string';
 }
 
-const MAX_CHUNKS = 4096;
+/**
+ * Most chunks one frame may have. A full WorldState needs a handful; this cap keeps a hostile peer
+ * from making us buffer and JSON.parse tens of MB per frame (it bounds one assembly to ~2 MB).
+ */
+export const MAX_CHUNKS = 128;
 
 export class StarTransport implements RoomTransport {
   readonly selfId: PlayerId;
@@ -339,6 +343,7 @@ export class StarTransport implements RoomTransport {
   private receiveChunk(from: PlayerId, entry: PeerEntry, c: Extract<Frame, { k: 'c' }>): void {
     if (
       typeof c.d !== 'string' ||
+      c.d.length > this.timing.maxFrameBytes ||
       !Number.isInteger(c.n) ||
       !Number.isInteger(c.i) ||
       c.n < 1 ||

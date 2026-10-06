@@ -98,7 +98,14 @@ export class Game {
     this.session = session;
     this.renderer.loadLevel(session.level);
     this.audio.setLevel(session.level);
-    this.roundEndedAt = -1;
+    // Per-session bookkeeping. Joining a round already in progress (or already over) starts the
+    // clocks now rather than leaving them at "never" from the previous session.
+    const now = performance.now() / 1000;
+    const phase = session.state.phase;
+    this.roundStartedAt = phase === 'playing' ? now : -1;
+    this.roundEndedAt = phase === 'won' || phase === 'lost' ? now : -1;
+    this.roundFlashes = 0;
+    this.lastPhase = '';
 
     session.callbacks = {
       onEvent: (e) => this.onEvent(e),

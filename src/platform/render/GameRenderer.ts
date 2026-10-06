@@ -14,7 +14,8 @@ import { HandFactory, type Hand } from './hands';
 import { LevelView } from './LevelView';
 import { MessagePanel } from './MessagePanel';
 import { MonsterModel } from './MonsterModel';
-import { ModelLibrary } from './assets';
+import { createKTX2Loader, ModelLibrary } from './assets';
+import { PerfHud, perfHudRequested } from './PerfHud';
 import { SurfaceLibrary } from './SurfaceTextures';
 import { SkinnedMonster } from './SkinnedMonster';
 import { FURNITURE_MODEL_NAMES } from './FurnitureModels';
@@ -46,7 +47,7 @@ const MODEL_NAMES = [
   ...FURNITURE_MODEL_NAMES,
 ];
 /** Every GLB in the manifest with one of these prefixes is loaded too (set dressing). */
-const MODEL_PREFIXES = [DRESSING_PREFIX];
+const MODEL_PREFIXES = [DRESSING_PREFIX, 'decal_', 'note_'];
 /** Models that are baked into the level, so the level is rebuilt when they arrive. */
 const LEVEL_MODELS = new Set(['fusebox', 'door', 'fuse', 'window_frame', 'doorway_casing', 'radiator']);
 const isLevelModel = (n: string): boolean => n.startsWith('furniture_') || n.startsWith(DRESSING_PREFIX) || LEVEL_MODELS.has(n);
@@ -55,6 +56,12 @@ const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const _origin = new THREE.Vector3();
+const _dir = new THREE.Vector3();
+const _col = new THREE.Color();
+const SIDES = ['left', 'right'] as const;
+/** Heights (m) above the monster's feet tested for a flash hit (a partly hidden monster still shows). */
+const MONSTER_PROBES = [0.6, 1.3, 2.0];
 
 /** three.js renderer for MUTE. */
 export class GameRenderer implements IGameRenderer {
@@ -90,19 +97,24 @@ export class GameRenderer implements IGameRenderer {
   private readonly headQuat = new THREE.Quaternion();
   private time = 0;
   private readonly onResize = (): void => this.resize();
+  /** `?perf=1`: fps / draw calls / triangles / textures readout (head-locked, works in VR). */
+  private readonly perf: PerfHud | null = null;
 
   /** Creates the WebGLRenderer (xr.enabled = true) and appends its canvas to `container`. */
   constructor(container: HTMLElement) {
     this.container = container;
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, RENDER.maxPixelRatio));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NoToneMapping;
     renderer.shadowMap.enabled = false;
     renderer.setClearColor(0x000000, 1);
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType('local-floor');
+    // Quest: full fixed foveation, and a slightly smaller eye buffer than the browser's default
+    // (fill rate is the limit with per-pixel lights; MSAA keeps edges clean).
     renderer.xr.setFoveation(1);
+    renderer.xr.setFramebufferScaleFactor(RENDER.xrFramebufferScale);
     renderer.domElement.style.display = 'block';
     container.appendChild(renderer.domElement);
     setTextureAnisotropy(renderer.capabilities.getMaxAnisotropy());
@@ -152,9 +164,18 @@ export class GameRenderer implements IGameRenderer {
     this.message = new MessagePanel();
     scene.add(this.message.mesh);
 
+    if (perfHudRequested()) {
+      this.perf = new PerfHud();
+      camera.add(this.perf.mesh);
+    }
+
     this.resize();
     window.addEventListener('resize', this.onResize);
 
+    // GPU-compressed (KTX2) textures where the build made them: one shared transcoder.
+    const ktx2 = createKTX2Loader(renderer);
+    this.models.useKTX2(ktx2);
+    this.surfaces.useKTX2(ktx2);
     // Models and the house's surface textures load together; the level is rebuilt once with both.
     void Promise.all([this.models.load(MODEL_NAMES, MODEL_PREFIXES), this.surfaces.load()]).then(() => this.applyModels());
   }
@@ -385,8 +406,8 @@ export class GameRenderer implements IGameRenderer {
   // -------------------------------------------------------------------------------------------
 
   flash(event: FlashEvent, state: WorldState, localId: PlayerId, localPose: PlayerPose): void {
-    const origin = new THREE.Vector3(event.position.x, event.position.y, event.position.z);
-    const dir = new THREE.Vector3(event.direction.x, event.direction.y, event.direction.z);
+    const origin = _origin.set(event.position.x, event.position.y, event.position.z);
+    const dir = _dir.set(event.direction.x, event.direction.y, event.direction.z);
     if (dir.lengthSq() < 1e-8) dir.set(0, 0, -1);
     dir.normalize();
     const blockers = this.level ? this.level.blockers() : [];
@@ -404,8 +425,8 @@ export class GameRenderer implements IGameRenderer {
     const parts: THREE.BufferGeometry[] = [];
     const halo: THREE.BufferGeometry[] = [];
     const push = (list: THREE.BufferGeometry[], from: number, k: number): void => {
-      const c = new THREE.Color(k, k, k);
-      for (let i = from; i < list.length; i++) paint(list[i], c);
+      _col.setRGB(k, k, k);
+      for (let i = from; i < list.length; i++) paint(list[i], _col);
     };
     for (const id in state.players) {
       const pl = state.players[id];
@@ -426,7 +447,7 @@ export class GameRenderer implements IGameRenderer {
         push(parts, from, k * 0.85);
       }
       // Hands with their exact finger curls right now.
-      for (const side of ['left', 'right'] as const) {
+      for (const side of SIDES) {
         const h = pose[side];
         if (!h.tracked) continue;
         setV(_a, h.position);
@@ -444,7 +465,7 @@ export class GameRenderer implements IGameRenderer {
     // The monster: test a few points along its body so a partly hidden monster still shows.
     const mp = state.monster.position;
     let mk = 0;
-    for (const y of [0.6, 1.3, 2.0]) mk = Math.max(mk, captured(_b.set(mp.x, mp.y + y, mp.z)));
+    for (const y of MONSTER_PROBES) mk = Math.max(mk, captured(_b.set(mp.x, mp.y + y, mp.z)));
     if (mk > 0) {
       const from = parts.length;
       this.monster.bake(parts, 1.03);
@@ -485,6 +506,7 @@ export class GameRenderer implements IGameRenderer {
 
   render(): void {
     this.ctx.renderer.render(this.ctx.scene, this.ctx.camera);
+    this.perf?.frame(this.ctx.renderer, this.ctx.scene, performance.now());
   }
 
   // -------------------------------------------------------------------------------------------
@@ -531,6 +553,7 @@ export class GameRenderer implements IGameRenderer {
     this.flashFx.dispose();
     this.meter.dispose();
     this.message.dispose();
+    this.perf?.dispose();
     this.ctx.renderer.dispose();
     this.ctx.renderer.domElement.remove();
   }

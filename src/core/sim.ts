@@ -50,6 +50,7 @@ import {
   type CollisionOptions,
 } from './physics';
 import { findPath, nearestNavNode } from './nav';
+import { clampToward, hasOwn, LIMITS, sanitizePose } from './validate';
 
 export interface SimOptions {
   fusesRequired?: number;
@@ -114,6 +115,18 @@ export const SIM_TUNING = {
   noiseMemoryPull: 0.8,
   /** Distance falloff (m) of a warm spot's pull on a wander candidate. */
   noiseMemoryReach: 4,
+  /**
+   * Remote clients' heads may move at most this fast (m/s, XZ) on the host, with a burst budget
+   * of `moveBurst` m for bunched-up packets. Sprinting is 3.3 m/s, so legit play never hits it;
+   * it stops "teleport" cheats (the host keeps them where they were and lets them catch up).
+   */
+  maxMoveSpeed: 3 * PLAYER.sprintSpeed,
+  moveBurst: 3,
+  /**
+   * Nothing farther than this (m) from a player's eyes can be grabbed: the desktop probe sits
+   * 0.5 m in front of the eyes and reaches PLAYER.desktopGrabReach from there.
+   */
+  maxGrabFromHead: 0.5 + PLAYER.desktopGrabReach + 0.15,
 } as const;
 
 const HANDS: readonly Handedness[] = ['left', 'right'];
@@ -132,21 +145,10 @@ export function makeSpawnPose(feet: Vec3, yaw: number): PlayerPose {
   return { head: { position: copy3(head), rotation: copyQuat(rot) }, left: hand(-1), right: hand(1) };
 }
 
-function clonePose(p: PlayerPose): PlayerPose {
-  const hand = (h: HandPose): HandPose => ({
-    tracked: !!h.tracked,
-    position: copy3(h.position),
-    rotation: copyQuat(h.rotation),
-    curls: [h.curls[0], h.curls[1], h.curls[2], h.curls[3], h.curls[4]],
-  });
-  return {
-    head: { position: copy3(p.head.position), rotation: copyQuat(p.head.rotation) },
-    left: hand(p.left),
-    right: hand(p.right),
-  };
-}
-
 const flat = (p: Vec3): Vec3 => ({ x: p.x, y: 0, z: p.z });
+/** Player by id; ids come off the network, so 'constructor' & co. must not hit Object.prototype. */
+const playerOf = (s: WorldState, id: PlayerId | null): PlayerState | undefined =>
+  id !== null && hasOwn(s.players, id) ? s.players[id] : undefined;
 const isHand = (h: unknown): h is Handedness => h === 'left' || h === 'right';
 
 /** Monster AI memory that is not part of the networked state. */
@@ -193,6 +195,8 @@ export class GameSim {
   private spawnOf: Record<PlayerId, number> = {};
   private pending: SimEvent[] = [];
   private brain: Brain;
+  /** Per remote player: how far (m) their head may still move right now, and when that was. */
+  private moveBudget: Record<PlayerId, { left: number; time: number }> = {};
 
   constructor(level: LevelData, opts: SimOptions = {}) {
     this.level = level;
@@ -237,7 +241,7 @@ export class GameSim {
 
   /** Add a player (lobby or mid-round). Assigns color + spawn. Returns the new player state. */
   addPlayer(id: PlayerId, name: string, isDesktop: boolean): PlayerState {
-    const existing = this.state.players[id];
+    const existing = playerOf(this.state, id);
     if (existing) return existing;
     const others = Object.values(this.state.players);
     const used = new Set(others.map((p) => p.color));
@@ -259,28 +263,37 @@ export class GameSim {
     this.state.players[id] = player;
     this.spawnOf[id] = spawnIdx;
     this.joinOrder.push(id);
+    this.resetMoveBudget(id);
     return player;
   }
 
   /** Remove a player; anything they held is dropped where their hands were. */
   removePlayer(id: PlayerId): SimEvent[] {
-    const p = this.state.players[id];
+    const p = playerOf(this.state, id);
     if (!p) return [];
     const out: SimEvent[] = [];
     this.dropAll(p, out, false);
     delete this.state.players[id];
     delete this.spawnOf[id];
+    delete this.moveBudget[id];
     this.joinOrder = this.joinOrder.filter((j) => j !== id);
     if (this.state.monster.targetPlayer === id) this.state.monster.targetPlayer = null;
     this.checkEnd(out);
     return out;
   }
 
-  /** Client-authoritative pose update. Also moves anything held in their hands. */
-  setPlayerPose(id: PlayerId, pose: PlayerPose): void {
-    const p = this.state.players[id];
-    if (!p || !pose || !isFiniteVec3(pose.head?.position)) return;
-    p.pose = clonePose(pose);
+  /**
+   * Client-authoritative pose update. Also moves anything held in their hands.
+   * The pose may come straight off the network: it is sanitized (see sanitizePose) and, for
+   * `remote` players (anyone but the host itself), speed-limited (SIM_TUNING.maxMoveSpeed).
+   */
+  setPlayerPose(id: PlayerId, pose: PlayerPose, remote = false): void {
+    const p = playerOf(this.state, id);
+    if (!p) return;
+    const clean = sanitizePose(pose, this.level.bounds);
+    if (!clean) return;
+    if (remote) this.limitMove(p, clean);
+    p.pose = clean;
     this.syncHeld(p);
   }
 
@@ -307,6 +320,7 @@ export class GameSim {
       p.spawn = copy3(spawns[idx].position);
       p.spawnYaw = spawns[idx].yaw;
       p.pose = makeSpawnPose(spawns[idx].position, spawns[idx].yaw);
+      this.resetMoveBudget(id);
     });
     s.phase = 'playing';
     this.pending = [];
@@ -329,19 +343,21 @@ export class GameSim {
   /** Apply a player's action. Returns resulting events. */
   handleAction(id: PlayerId, action: PlayerAction): SimEvent[] {
     const s = this.state;
-    const p = s.players[id];
+    const p = playerOf(s, id);
     const out: SimEvent[] = [];
     if (!p || p.status !== 'alive' || s.phase !== 'playing') return out;
     if (!action || !isHand(action.hand) || !isFiniteVec3(action.position)) return out;
+    // Hands are never farther than an arm from the eyes (actions come off the network).
+    const at = clampToward(p.pose.head.position, copy3(action.position), LIMITS.handReach);
     switch (action.type) {
       case 'grab':
-        this.grab(p, action.hand, action.position, action.reach, out);
+        this.grab(p, action.hand, at, action.reach, out);
         break;
       case 'release':
-        this.release(p, action.hand, action.position, out);
+        this.release(p, action.hand, at, out);
         break;
       case 'flash':
-        this.flash(p, action.hand, action.position, action.direction, out);
+        this.flash(p, action.hand, at, action.direction, out);
         break;
     }
     return out;
@@ -415,6 +431,34 @@ export class GameSim {
       visited: this.level.nav.map(() => NEVER),
       heat: this.level.nav.map(() => 0),
     };
+  }
+
+  private resetMoveBudget(id: PlayerId): void {
+    this.moveBudget[id] = { left: SIM_TUNING.moveBurst, time: this.state.time };
+  }
+
+  /** Clamp a remote player's head travel (XZ) to their movement budget; hands move along. */
+  private limitMove(p: PlayerState, pose: PlayerPose): void {
+    const T = SIM_TUNING;
+    const b = this.moveBudget[p.id] ?? { left: T.moveBurst, time: this.state.time };
+    this.moveBudget[p.id] = b;
+    b.left = Math.min(T.moveBurst, b.left + Math.max(0, this.state.time - b.time) * T.maxMoveSpeed);
+    b.time = this.state.time;
+    const from = p.pose.head.position;
+    const to = pose.head.position;
+    const d = distXZ(from, to);
+    if (d <= b.left) {
+      b.left -= d;
+      return;
+    }
+    const k = b.left / d;
+    const dx = from.x + (to.x - from.x) * k - to.x;
+    const dz = from.z + (to.z - from.z) * k - to.z;
+    for (const pt of [pose.head.position, pose.left.position, pose.right.position]) {
+      pt.x += dx;
+      pt.z += dz;
+    }
+    b.left = 0;
   }
 
   private freeSpawnIndex(): number {
@@ -579,6 +623,7 @@ export class GameSim {
     const consider = (pos: Vec3): number => {
       const d = dist3(at, pos);
       if (d > r || d >= bestD) return Infinity;
+      if (dist3(p.pose.head.position, pos) > SIM_TUNING.maxGrabFromHead) return Infinity;
       // No reaching through walls: the player's eyes must see it.
       if (wallsBetween(this.level, p.pose.head.position, pos, opts) > 0) return Infinity;
       return d;
@@ -675,7 +720,7 @@ export class GameSim {
     if (loudness <= 0) return;
     const pid = noise.playerId ?? null;
     if (pid !== null) {
-      const src = s.players[pid];
+      const src = playerOf(s, pid);
       if (!src || src.status !== 'alive') return;
     }
     const m = s.monster;
@@ -1063,7 +1108,7 @@ export class GameSim {
       return;
     }
     if (m.targetPlayer !== null) {
-      const tp = s.players[m.targetPlayer];
+      const tp = playerOf(s, m.targetPlayer);
       if (!tp || tp.status !== 'alive') m.targetPlayer = null;
     }
     if (b.routeDirty && s.time - b.replanAt >= SIM_TUNING.chaseReplanInterval) {
@@ -1111,7 +1156,7 @@ export class GameSim {
       if (it.kind !== 'fuse' || it.where !== 'held') continue;
       if (dist3(it.position, box) > SIM_TUNING.fuseInsertDistance) continue;
       const by = it.holder;
-      const holder = by !== null ? s.players[by] : undefined;
+      const holder = playerOf(s, by);
       if (!holder || holder.status !== 'alive' || it.hand === null) continue;
       holder.held[it.hand] = null;
       it.where = 'used';

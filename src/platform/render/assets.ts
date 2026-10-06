@@ -3,10 +3,15 @@
  *
  * Models are optional at runtime: anything that fails to load falls back to the procedural
  * geometry built in code, so the game always runs (and tests don't need the files).
+ *
+ * Production builds also ship GPU-compressed copies (models/ktx2/<name>.glb, KTX2 / Basis
+ * textures, made by scripts/optimize-assets.mjs). Those are preferred when listed in
+ * models/ktx2/manifest.json and the KTX2 transcoder works; otherwise the WebP originals load.
  */
 
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { ensureIndexed } from './util';
 
@@ -19,10 +24,67 @@ export interface ModelAsset {
 }
 
 const MODEL_BASE = `${import.meta.env.BASE_URL}models/`;
+/** Basis Universal transcoder (three's examples/jsm/libs/basis, served + emitted by vite.config.ts). */
+const BASIS_PATH = `${import.meta.env.BASE_URL}basis/`;
+/** scripts/optimize-assets.mjs stamps a content hash on texture names: same hash = same texels. */
+const CONTENT_HASH = /#([0-9a-f]{12})$/;
+
+/**
+ * The one shared KTX2 (Basis) texture loader, or null where it can't work (no WebAssembly or
+ * Worker). Transcodes on worker threads to whatever the GPU samples natively: ETC2 / ASTC on
+ * Quest, BC on desktop (RGBA8 only as a last resort).
+ */
+export function createKTX2Loader(renderer: THREE.WebGLRenderer): KTX2Loader | null {
+  if (typeof WebAssembly === 'undefined' || typeof Worker === 'undefined') return null;
+  try {
+    return new KTX2Loader().setTranscoderPath(BASIS_PATH).detectSupport(renderer);
+  } catch (err) {
+    console.warn('[models] KTX2 textures unavailable, using WebP', err);
+    return null;
+  }
+}
+
+/**
+ * GPU-compressed textures keep their transcoded data in JS memory after upload by default. Note
+ * its size (for the perf HUD) and drop that CPU copy once it is on the GPU (tens of MB on Quest).
+ */
+export function trimAfterUpload(tex: THREE.Texture): void {
+  const c = tex as THREE.CompressedTexture;
+  if (!c.isCompressedTexture || tex.userData.gpuBytes !== undefined) return;
+  const mips = c.mipmaps as unknown as { data?: ArrayBufferView }[] | undefined;
+  if (!mips?.length) return;
+  tex.userData.gpuBytes = mips.reduce((a, m) => a + (m.data?.byteLength ?? 0), 0);
+  const prev = tex.onUpdate;
+  tex.onUpdate = (t: THREE.Texture) => {
+    prev?.call(tex, t);
+    c.mipmaps = [];
+  };
+}
+
+/** Fetch a JSON list of names, or null if it's missing (the dev server answers with index.html). */
+export async function fetchNameList(url: string): Promise<Set<string> | null> {
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null;
+    const list: unknown = await res.json();
+    return Array.isArray(list) ? new Set(list.filter((n): n is string => typeof n === 'string')) : null;
+  } catch {
+    return null;
+  }
+}
 
 export class ModelLibrary {
   private readonly models = new Map<string, ModelAsset>();
   private readonly loader = new GLTFLoader();
+  /** Loader for the KTX2-textured copies (null: WebP only). */
+  private compressedLoader: GLTFLoader | null = null;
+  /** Textures with a content hash, shared between models (both hands, a trim set used twice...). */
+  private readonly sharedTextures = new Map<string, THREE.Texture>();
+
+  /** Prefer the build's GPU-compressed copies (call before load()). */
+  useKTX2(ktx2: KTX2Loader | null): void {
+    this.compressedLoader = ktx2 ? new GLTFLoader().setKTX2Loader(ktx2) : null;
+  }
 
   /**
    * Load the given models in parallel, skipping any not listed in models/manifest.json (generated
@@ -31,7 +93,10 @@ export class ModelLibrary {
    * new set-dressing pieces are picked up without a code change.
    */
   async load(names: readonly string[], prefixes: readonly string[] = []): Promise<void> {
-    const available = await this.manifest();
+    const [available, compressed] = await Promise.all([
+      fetchNameList(`${MODEL_BASE}manifest.json`),
+      this.compressedLoader ? fetchNameList(`${MODEL_BASE}ktx2/manifest.json`) : Promise.resolve(null),
+    ]);
     const wanted = new Set(names);
     if (available) for (const n of available) if (prefixes.some((p) => n.startsWith(p))) wanted.add(n);
     await Promise.all(
@@ -39,7 +104,7 @@ export class ModelLibrary {
         if (available && !available.has(name)) return;
         if (this.models.has(name)) return;
         try {
-          const gltf = await this.loader.loadAsync(`${MODEL_BASE}${name}.glb`);
+          const gltf = await this.loadGltf(name, !!compressed?.has(name));
           const extras: Record<string, unknown> = {};
           gltf.scene.traverse((o) => {
             Object.assign(extras, o.userData);
@@ -47,10 +112,7 @@ export class ModelLibrary {
             const mesh = o as THREE.Mesh;
             if (!mesh.isMesh) return;
             mesh.geometry.userData.shared = true;
-            for (const mat of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-              mat.userData.shared = true;
-              for (const v of Object.values(mat)) if (v instanceof THREE.Texture) v.userData.shared = true;
-            }
+            for (const mat of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) this.prepareMaterial(mat);
           });
           this.models.set(name, { name, scene: gltf.scene, animations: gltf.animations, extras });
         } catch (err) {
@@ -60,15 +122,39 @@ export class ModelLibrary {
     );
   }
 
-  /** Names of the GLBs that exist, or null if the manifest is unavailable (then: try everything). */
-  private async manifest(): Promise<Set<string> | null> {
-    try {
-      const res = await fetch(`${MODEL_BASE}manifest.json`, { cache: 'no-store' });
-      if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null;
-      const list: unknown = await res.json();
-      return Array.isArray(list) ? new Set(list.filter((n): n is string => typeof n === 'string')) : null;
-    } catch {
-      return null;
+  /** The KTX2 copy if there is one (falling back to the original if it fails), else the original. */
+  private async loadGltf(name: string, compressed: boolean): Promise<GLTF> {
+    if (compressed && this.compressedLoader) {
+      try {
+        return await this.compressedLoader.loadAsync(`${MODEL_BASE}ktx2/${name}.glb`);
+      } catch (err) {
+        console.warn(`[models] ${name}: compressed copy failed, loading the WebP original`, err);
+      }
+    }
+    return this.loader.loadAsync(`${MODEL_BASE}${name}.glb`);
+  }
+
+  private prepareMaterial(mat: THREE.Material): void {
+    mat.userData.shared = true;
+    // Thin glass: one pass instead of three's back-then-front pair (half the draw calls; with
+    // depthWrite off, as glTF BLEND materials are, the result looks the same).
+    if (mat.transparent && mat.side === THREE.DoubleSide) mat.forceSinglePass = true;
+    const slots = mat as unknown as Record<string, unknown>;
+    for (const key of Object.keys(slots)) {
+      const tex = slots[key];
+      if (!(tex instanceof THREE.Texture)) continue;
+      const hash = CONTENT_HASH.exec(tex.name);
+      if (hash) {
+        const id = `${hash[1]}|${tex.colorSpace}|${tex.wrapS}|${tex.wrapT}|${tex.flipY}`;
+        const prev = this.sharedTextures.get(id);
+        if (prev && prev !== tex) {
+          slots[key] = prev; // never uploaded, so nothing to free on the GPU
+          continue;
+        }
+        this.sharedTextures.set(id, tex);
+      }
+      tex.userData.shared = true;
+      trimAfterUpload(tex);
     }
   }
 

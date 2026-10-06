@@ -65,6 +65,13 @@ export class MicInput {
         await track.applyConstraints({ autoGainControl: false, echoCancellation: true, noiseSuppression: true });
       }
     } catch { /* best effort */ }
+    // A new device (the old one was unplugged / ended): the meter graph must read the new stream.
+    if (this.stream && this.stream !== stream) {
+      this.dispose();
+      for (const t of this.stream.getAudioTracks()) {
+        try { t.stop(); } catch { /* already ended */ }
+      }
+    }
     this.stream = stream;
     if (this.ctx) this.attach(this.ctx);
     return stream;
@@ -77,6 +84,7 @@ export class MicInput {
 
   /** Builds the meter graph once both the stream and an AudioContext exist. */
   attach(ctx: AudioContext): void {
+    if (this.ctx !== ctx) this.dispose();
     this.ctx = ctx;
     if (!this.stream || this.analyser) return;
     try {
@@ -116,5 +124,6 @@ export class MicInput {
     }
     this.nodes = [];
     this.analyser = null;
+    this.buf = null;
   }
 }

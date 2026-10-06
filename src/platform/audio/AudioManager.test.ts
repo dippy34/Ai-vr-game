@@ -366,3 +366,60 @@ describe('AudioManager with a strict fake WebAudio', () => {
     expect(ctx.nodes).toBe(before);
   });
 });
+
+describe('AudioManager device / context loss', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('resumes a context suspended behind its back (Quest headset sleep) without a DOM gesture', async () => {
+    vi.stubGlobal('AudioContext', FakeContext);
+    const am = new AudioManager();
+    await am.unlock();
+    const ctx = FakeContext.last!;
+    expect(ctx.state).toBe('running');
+    // The headset slept: the browser suspended the context. In VR there are no DOM clicks to
+    // resume it from, but the page has had user activation, so resume() is allowed.
+    ctx.state = 'suspended';
+    const resume = vi.spyOn(ctx, 'resume');
+    for (let f = 0; f < 72 * 3; f++) am.update(world(), 'me', head, 1 / 72);
+    expect(resume).toHaveBeenCalled();
+    expect(resume.mock.calls.length).toBeLessThanOrEqual(4); // throttled, not every frame
+    expect(ctx.state).toBe('running');
+  });
+
+  it('rebuilds the mic meter on a new device after the old one was unplugged', async () => {
+    vi.stubGlobal('AudioContext', FakeContext);
+    const streams: MediaStream[] = [];
+    const getUserMedia = vi.fn(() => {
+      const s = fakeStream();
+      streams.push(s);
+      return Promise.resolve(s);
+    });
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+    const am = new AudioManager();
+    await am.unlock();
+    const ctx = FakeContext.last!;
+    const sources = vi.spyOn(ctx, 'createMediaStreamSource');
+    const first = await am.startMic();
+    expect(first).toBe(streams[0]);
+    expect(sources).toHaveBeenLastCalledWith(streams[0]);
+    // Asking again while the mic works hands back the same stream (no prompt, no new graph).
+    expect(await am.startMic()).toBe(first);
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+
+    // Unplugged: the track ends. The meter goes quiet and a new request gets a new device...
+    (first!.getAudioTracks()[0] as { readyState: string }).readyState = 'ended';
+    const t0 = performance.now();
+    while (performance.now() - t0 < 400) am.getMicLevel();
+    expect(am.getMicLevel()).toBe(0);
+    const second = await am.startMic();
+    expect(second).toBe(streams[1]);
+    // ...whose audio the meter now actually reads.
+    expect(sources).toHaveBeenLastCalledWith(streams[1]);
+    const t1 = performance.now();
+    while (performance.now() - t1 < 50) am.getMicLevel();
+    expect(am.getMicLevel()).toBeGreaterThan(0.5);
+  });
+});

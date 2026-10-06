@@ -2,6 +2,11 @@
  * Network messages. Topology is a star: every client talks only to the host, the host runs the
  * GameSim and relays. (Voice audio is the exception: it is peer-to-peer between everyone.)
  * Messages are plain JSON so any transport (PeerJS, BroadcastChannel, WebSocket, Photon...) works.
+ *
+ * Nothing received is trusted, in either direction: the types below describe what a well-behaved
+ * peer sends, not what arrives. HostSession validates and rate-limits client messages (and the
+ * GameSim sanitizes poses / actions); ClientSession validates the host's states, poses, events and
+ * lobbies before use. The readers live in src/core/validate.ts.
  */
 
 import type {

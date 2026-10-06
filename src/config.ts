@@ -133,6 +133,13 @@ export const RENDER = {
   afterimageDuration: 2.2,
   /** Max distance (m) from the flash at which things get an afterimage. */
   flashRange: 14,
+  /**
+   * WebXR eye-buffer size relative to the browser's recommended one (Quest: fill rate is the
+   * bottleneck with per-pixel lights; 0.9 = 19% fewer pixels, barely visible with MSAA on).
+   */
+  xrFramebufferScale: 0.9,
+  /** Desktop canvas devicePixelRatio cap. */
+  maxPixelRatio: 2,
 } as const;
 
 /** Player colors (avatar tints), assigned in join order. */

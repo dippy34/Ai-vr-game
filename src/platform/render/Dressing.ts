@@ -63,6 +63,29 @@ export interface DressingInput {
   placed: PlacedFurniture[];
   /** World point at the center of the fuse box's back (on the wall). */
   fuseBoxMount: THREE.Vector3;
+  /** Spots other scatterers (story decals + notes, see Decals.ts) already use: kept clear. */
+  reserved?: DressingReserved;
+}
+
+/** A floor rectangle: center, half extents along the yaw-rotated X / Z axes. */
+export interface FloorRect {
+  x: number;
+  z: number;
+  hw: number;
+  hd: number;
+  yaw: number;
+}
+
+/** Spots the dressing must leave alone (planned before the scatter, e.g. by Decals.ts). */
+export interface DressingReserved {
+  /** Wall rects (same convention as the dressing's own wall pieces). */
+  walls: WallRect[];
+  /** Flat floor pieces: nothing goes on top of them, not even rugs. */
+  floor: FloorRect[];
+  /** Floor kept free of solid pieces (e.g. in front of writing on a wall). */
+  clearance: FloorRect[];
+  /** Spots on furniture tops. */
+  surfaces: { x: number; z: number; r: number }[];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -234,7 +257,7 @@ const boxAabb = (b: Box): Aabb => ({ minX: b.min.x, minY: b.min.y, minZ: b.min.z
 const SIDES: readonly [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
 /** A placed wall piece (for overlap tests). */
-interface WallRect {
+export interface WallRect {
   /** Outward wall normal (from the room into the wall). */
   nx: number;
   nz: number;
@@ -311,6 +334,7 @@ export class DressingSet {
     this.level = input.level;
     this.seed = (input.level.seed >>> 0) ^ 0x5eed;
     this.analyze();
+    this.reserve(input.reserved);
     const has = (n: string) => this.pieces.has(n);
     // Order matters: big/structural things first, litter last.
     if (has('boards')) this.ruleBoards();
@@ -422,6 +446,21 @@ export class DressingSet {
     disc(level.cameraSpawn.position, 0.4, F_ITEM);
     for (const p of [...level.fuseSpawns, ...level.filmSpawns]) disc(p, 0.4, F_ITEM);
     disc(this.input.fuseBoxMount, 1.0, F_CLEAR);
+  }
+
+  /** Mark spots other scatterers already use (see DressingReserved). */
+  private reserve(r: DressingReserved | undefined): void {
+    if (!r) return;
+    this.wallRects.push(...r.walls);
+    this.surfaceUsed.push(...r.surfaces);
+    const mark = (f: FloorRect, flag: number): void => {
+      this.grid.forRect(f.x, f.z, f.hw, f.hd, f.yaw, (c) => {
+        if (c >= 0) this.grid.flags[c] |= flag;
+        return true;
+      });
+    };
+    for (const f of r.floor) mark(f, F_USED | F_RUG);
+    for (const f of r.clearance) mark(f, F_USED);
   }
 
   private roomOf(x: number, z: number): Room | null {

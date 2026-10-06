@@ -44,6 +44,13 @@ import {
 /** Ghost hearing: world bus lowpass (Hz) and gain while the local player is caught. */
 const GHOST = { worldLp: 650, worldGain: 0.42, voiceLp: 2800, voiceGain: 0.85 } as const;
 
+/**
+ * Seconds between resume() attempts while the context is suspended behind our back (Quest suspends
+ * it when the headset sleeps; inside VR there are no DOM gestures to resume from, but the page has
+ * had user activation, so resume() is allowed).
+ */
+const RESUME_RETRY_SECONDS = 1;
+
 const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T | void> =>
   Promise.race([p, new Promise<void>((resolve) => setTimeout(resolve, ms))]);
 
@@ -64,6 +71,7 @@ export class AudioManager implements IAudioManager {
   private listener: Vec3 = { x: 0, y: PLAYER.eyeHeight, z: 0 };
   private warned = false;
   private level: LevelData | null = null;
+  private resumeTimer = 0;
 
   // -------------------------------------------------------------------------------------------
   // Lifecycle
@@ -197,6 +205,7 @@ export class AudioManager implements IAudioManager {
   }
 
   update(state: WorldState, localId: PlayerId, head: HeadPose, dt: number): void {
+    this.retryResume(dt);
     const e = this.live();
     try {
       this.mic.poll(!!e);
@@ -343,6 +352,23 @@ export class AudioManager implements IAudioManager {
   // -------------------------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------------------------
+
+  /** Keep trying to resume a context that got suspended/interrupted after unlock() (throttled). */
+  private retryResume(dt: number): void {
+    const ctx = this.eng?.ctx;
+    if (!ctx || ctx.state === 'running' || ctx.state === 'closed') {
+      this.resumeTimer = 0;
+      return;
+    }
+    this.resumeTimer -= Number.isFinite(dt) && dt > 0 ? dt : 0;
+    if (this.resumeTimer > 0) return;
+    this.resumeTimer = RESUME_RETRY_SECONDS;
+    try {
+      ctx.resume().catch(() => undefined);
+    } catch {
+      /* not allowed right now; try again later */
+    }
+  }
 
   private setGhost(on: boolean, at: number): void {
     const e = this.eng;

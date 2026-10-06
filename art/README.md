@@ -70,3 +70,18 @@ should look *horrible* in the camera flash: glossy and pale against black.
 Animations loop except `Attack`. Stride is matched so that `Walk` plays at 1.0 m/s and `Run` at
 3.1 m/s with timeScale 1 (the game scales timeScale by actual speed). Write the speeds into the
 glTF extras (`extras.walkSpeed`, `extras.runSpeed`).
+
+## GPU texture compression (build step, not part of the Blender pipeline)
+
+Keep exporting WebP into `public/`: that's what `npm run dev` serves. `npm run build` then runs
+`scripts/optimize-assets.mjs`, which writes KTX2 (Basis Universal) copies into `dist/`
+(`models/ktx2/*.glb`, `textures/*.ktx2`): ETC1S for color and ORM, ETC1S normal-map mode for prop
+normals, UASTC for the monster/hands/camera and house-surface normals, mipmaps included. The game
+prefers those and falls back to the WebP originals. On a Quest that cuts texture memory ~7x
+(RGBA8 → ETC2/ASTC). `npm run dev:ktx2` serves the same compressed copies in dev (cached by
+content hash, so only changed textures are re-encoded).
+
+The renderer merges batched models (furniture, dressing, trims, decals) that share material
+settings and **texture sizes** into texture arrays, one draw call per group. So within a family keep
+the same sizes per map (e.g. furniture 1024 color/normal + 512 ORM, dressing 512 everywhere); a
+model with odd sizes still works, it just costs its own draw call.

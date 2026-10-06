@@ -6,9 +6,15 @@
  * Conventions (from the texture artist): color = sRGB; normal = OpenGL (+Y up, three.js default);
  * orm = linear R ambient occlusion / G roughness / B metalness. `tile` = meters one repeat covers,
  * so UV = world meters / tile. On walls v = 0 is the floor.
+ *
+ * Production builds also have GPU-compressed copies (<name>_<map>.ktx2, made by
+ * scripts/optimize-assets.mjs, which marks those sets `"ktx2": true` in textures.json). They're
+ * used when the KTX2 transcoder works, else the WebP files (the only ones in plain `npm run dev`).
  */
 
 import * as THREE from 'three';
+import type { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
+import { trimAfterUpload } from './assets';
 
 export interface SurfaceSet {
   name: string;
@@ -25,12 +31,18 @@ export class SurfaceLibrary {
   private readonly sets = new Map<string, SurfaceSet>();
   private readonly materials = new Map<string, THREE.MeshStandardMaterial>();
   private readonly loader = new THREE.TextureLoader();
+  private ktx2: KTX2Loader | null = null;
 
   constructor(private readonly anisotropy = 4) {}
 
+  /** Prefer the build's GPU-compressed (KTX2) copies where textures.json lists them (call before load()). */
+  useKTX2(loader: KTX2Loader | null): void {
+    this.ktx2 = loader;
+  }
+
   /** Load every set listed in textures.json. Missing/broken sets are skipped with a warning. */
   async load(): Promise<void> {
-    let index: Record<string, { tile?: unknown }>;
+    let index: Record<string, { tile?: unknown; ktx2?: unknown }>;
     try {
       const res = await fetch(`${BASE}textures.json`, { cache: 'no-store' });
       if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return;
@@ -42,15 +54,14 @@ export class SurfaceLibrary {
       Object.entries(index).map(async ([name, info]) => {
         const tile = Array.isArray(info.tile) && info.tile.length === 2 ? (info.tile as [number, number]) : [1, 1];
         try {
-          const [map, normalMap, orm] = await Promise.all(
-            ['color', 'normal', 'orm'].map((kind) => this.loader.loadAsync(`${BASE}${name}_${kind}.webp`)),
-          );
+          const [map, normalMap, orm] = await this.loadMaps(name, info.ktx2 === true);
           map.colorSpace = THREE.SRGBColorSpace;
           normalMap.colorSpace = orm.colorSpace = THREE.NoColorSpace;
           for (const t of [map, normalMap, orm]) {
             t.wrapS = t.wrapT = THREE.RepeatWrapping;
             t.anisotropy = this.anisotropy;
             t.userData.shared = true;
+            trimAfterUpload(t);
           }
           this.sets.set(name, { name, tile: [Number(tile[0]) || 1, Number(tile[1]) || 1], map, normalMap, orm });
         } catch (err) {
@@ -58,6 +69,21 @@ export class SurfaceLibrary {
         }
       }),
     );
+  }
+
+  /** color, normal, orm: the KTX2 copies if available and working, else the WebP files. */
+  private async loadMaps(name: string, compressed: boolean): Promise<THREE.Texture[]> {
+    const kinds = ['color', 'normal', 'orm'];
+    const ktx2 = this.ktx2;
+    if (compressed && ktx2) {
+      try {
+        // Encoded upside down already (compressed textures can't be flipped on upload like WebP).
+        return await Promise.all(kinds.map((kind) => ktx2.loadAsync(`${BASE}${name}_${kind}.ktx2`)));
+      } catch (err) {
+        console.warn(`[textures] ${name}: compressed copy failed, loading the WebP files`, err);
+      }
+    }
+    return Promise.all(kinds.map((kind) => this.loader.loadAsync(`${BASE}${name}_${kind}.webp`)));
   }
 
   has(name: string): boolean {
