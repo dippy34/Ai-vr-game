@@ -342,6 +342,7 @@ details[open] summary {
   opacity: 0;
   transition: opacity 0.4s;
   max-width: 90vw;
+  white-space: pre-line;
 }
 
 .hud .toast.show {

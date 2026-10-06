@@ -59,6 +59,9 @@ export class Game {
   private lastHead: Vec3 | null = null;
   private promptTimer = 0;
   private roundEndedAt = -1;
+  /** For the end-of-round summary. */
+  private roundStartedAt = -1;
+  private roundFlashes = 0;
   private paused = false;
   private readonly tmpV = new THREE.Vector3();
   private readonly tmpQ = new THREE.Quaternion();
@@ -193,9 +196,11 @@ export class Game {
     const delta = v3((right.x * mx + f.x * my) * speed * dt, 0, (right.z * mx + f.z * my) * speed * dt);
 
     const opts = { exitOpen: state.exitOpen };
-    const moved = moveCircle(session.level, head, delta, PLAYER.radius, opts);
+    // Caught players are ghosts: they drift through walls to watch the others.
+    const ghost = state.phase === 'playing' && state.players[session.localId]?.status === 'caught';
+    const moved = ghost ? add3(head, delta) : moveCircle(session.level, head, delta, PLAYER.radius, opts);
     // Also undo real-world walking into walls (room-scale VR).
-    const corr = pushOut(session.level, moved, PLAYER.radius, opts);
+    const corr = ghost ? v3() : pushOut(session.level, moved, PLAYER.radius, opts);
     const dx = moved.x + corr.x - head.x;
     const dz = moved.z + corr.z - head.z;
     if (dx !== 0 || dz !== 0) {
@@ -329,6 +334,7 @@ export class Game {
 
     switch (e.type) {
       case 'flash':
+        this.roundFlashes++;
         this.renderer.flash(e, session.state, localId, this.localPose);
         break;
       case 'dryFire':
@@ -358,10 +364,12 @@ export class Game {
       case 'phase':
         if (e.phase === 'playing') {
           this.roundEndedAt = -1;
+          this.roundStartedAt = performance.now() / 1000;
+          this.roundFlashes = 0;
           this.message('Find the fuses. Stay quiet.', 4);
         } else if (e.phase === 'won' || e.phase === 'lost') {
           this.roundEndedAt = performance.now() / 1000;
-          this.message(e.phase === 'won' ? 'You escaped.' : 'Nobody made it out.', 5);
+          this.message(`${e.phase === 'won' ? 'You escaped.' : 'Nobody made it out.'}\n${this.roundSummary(session.state)}`, 6);
         }
         break;
       default:
@@ -397,6 +405,14 @@ export class Game {
 
     this.lastHead = null;
     this.stepAccum = 0;
+  }
+
+  private roundSummary(state: WorldState): string {
+    const secs = this.roundStartedAt >= 0 ? Math.max(0, Math.round(performance.now() / 1000 - this.roundStartedAt)) : 0;
+    const time = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+    const players = Object.values(state.players);
+    const out = players.filter((p) => p.status === 'escaped').length;
+    return `${time} in the house · ${state.fusesInserted}/${state.fusesRequired} fuses · ${this.roundFlashes} flashes · ${out}/${players.length} got out`;
   }
 
   /** VR menu button: there are no menus in the headset, so show where things stand. */
