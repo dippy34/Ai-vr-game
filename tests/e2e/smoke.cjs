@@ -100,6 +100,8 @@ async function monsterAway(page, x, z, d = 4) {
   await ctx.grantPermissions(['microphone']);
 
   // ------------------------------------------------------------ solo
+  // E2E_ONLY=multi skips the solo part (handy on slow machines when debugging multiplayer).
+  if (process.env.E2E_ONLY !== 'multi') {
   const page = await ctx.newPage();
   watch(page, 'solo');
   await page.goto(base);
@@ -198,6 +200,7 @@ async function monsterAway(page, x, z, d = 4) {
   check(!!s && s.st.phase === 'won' && s.st.players[s.id].status === 'escaped', `walking out the open door wins (${s && s.st.phase})`);
   await page.screenshot({ path: `${out}/g-escaped.png` });
   await page.close();
+  }
 
   // ------------------------------------------------------------ two tabs, local transport
   const host = await ctx.newPage();

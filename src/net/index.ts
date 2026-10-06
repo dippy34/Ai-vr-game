@@ -20,7 +20,7 @@ export interface NetOptions {
   peerTimeoutMs?: number;
   /** Extra silence allowed right after a peer joins, while it builds the level (default 30000 ms). */
   joinGraceMs?: number;
-  /** Max wait for the host to answer a join (default: 10000 ms peerjs, 2000 ms local). */
+  /** Max wait for the host to answer a join (default: 10000 ms peerjs, 5000 ms local). */
   joinTimeoutMs?: number;
   /** PeerJS only: max wait for the signaling server (default 10000 ms). */
   signalingTimeoutMs?: number;
@@ -71,7 +71,8 @@ export async function joinRoom(kind: TransportKind, code: string, options: NetOp
   }
   switch (kind) {
     case 'local':
-      return joinLocal(normalized, { timing: timing(options), joinTimeoutMs: options.joinTimeoutMs ?? 2000 });
+      // Generous: a host tab that is busy rendering (slow machine, software GL) answers late.
+      return joinLocal(normalized, { timing: timing(options), joinTimeoutMs: options.joinTimeoutMs ?? 5000 });
     case 'peerjs': {
       const { joinPeerjs } = await import('./peer');
       return joinPeerjs(normalized, {
