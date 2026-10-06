@@ -38,12 +38,8 @@ export function unitCapsuleLo(): THREE.BufferGeometry {
   return unitCapsuleLoGeo;
 }
 
-/** Keep only position + normal (afterimage geometry), make sure it's indexed. */
-export function positionNormalOnly(g: THREE.BufferGeometry): THREE.BufferGeometry {
-  g.userData = {};
-  for (const name of Object.keys(g.attributes)) {
-    if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
-  }
+/** Give a non-indexed geometry a trivial index so it can be merged with indexed ones. */
+export function ensureIndexed(g: THREE.BufferGeometry): THREE.BufferGeometry {
   if (!g.index) {
     const n = g.attributes.position.count;
     const idx = new Array<number>(n);
@@ -51,6 +47,15 @@ export function positionNormalOnly(g: THREE.BufferGeometry): THREE.BufferGeometr
     g.setIndex(idx);
   }
   return g;
+}
+
+/** Keep only position + normal (afterimage geometry), make sure it's indexed. */
+export function positionNormalOnly(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  g.userData = {};
+  for (const name of Object.keys(g.attributes)) {
+    if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
+  }
+  return ensureIndexed(g);
 }
 
 /** Fill a geometry with a constant vertex color attribute. */

@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Handedness } from '../../core/types';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { paint } from './util';
+import { ensureIndexed, paint } from './util';
 
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
@@ -19,6 +19,7 @@ const _s = new THREE.Vector3(1, 1, 1);
 function merged(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
   for (const p of parts) {
     if (p.attributes.uv) p.deleteAttribute('uv');
+    ensureIndexed(p);
   }
   const g = mergeGeometries(parts, false)!;
   for (const p of parts) p.dispose();

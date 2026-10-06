@@ -8,7 +8,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { Handedness, PlayerPose, PlayerStatus } from '../../core/types';
 import { HandModel } from './HandModel';
-import { damp, paint, positionNormalOnly, setQ, setV } from './util';
+import { damp, ensureIndexed, paint, positionNormalOnly, setQ, setV } from './util';
 
 const HEAD_CENTER = new THREE.Vector3(0, 0.028, 0.07);
 
@@ -29,6 +29,7 @@ function headParts(bandColor: number, withColor: boolean): THREE.BufferGeometry 
   }
   for (const p of parts) {
     p.deleteAttribute('uv');
+    ensureIndexed(p);
     if (!withColor) positionNormalOnly(p);
   }
   const g = mergeGeometries(parts, false)!;
