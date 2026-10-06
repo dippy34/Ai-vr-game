@@ -144,6 +144,7 @@ export class Game {
     }
 
     if (frame.menuPressed && frame.mode === 'desktop' && !this.paused) this.onMenu();
+    if (frame.menuPressed && frame.mode === 'xr') this.statusCard(session);
 
     const state = session.state;
     const me = state.players[session.localId];
@@ -396,6 +397,26 @@ export class Game {
 
     this.lastHead = null;
     this.stepAccum = 0;
+  }
+
+  /** VR menu button: there are no menus in the headset, so show where things stand. */
+  private statusCard(session: Session): void {
+    const state = session.state;
+    const me = state.players[session.localId];
+    const lines: string[] = [];
+    if (state.phase === 'lobby') {
+      lines.push(`${Object.keys(state.players).length} player(s) in the house`);
+      lines.push(session.isHost ? 'Pull the trigger to start.' : 'Waiting for the host to start.');
+    } else if (state.phase === 'playing') {
+      lines.push(state.exitOpen ? 'The front door is OPEN.' : `Fuses ${state.fusesInserted} of ${state.fusesRequired}`);
+      lines.push(`Film: ${state.camera.film} shots`);
+      if (me?.status === 'caught') lines.push('You were caught. Spectating.');
+    } else {
+      lines.push(state.phase === 'won' ? 'Someone got out.' : 'Nobody got out.');
+      if (session.isHost) lines.push('Pull the trigger to play again.');
+    }
+    if (session.roomCode) lines.push(`Room ${session.roomCode}`);
+    this.message(lines.join('\n'), 5);
   }
 
   private message(text: string, seconds = 3): void {
