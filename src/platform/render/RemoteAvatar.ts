@@ -48,13 +48,19 @@ export function headGhostGeometry(): THREE.BufferGeometry {
 }
 
 function torsoGeometry(color: number): THREE.BufferGeometry {
-  const c = new THREE.Color(color).multiplyScalar(0.3).getHex();
-  const neck = paint(new THREE.CylinderGeometry(0.045, 0.05, 0.16, 10).translate(0, -0.07, 0.0), 0x6a5e56);
-  const chest = paint(new THREE.CapsuleGeometry(0.5, 1, 3, 12), c);
-  chest.scale(0.34, 0.3, 0.2).translate(0, -0.46, 0.02);
-  const shoulders = paint(new THREE.CapsuleGeometry(0.5, 1, 3, 10).rotateZ(Math.PI / 2), c);
-  shoulders.scale(0.22, 0.11, 0.17).translate(0, -0.2, 0.02);
-  const parts = [neck, chest, shoulders];
+  // Muted clothing with a hint of the player's color (the head band carries the real color).
+  const cloth = new THREE.Color(0x1f1e1d).lerp(new THREE.Color(color), 0.22).getHex();
+  const darkCloth = new THREE.Color(cloth).multiplyScalar(0.75).getHex();
+  const neck = paint(new THREE.CylinderGeometry(0.045, 0.052, 0.16, 10).translate(0, -0.07, 0.01), 0x8a7a6e);
+  const chest = paint(new THREE.CylinderGeometry(0.17, 0.13, 0.44, 14, 1), cloth);
+  chest.scale(1, 1, 0.62).translate(0, -0.38, 0.02);
+  const shoulders = paint(new THREE.CapsuleGeometry(0.5, 1, 3, 10).rotateZ(Math.PI / 2), cloth);
+  shoulders.scale(0.2, 0.1, 0.18).translate(0, -0.18, 0.02);
+  const belly = paint(new THREE.CapsuleGeometry(0.5, 1, 3, 10).rotateZ(Math.PI / 2), darkCloth);
+  belly.scale(0.14, 0.09, 0.17).translate(0, -0.6, 0.02);
+  const collar = paint(new THREE.TorusGeometry(0.06, 0.016, 6, 14).rotateX(Math.PI / 2), darkCloth);
+  collar.translate(0, -0.14, 0.01);
+  const parts = [neck, chest, shoulders, belly, collar];
   for (const p of parts) p.deleteAttribute('uv');
   const g = mergeGeometries(parts, false)!;
   for (const p of parts) p.dispose();
@@ -97,7 +103,7 @@ export class RemoteAvatar {
     this.head = new THREE.Mesh(headParts(color, true), this.headMat);
     this.torso = new THREE.Mesh(torsoGeometry(color), this.torsoMat);
     // Gloves tinted toward the player's color so you can tell who is signing in the flash.
-    const glove = new THREE.Color(0xb59d8a).lerp(new THREE.Color(color), 0.35);
+    const glove = new THREE.Color(0x7d6e63).lerp(new THREE.Color(color), 0.3);
     this.handMat = new THREE.MeshLambertMaterial({ color: glove });
     this.left = new HandModel('left', this.handMat);
     this.right = new HandModel('right', this.handMat);
@@ -114,7 +120,7 @@ export class RemoteAvatar {
     this.torso.geometry.dispose();
     this.head.geometry = headParts(color, true);
     this.torso.geometry = torsoGeometry(color);
-    this.handMat.color.set(0xb59d8a).lerp(new THREE.Color(color), 0.35);
+    this.handMat.color.set(0x7d6e63).lerp(new THREE.Color(color), 0.3);
   }
 
   /**

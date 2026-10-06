@@ -42,11 +42,16 @@ export class MessagePanel {
     const g = this.canvas.getContext('2d')!;
     g.clearRect(0, 0, W, H);
     // Soft dark backing so text reads over the flash too.
-    const bg = g.createRadialGradient(W / 2, H / 2, 20, W / 2, H / 2, W / 2);
-    bg.addColorStop(0, 'rgba(0,0,0,0.55)');
+    g.save();
+    g.translate(W / 2, H / 2);
+    g.scale(1, H / W);
+    const bg = g.createRadialGradient(0, 0, 10, 0, 0, W / 2);
+    bg.addColorStop(0, 'rgba(0,0,0,0.6)');
+    bg.addColorStop(0.6, 'rgba(0,0,0,0.35)');
     bg.addColorStop(1, 'rgba(0,0,0,0)');
     g.fillStyle = bg;
-    g.fillRect(0, 0, W, H);
+    g.fillRect(-W / 2, -W / 2, W, W);
+    g.restore();
     const lines = wrap(g, text, W - 120, 64);
     const size = lines.length > 2 ? 50 : 64;
     g.font = `600 ${size}px Georgia, 'Times New Roman', serif`;

@@ -10,6 +10,7 @@
  *   noflash=1    don't auto-flash every 3 s
  *   flashBy=p3   who fires the auto flash (default: me)
  *   open=1       fuses all in + exit open
+ *   level=real   use src/core/level createLevel(seed) instead of the mock (view=spawn recommended)
  * Desktop: drag to look, WASD to move, F = flash, M = message.
  */
 
@@ -19,6 +20,7 @@ import type {
   FingerCurls, FlashEvent, HandPose, ItemState, PlayerPose, PlayerState, Quat, Vec3, WorldState,
 } from '../../src/core/types';
 import { mockLevel } from './mockLevel';
+import { createLevel } from '../../src/core/level';
 
 const params = new URLSearchParams(location.search);
 const view = params.get('view') ?? 'signs';
@@ -26,11 +28,13 @@ const manual = params.has('manual');
 const autoFlash = !params.has('noflash');
 const flashBy = params.get('flashBy') ?? 'me';
 const open = params.has('open');
+const p2Sign = (params.get('sign') ?? 'stop') as 'stop';
 
 const app = document.getElementById('app')!;
 const hud = document.getElementById('hud')!;
 const gr = new GameRenderer(app);
-const level = mockLevel();
+// level=real uses the core level generator (if it is implemented), else the mock.
+const level = params.get('level') === 'real' ? createLevel(Number(params.get('seed') ?? 1)) : mockLevel();
 gr.loadLevel(level);
 if (params.has('bright')) {
   gr.ctx.scene.add(new THREE.AmbientLight(0xffffff, 2.2));
@@ -71,7 +75,7 @@ const SIGNS: Record<string, { off: THREE.Vector3; fingers: THREE.Vector3; back: 
   point: { off: V(0.12, -0.1, -0.32), fingers: V(-0.05, 0.12, -1), back: V(0.6, 0.8, 0), curls: [0.75, 0, 1, 1, 1] },
   rest: { off: V(0.2, -0.75, -0.05), fingers: V(0, -1, -0.15), back: V(1, 0, 0), curls: [0.3, 0.35, 0.4, 0.45, 0.5] },
   holdCam: { off: V(0.16, -0.28, -0.42), fingers: V(0, 0.05, -1), back: V(1, 0, 0), curls: [0.4, 0.15, 0.85, 0.9, 0.9] },
-  meter: { off: V(-0.05, -0.32, -0.38), fingers: V(0.25, 0.2, -1), back: V(0, -1, 0), curls: [0.15, 0.1, 0.12, 0.15, 0.2] },
+  meter: { off: V(-0.02, -0.13, -0.3), fingers: V(0.35, 0.55, -1), back: V(0, -1, 0.35), curls: [0.15, 0.1, 0.12, 0.15, 0.2] },
 };
 
 function mirror(off: THREE.Vector3): THREE.Vector3 { return V(-off.x, off.y, off.z); }
@@ -105,13 +109,19 @@ interface View { feet: THREE.Vector3; yaw: number; pitch: number; left: keyof ty
 const P2 = V(-3.55, 0, 2.15);
 const VIEWS: Record<string, View> = {
   signs: { feet: V(-1.95, 0, 2.2), yaw: yawTo(V(-1.95, 0, 2.2), P2) - 0.12, pitch: -0.04, left: 'rest', right: 'holdCam' },
+  hands: { feet: V(-2.35, 0, 2.2), yaw: yawTo(V(-2.35, 0, 2.2), P2) - 0.06, pitch: 0.06, left: 'rest', right: 'holdCam' },
+  close: { feet: V(-2.6, 0, 2.25), yaw: yawTo(V(-2.6, 0, 2.25), P2) - 0.05, pitch: 0.02, left: 'rest', right: 'holdCam' },
   wide: { feet: V(-0.9, 0, 2.9), yaw: Math.PI / 2 - 0.25, pitch: -0.1, left: 'rest', right: 'holdCam' },
   room: { feet: V(-0.8, 0, 2.6), yaw: Math.PI / 2 + 0.35, pitch: -0.18, left: 'rest', right: 'holdCam' },
   roomB: { feet: V(0.8, 0, 2.9), yaw: -Math.PI / 2 + 0.5, pitch: -0.12, left: 'rest', right: 'holdCam' },
   monster: { feet: V(1.9, 0, 2.9), yaw: yawTo(V(1.9, 0, 2.9), V(3.4, 0, 1.0)), pitch: 0.12, left: 'rest', right: 'holdCam' },
-  meter: { feet: V(-1.95, 0, 2.2), yaw: Math.PI / 2, pitch: -0.75, left: 'meter', right: 'holdCam' },
+  meter: { feet: V(-1.95, 0, 2.2), yaw: Math.PI / 2, pitch: -0.5, left: 'meter', right: 'holdCam' },
+  portrait: { feet: V(2.0, 0, 2.6), yaw: yawTo(V(2.0, 0, 2.6), V(3.4, 0, 1.2)), pitch: 0.18, left: 'rest', right: 'holdCam' },
+  items: { feet: V(-2.75, 0, 0.75), yaw: yawTo(V(-2.75, 0, 0.75), V(-3.1, 0, -0.1)), pitch: -0.75, left: 'rest', right: 'holdCam' },
   exit: { feet: V(2.6, 0, 1.6), yaw: yawTo(V(2.6, 0, 1.6), V(3.0, 0, 4.0)), pitch: 0.0, left: 'rest', right: 'holdCam' },
 };
+const sp = level.playerSpawns[Number(params.get('spawn') ?? 0)] ?? level.playerSpawns[0];
+VIEWS.spawn = { feet: V(sp.position.x, 0, sp.position.z), yaw: sp.yaw + Number(params.get('turn') ?? 0), pitch: -0.05, left: 'rest', right: 'holdCam' };
 const cam: View = { ...(VIEWS[view] ?? VIEWS.signs) };
 
 // Desktop look/move for manual inspection.
@@ -184,7 +194,7 @@ function buildState(t: number): void {
 
   // p2: stop sign right in front of us, holding a fuse in the left hand; slight idle sway.
   const p2feet = P2.clone().add(V(0, 0, Math.sin(t * 0.7) * 0.02));
-  const p2 = playerPose(p2feet, yawTo(P2, cam.feet) + Math.sin(t * 0.5) * 0.05, 0.05, 'rest', 'stop');
+  const p2 = playerPose(p2feet, yawTo(P2, cam.feet) + Math.sin(t * 0.5) * 0.05, 0.05, 'rest', p2Sign);
   // p3: thumbs up a bit further back.
   const P3 = V(-4.4, 0, 1.15);
   const p3 = playerPose(P3, yawTo(P3, cam.feet), 0, 'three', 'thumbsUp', 1.55);
@@ -197,11 +207,19 @@ function buildState(t: number): void {
     p3: player('p3', 'Bo', 0xe86a4f, p3),
     p4: player('p4', 'Cy', 0x7be84f, p4, 'caught'),
   };
+  for (const id in statusOverride) if (state.players[id]) state.players[id].status = statusOverride[id];
   state.camera.position = localPose.right.position;
 
   // Monster: walks a slow loop through both rooms; investigates (listens) for a while at each end.
   const m = state.monster;
-  if (view === 'monster') {
+  if (view === 'portrait') {
+    // Standing still, facing us, listening.
+    m.position = { x: 3.4, y: 0, z: 1.2 };
+    m.yaw = yawTo(V(3.4, 0, 1.2), cam.feet);
+    m.speed = 0;
+    m.mode = 'investigate';
+    m.alert = 0.8;
+  } else if (view === 'monster') {
     const a = t * 0.35;
     const c = V(3.6, 0, 0.6);
     const pos = V(c.x + Math.cos(a) * 1.2, 0, c.z + Math.sin(a) * 0.9);
@@ -257,6 +275,7 @@ function fireFlash(by: string): void {
 let t = 0;
 let lastFlash = -1.5;
 let noiseOverride: number | null = null;
+const statusOverride: Record<string, PlayerState['status']> = {};
 let fps = 0;
 function frameStep(dt: number): void {
   t += dt;
@@ -296,6 +315,9 @@ declare global {
       message(text: string): void;
       stats(): ReturnType<GameRenderer['stats']>;
       setNoise(v: number): void;
+      reload(): void;
+      setStatus(id: string, status: PlayerState['status']): void;
+      remotePose(id: string): void;
     };
   }
 }
@@ -307,4 +329,8 @@ window.preview = {
   message(text: string) { gr.showMessage(text, 3); },
   stats: () => gr.stats(),
   setNoise(v: number) { noiseOverride = v; },
+  reload() { gr.loadLevel(mockLevel()); },
+  setStatus(id, status) { statusOverride[id] = status; },
+  /** Push a direct pose (as if from the network) for a remote player. */
+  remotePose(id) { const p = state.players[id]; if (p) gr.setRemotePose(id, p.pose); },
 };

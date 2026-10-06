@@ -16,8 +16,35 @@ import { ghostMatcapTexture } from './textures';
 
 /** Max time a full-view whiteout may last (VR comfort: no strobe longer than ~80 ms). */
 const WHITEOUT_SECONDS = 0.07;
-const SPOT_PEAK = 70;
-const POINT_PEAK = 5;
+const SPOT_PEAK = 30;
+const POINT_PEAK = 2.2;
+
+/**
+ * Afterimages are pulled this far toward the viewer along the view ray in the vertex shader: they
+ * look exactly the same on screen, but the live (dark) body that moved a few cm since the flash no
+ * longer cuts holes in its own ghost, while walls/furniture further in front still hide it.
+ */
+const GHOST_PULL = { value: 0.25 };
+
+function withViewPull<T extends THREE.Material>(m: T): T {
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.ghostPull = GHOST_PULL;
+    shader.vertexShader = shader.vertexShader
+      .replace('void main() {', 'uniform float ghostPull;\nvoid main() {')
+      .replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>
+        {
+          float ghostLen = length( mvPosition.xyz );
+          float ghostK = max( 1.0 - ghostPull / max( ghostLen, 1e-4 ), min( 1.0, 0.06 / max( ghostLen, 1e-4 ) ) );
+          mvPosition.xyz *= ghostK;
+          gl_Position = projectionMatrix * mvPosition;
+        }`,
+      );
+  };
+  m.customProgramCacheKey = () => 'mute-ghost-pull';
+  return m;
+}
 
 interface Afterimage {
   core: THREE.Mesh;
@@ -39,7 +66,9 @@ export class FlashEffect {
   private readonly warm: THREE.Mesh[] = [];
 
   constructor(private readonly scene: THREE.Scene, camera: THREE.Camera) {
-    this.spot = new THREE.SpotLight(0xf1f4ff, 0, RENDER.flashRange, THREE.MathUtils.degToRad(58), 0.7, 1.55);
+    // Range capped at fogFar: beyond it everything is fog anyway, and it limits light leaking
+    // through walls (no shadows on Quest).
+    this.spot = new THREE.SpotLight(0xf1f4ff, 0, Math.min(RENDER.flashRange, RENDER.fogFar), THREE.MathUtils.degToRad(58), 0.7, 1.7);
     this.spot.name = 'flashSpot';
     this.point = new THREE.PointLight(0xe6ecff, 0, 9, 1.8);
     this.point.name = 'flashBounce';
@@ -55,12 +84,15 @@ export class FlashEffect {
     this.whiteout.visible = false;
     camera.add(this.whiteout);
 
-    this.coreMat = new THREE.MeshMatcapMaterial({
-      matcap: ghostMatcapTexture(), color: 0xdfe8ff, vertexColors: true, transparent: true, opacity: 1, depthWrite: false, fog: false, blending: THREE.AdditiveBlending,
-    });
-    this.haloMat = new THREE.MeshBasicMaterial({
+    // Pulled toward the viewer with polygonOffset so the frozen copy never z-fights the live hand
+    // it was copied from (it is also inflated slightly when baked).
+    this.coreMat = withViewPull(new THREE.MeshMatcapMaterial({
+      matcap: ghostMatcapTexture(), color: 0xdfe8ff, vertexColors: true, transparent: true, opacity: 1, depthWrite: false, fog: false,
+      blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8,
+    }));
+    this.haloMat = withViewPull(new THREE.MeshBasicMaterial({
       color: 0x8fa6d8, vertexColors: true, transparent: true, opacity: 1, depthWrite: false, fog: false, blending: THREE.AdditiveBlending, side: THREE.BackSide,
-    });
+    }));
     // Warm-up meshes so the afterimage shaders are compiled with the level, not on the first flash.
     for (const m of [this.coreMat, this.haloMat]) {
       const w = new THREE.Mesh(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]), m);
@@ -98,7 +130,7 @@ export class FlashEffect {
     for (const p of parts) p.dispose();
     if (!g) return;
     g.computeBoundingSphere();
-    const core = new THREE.Mesh(g, this.coreMat.clone());
+    const core = new THREE.Mesh(g, withViewPull(this.coreMat.clone()));
     core.renderOrder = 20;
     let haloMesh: THREE.Mesh | null = null;
     if (halo.length) {
@@ -106,7 +138,7 @@ export class FlashEffect {
       for (const p of halo) p.dispose();
       if (hg) {
         hg.computeBoundingSphere();
-        haloMesh = new THREE.Mesh(hg, this.haloMat.clone());
+        haloMesh = new THREE.Mesh(hg, withViewPull(this.haloMat.clone()));
         haloMesh.renderOrder = 19;
         this.scene.add(haloMesh);
       }
@@ -139,8 +171,11 @@ export class FlashEffect {
         this.remove(gh);
         continue;
       }
+      // Ramp in as the flash light dies (you see the lit scene first, then the frozen ghost remains),
+      // hold briefly, then ease out.
+      const rampIn = THREE.MathUtils.smoothstep(age, 0.03, RENDER.flashDuration * 0.9);
       const hold = 0.15 * AD;
-      const f = age < hold ? 1 : Math.pow(1 - (age - hold) / (AD - hold), 1.7);
+      const f = rampIn * (age < hold ? 1 : Math.pow(1 - (age - hold) / (AD - hold), 1.7));
       // A subtle shimmer while it fades, like a retinal afterimage.
       const shimmer = 1 - 0.06 * Math.max(0, Math.sin(age * 31)) * (age / AD);
       (gh.core.material as THREE.MeshMatcapMaterial).opacity = f * shimmer * gh.strength * 0.92;

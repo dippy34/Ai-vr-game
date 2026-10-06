@@ -23,9 +23,15 @@ import { paint, positionNormalOnly, segmentHitsAabb, setQ, setV } from './util';
 /**
  * three.js's physically based lights divide diffuse by PI, so a hemisphere light of intensity I lights
  * an albedo-a surface to a*I/PI. We multiply by PI so RENDER.ambientIntensity reads as "fraction of
- * surface color you see in the dark" (0.035 = silhouettes barely visible up close).
+ * surface color you see in the dark".
  */
 const AMBIENT_SCALE = Math.PI;
+/**
+ * "Dark-adapted eyes": a very faint, short-range light at the local head. Uniform ambient + linear
+ * fog can't make things visible at arm's length yet black at 3 m; this does (silhouettes and wet
+ * glints on the monster only up close). Local only, so it never reveals hand signs to others.
+ */
+const NEAR_LIGHT = { intensity: 0.016, distance: 2.2, decay: 2 };
 const FOG_COLOR = 0x04060b;
 const AFTERIMAGE_MIN_DOT = 0.1;
 
@@ -34,13 +40,14 @@ const _b = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _m = new THREE.Matrix4();
-const _one = new THREE.Vector3(1, 1, 1);
+const _infl = new THREE.Vector3(1.03, 1.03, 1.03);
 
 /** three.js renderer for MUTE. */
 export class GameRenderer implements IGameRenderer {
   readonly ctx: RenderContext;
   private readonly container: HTMLElement;
   private readonly hemi: THREE.HemisphereLight;
+  private readonly nearLight: THREE.PointLight;
   private level: LevelView | null = null;
   private readonly localHandMat: THREE.MeshLambertMaterial;
   private readonly localLeft: HandModel;
@@ -50,6 +57,7 @@ export class GameRenderer implements IGameRenderer {
   private readonly pendingPoses = new Map<PlayerId, PlayerPose>();
   private readonly monster: MonsterModel;
   private readonly items = new Map<number, Prop>();
+  private readonly seenItems = new Set<number>();
   private readonly cameraProp: CameraProp;
   private readonly flashFx: FlashEffect;
   private readonly meter: NoiseMeter;
@@ -87,21 +95,24 @@ export class GameRenderer implements IGameRenderer {
     scene.add(rig);
     this.ctx = { renderer, scene, camera, rig };
 
-    this.hemi = new THREE.HemisphereLight(0xa4b4d4, 0x2a2622, RENDER.ambientIntensity * AMBIENT_SCALE);
+    this.hemi = new THREE.HemisphereLight(0xa4b4d4, 0x3a3530, RENDER.ambientIntensity * AMBIENT_SCALE);
     scene.add(this.hemi);
+    this.nearLight = new THREE.PointLight(0xb4c0dc, NEAR_LIGHT.intensity, NEAR_LIGHT.distance, NEAR_LIGHT.decay);
+    this.nearLight.name = 'nearSight';
+    scene.add(this.nearLight);
 
     this.dynamic.name = 'dynamic';
     scene.add(this.dynamic);
 
     // Local hands: faintly self-lit so you can see your own hands in the dark.
-    this.localHandMat = new THREE.MeshLambertMaterial({ color: 0xb8a493, emissive: 0x2e2722, emissiveIntensity: 1 });
+    this.localHandMat = new THREE.MeshLambertMaterial({ color: 0xb8a493, emissive: 0x16120f, emissiveIntensity: 1 });
     this.localLeft = new HandModel('left', this.localHandMat);
     this.localRight = new HandModel('right', this.localHandMat);
     this.localLeft.visible = this.localRight.visible = false;
     this.dynamic.add(this.localLeft.mesh, this.localRight.mesh);
 
     this.ghostMat = new THREE.MeshBasicMaterial({
-      color: 0x8a1e1e, transparent: true, opacity: 0.2, depthWrite: false, blending: THREE.AdditiveBlending,
+      color: 0x8a1e1e, transparent: true, opacity: 0.16, depthWrite: false, blending: THREE.AdditiveBlending,
     });
     this.ghostMat.userData.shared = true;
 
@@ -162,6 +173,8 @@ export class GameRenderer implements IGameRenderer {
     this.time += dt;
     setV(this.headPos, localPose.head.position);
     setQ(this.headQuat, localPose.head.rotation);
+    // Slightly in front of the eyes so your own hands/arms catch it too.
+    this.nearLight.position.set(0, -0.1, -0.15).applyQuaternion(this.headQuat).add(this.headPos);
 
     this.level?.update(state, dt, this.time);
 
@@ -229,7 +242,8 @@ export class GameRenderer implements IGameRenderer {
   }
 
   private updateItems(state: WorldState, localId: PlayerId, localPose: PlayerPose): void {
-    const seen = new Set<number>();
+    const seen = this.seenItems;
+    seen.clear();
     for (const it of state.items) {
       seen.add(it.id);
       let prop = this.items.get(it.id);
@@ -314,7 +328,7 @@ export class GameRenderer implements IGameRenderer {
       if (k > 0) {
         setQ(_q, pose.head.rotation);
         const from = parts.length;
-        parts.push(positionNormalOnly(headGhostGeometry().clone()).applyMatrix4(_m.compose(_a, _q, _one)));
+        parts.push(positionNormalOnly(headGhostGeometry().clone()).applyMatrix4(_m.compose(_a, _q, _infl)));
         push(parts, from, k * 0.85);
       }
       // Hands with their exact finger curls right now.
@@ -326,7 +340,7 @@ export class GameRenderer implements IGameRenderer {
         if (k <= 0) continue;
         setQ(_q, h.rotation);
         let from = parts.length;
-        HandModel.bakePose(side, _a, _q, h.curls, parts);
+        HandModel.bakePose(side, _a, _q, h.curls, parts, 1.04);
         push(parts, from, k);
         from = halo.length;
         HandModel.bakePose(side, _a, _q, h.curls, halo, 1.45);
@@ -339,7 +353,7 @@ export class GameRenderer implements IGameRenderer {
     for (const y of [0.6, 1.3, 2.0]) mk = Math.max(mk, captured(_b.set(mp.x, mp.y + y, mp.z)));
     if (mk > 0) {
       const from = parts.length;
-      this.monster.bake(parts);
+      this.monster.bake(parts, 1.03);
       push(parts, from, mk);
     }
     this.flashFx.addAfterimage(parts, halo, this.time);

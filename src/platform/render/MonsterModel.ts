@@ -18,7 +18,7 @@ interface Part {
 }
 
 const SKIN = 1.0;
-const BONE = 1.45;
+const BONE = 1.12;
 const MOUTH = 0.06;
 
 const _m = new THREE.Matrix4();
@@ -48,14 +48,15 @@ export class MonsterModel {
 
   constructor() {
     this.material = new THREE.MeshPhongMaterial({
-      color: 0x2b2c31, specular: 0x6f7480, shininess: 42,
+      color: 0x1c1b1c, specular: 0x262422, shininess: 95,
     });
     this.buildSkeleton();
     this.mesh = new THREE.InstancedMesh(unitCapsule(), this.material, this.parts.length);
     this.mesh.name = 'monster';
     this.mesh.frustumCulled = false;
     this.mesh.matrixAutoUpdate = false;
-    this.parts.forEach((p, i) => this.mesh.setColorAt(i, _c.setScalar(p.color)));
+    // Slight per-part tone variation so it doesn't read as one smooth plastic.
+    this.parts.forEach((p, i) => this.mesh.setColorAt(i, _c.setScalar(p.color * (p.color === MOUTH ? 1 : 0.88 + ((i * 37) % 11) / 40))));
     this.root.scale.setScalar(MONSTER.height / 2.3);
     this.pose(0);
   }
@@ -100,29 +101,35 @@ export class MonsterModel {
     const spine = this.joint('spine', hips, 0, 0.04, 0);
     this.part(spine, [0, 0.16, 0.01], [0.12, 0.34, 0.09], 'y');
     const chest = this.joint('chest', spine, 0, 0.3, 0);
-    this.part(chest, [0, 0.17, 0.0], [0.27, 0.38, 0.16], 'y');
-    this.part(chest, [0, 0.33, 0.015], [0.44, 0.075, 0.1], 'x');
+    this.part(chest, [0, 0.17, 0.0], [0.26, 0.38, 0.16], 'y');
+    // Clavicles angled up into shrugged, bony shoulders.
+    for (const sx of [-1, 1]) this.part(chest, [sx * 0.11, 0.345, 0.012], [0.24, 0.05, 0.07], 'x', BONE, [0, 0, sx * 0.24]);
     // Spine knobs and a few ribs that catch the flash.
     for (let i = 0; i < 5; i++) this.part(i < 2 ? spine : chest, [0, (i < 2 ? 0.1 + i * 0.12 : 0.04 + (i - 2) * 0.1), i < 2 ? 0.055 : 0.085], [0.035, 0.05, 0.035], 'y', BONE);
     for (const sx of [-1, 1]) for (let r = 0; r < 3; r++) {
-      this.part(chest, [sx * 0.1, 0.09 + r * 0.075, -0.03], [0.13, 0.022, 0.03], 'x', BONE * 0.9, [0, 0, sx * -0.35]);
+      this.part(chest, [sx * 0.07, 0.08 + r * 0.075, -0.045], [0.12, 0.02, 0.028], 'x', BONE, [0, sx * 0.35, sx * -0.3]);
     }
     const neck = this.joint('neck', chest, 0, 0.35, 0.01);
     this.part(neck, [0, 0.11, 0], [0.06, 0.24, 0.06], 'y');
     const head = this.joint('head', neck, 0, 0.22, 0);
-    this.part(head, [0, 0.16, -0.02], [0.165, 0.33, 0.21], 'y');
-    this.part(head, [0, 0.03, -0.045], [0.12, 0.17, 0.15], 'y');
-    const mouth = this.part(head, [0, 0.07, -0.118], [0.016, 0.15, 0.03], 'y', MOUTH);
+    // Long eyeless skull drooping forward; the face (and its vertical mouth slit) tilts down.
+    const face = this.joint('face', head, 0, 0.02, 0);
+    face.rotation.x = -0.45;
+    this.part(face, [0, 0.17, 0.015], [0.178, 0.38, 0.215], 'y');
+    this.part(face, [0, 0.04, -0.035], [0.115, 0.19, 0.15], 'y');
+    this.part(face, [0, 0.27, 0.05], [0.13, 0.15, 0.15], 'y');
+    const mouth = this.part(face, [0, 0.075, -0.106], [0.016, 0.17, 0.03], 'y', MOUTH);
     mouth.mouth = true;
 
     for (const side of [-1, 1]) {
       const n = side < 0 ? 'L' : 'R';
-      const sh = this.joint(`shoulder${n}`, chest, side * 0.21, 0.31, 0.01);
-      this.limb(sh, 0.56, 0.055);
-      const el = this.joint(`elbow${n}`, sh, 0, -0.56, 0);
-      this.part(el, [0, 0, 0], [0.06, 0.06, 0.06], 'y', BONE);
-      this.limb(el, 0.52, 0.044);
-      const wr = this.joint(`wrist${n}`, el, 0, -0.52, 0);
+      const sh = this.joint(`shoulder${n}`, chest, side * 0.22, 0.37, 0.012);
+      this.part(sh, [0, -0.01, 0], [0.075, 0.07, 0.075], 'y', BONE);
+      this.limb(sh, 0.58, 0.06);
+      const el = this.joint(`elbow${n}`, sh, 0, -0.58, 0);
+      this.part(el, [0, 0, 0.005], [0.052, 0.06, 0.05], 'y', BONE);
+      this.limb(el, 0.55, 0.046);
+      const wr = this.joint(`wrist${n}`, el, 0, -0.55, 0);
       this.part(wr, [0, -0.09, 0], [0.065, 0.19, 0.024], 'y');
       const fi = this.joint(`fingers${n}`, wr, 0, -0.17, 0);
       for (let k = 0; k < 4; k++) {
@@ -130,10 +137,11 @@ export class MonsterModel {
         this.part(fi, [x, -0.085, 0], [0.014, 0.18 - Math.abs(k - 1.5) * 0.025, 0.014], 'y', SKIN, [0, 0, (k - 1.5) * 0.05 * side]);
       }
       const hp = this.joint(`hip${n}`, hips, side * 0.1, -0.02, 0);
-      this.limb(hp, 0.56, 0.075);
+      this.part(hp, [0, -0.2, 0.005], [0.1, 0.36, 0.105], 'y');
+      this.limb(hp, 0.56, 0.072);
       const kn = this.joint(`knee${n}`, hp, 0, -0.56, 0);
-      this.part(kn, [0, 0, -0.01], [0.075, 0.075, 0.07], 'y', BONE);
-      this.limb(kn, 0.52, 0.058);
+      this.part(kn, [0, 0, -0.012], [0.064, 0.07, 0.06], 'y', BONE);
+      this.limb(kn, 0.52, 0.056);
       const an = this.joint(`ankle${n}`, kn, 0, -0.52, 0);
       this.part(an, [0, -0.025, -0.08], [0.06, 0.045, 0.27], 'z');
     }
@@ -201,10 +209,10 @@ export class MonsterModel {
 
     // Legs.
     const swing = (0.42 + 0.12 * ck) * amp;
-    J.hipL.rotation.x = sinP * swing - fk * 0.5;
-    J.hipR.rotation.x = -sinP * swing - fk * 0.5;
-    J.kneeL.rotation.x = -(0.06 + amp * (0.85 + 0.3 * ck) * Math.max(0, cosP)) - fk * 0.9;
-    J.kneeR.rotation.x = -(0.06 + amp * (0.85 + 0.3 * ck) * Math.max(0, -cosP)) - fk * 0.9;
+    J.hipL.rotation.x = 0.1 + sinP * swing - fk * 0.5;
+    J.hipR.rotation.x = 0.1 - sinP * swing - fk * 0.5;
+    J.kneeL.rotation.x = -(0.2 + amp * (0.85 + 0.3 * ck) * Math.max(0, cosP)) - fk * 0.9;
+    J.kneeR.rotation.x = -(0.2 + amp * (0.85 + 0.3 * ck) * Math.max(0, -cosP)) - fk * 0.9;
     J.ankleL.rotation.x = -(J.hipL.rotation.x + J.kneeL.rotation.x) * 0.6;
     J.ankleR.rotation.x = -(J.hipR.rotation.x + J.kneeR.rotation.x) * 0.6;
     J.hipL.rotation.z = 0.03;
@@ -215,13 +223,13 @@ export class MonsterModel {
     J.hips.position.y = this.hipHeight - amp * 0.045 * sinP * sinP - crouch + 0.006 * breathe;
     J.hips.rotation.y = sinP * 0.12 * amp;
     J.hips.rotation.z = cosP * 0.05 * amp;
-    J.spine.rotation.x = -0.18 - 0.32 * ck - 0.55 * fk + tw.sp;
+    J.spine.rotation.x = -0.22 - 0.32 * ck - 0.55 * fk + tw.sp;
     J.spine.rotation.y = -sinP * 0.1 * amp;
-    J.chest.rotation.x = -0.1 - 0.12 * ck + 0.015 * breathe;
-    J.neck.rotation.x = -0.42 - 0.2 * ck + 0.2 * fk;
+    J.chest.rotation.x = -0.16 - 0.12 * ck + 0.015 * breathe;
+    J.neck.rotation.x = -0.62 - 0.2 * ck + 0.2 * fk;
 
-    // Head: looks forward-ish; listening = slow tilt and turn; twitches when agitated.
-    J.head.rotation.x = 0.38 + 0.25 * ck - 0.3 * fk + tw.hx + lk * 0.12 * Math.sin(t * 0.9);
+    // Head: hangs forward; listening = slow tilt and turn; twitches when agitated.
+    J.head.rotation.x = 0.55 + 0.3 * ck - 0.3 * fk + tw.hx + lk * 0.12 * Math.sin(t * 0.9);
     J.head.rotation.y = lk * 0.65 * Math.sin(t * 0.37) + tw.hy;
     J.head.rotation.z = lk * (0.5 * Math.sin(t * 0.61) + 0.15) + tw.hz;
 
@@ -253,10 +261,12 @@ export class MonsterModel {
   }
 
   /** Append world-space copies of the current pose (position + normal only) for afterimages. */
-  bake(out: THREE.BufferGeometry[]): void {
+  bake(out: THREE.BufferGeometry[], inflate = 1): void {
     const base = unitCapsule();
+    _m2.makeScale(inflate, inflate, inflate);
     for (let i = 0; i < this.parts.length; i++) {
       this.mesh.getMatrixAt(i, _m);
+      if (inflate !== 1) _m.multiply(_m2);
       out.push(positionNormalOnly(base.clone()).applyMatrix4(_m));
     }
   }

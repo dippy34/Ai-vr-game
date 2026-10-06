@@ -10,7 +10,7 @@ import { damp } from './util';
 const SEGMENTS = 10;
 const TICKS = [NOISE.whisper, NOISE.talk, NOISE.shout];
 /** Bar layout in the left-hand frame: across the wrist (X), on the palm side (-Y), just behind the wrist (+Z). */
-const BAR_W = 0.062;
+const BAR_W = 0.055;
 const SEG_GAP = 0.0012;
 const Y = -0.0205;
 const Z = 0.03;

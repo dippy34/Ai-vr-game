@@ -113,13 +113,16 @@ export function wallpaperTexture(): THREE.Texture {
     grime.addColorStop(1, 'rgba(25,20,10,0.55)');
     g.fillStyle = grime;
     g.fillRect(0, 0, W, H);
-    // Peeling tears: pale paper showing.
-    for (let i = 0; i < 6; i++) {
-      const x = rnd() * W, y = rnd() * H;
-      g.fillStyle = 'rgba(190,180,150,0.5)';
+    // Peeling seams: thin pale slivers where strips of paper curl away.
+    for (let i = 0; i < 5; i++) {
+      const x = Math.floor(rnd() * 8) * (W / 8) + (rnd() < 0.5 ? 0 : W / 8 - 3);
+      const y = rnd() * H * 0.8;
+      const len = 30 + rnd() * 90;
+      g.fillStyle = 'rgba(165,155,125,0.35)';
       g.beginPath();
       g.moveTo(x, y);
-      for (let k = 0; k < 6; k++) g.lineTo(x + (rnd() - 0.3) * 40, y + rnd() * 60);
+      g.quadraticCurveTo(x + 7 + rnd() * 6, y + len * 0.5, x + 1, y + len);
+      g.lineTo(x, y + len);
       g.fill();
     }
     speckle(g, W, H, rnd, 9000, 'rgba(40,35,20,0.25)', 'rgba(200,190,160,0.12)');
@@ -392,10 +395,10 @@ export function ghostMatcapTexture(): THREE.Texture {
     g.fillStyle = '#000';
     g.fillRect(0, 0, W, W);
     const gr = g.createRadialGradient(W * 0.42, W * 0.38, 0, W / 2, W / 2, W / 2);
-    gr.addColorStop(0, '#d9e2f2');
-    gr.addColorStop(0.45, '#9fb0cc');
-    gr.addColorStop(0.78, '#a8bcdc');
-    gr.addColorStop(0.93, '#ffffff');
+    gr.addColorStop(0, '#e4ebf7');
+    gr.addColorStop(0.5, '#b4c3dc');
+    gr.addColorStop(0.8, '#c4d2ea');
+    gr.addColorStop(0.94, '#ffffff');
     gr.addColorStop(1, '#ffffff');
     g.fillStyle = gr;
     g.beginPath();

@@ -12,7 +12,6 @@ import { ensureIndexed, paint } from './util';
 
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
-const _q = new THREE.Quaternion();
 const _v = new THREE.Vector3();
 const _s = new THREE.Vector3(1, 1, 1);
 
@@ -152,6 +151,11 @@ export interface Prop {
 }
 
 const IDENT = new THREE.Quaternion();
+/** Camera held by its end: top toward the thumb (right hand: thumb on -X => +90 deg about Z). */
+const CAM_HOLD: Record<Handedness, THREE.Quaternion> = {
+  right: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2),
+  left: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -Math.PI / 2),
+};
 const ROT_Z_NEG90 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -Math.PI / 2);
 
 // ---------------------------------------------------------------------------------------------
@@ -317,8 +321,7 @@ export class CameraProp implements Prop {
 
   placeInHand(hand: Handedness, p: THREE.Vector3, q: THREE.Quaternion): void {
     // Held by its right/left end, lens along the fingers (-Z), top toward the thumb.
-    const rot = _q.setFromAxisAngle(_v.set(0, 0, 1), (hand === 'left' ? -1 : 1) * Math.PI / 2);
-    placeHand(this.group, hand, p, q, [0.0, -0.07, -0.055], rot.clone());
+    placeHand(this.group, hand, p, q, [0.0, -0.07, -0.055], CAM_HOLD[hand]);
   }
 
   placeInWorld(x: number, y: number, z: number, yaw: number): void {

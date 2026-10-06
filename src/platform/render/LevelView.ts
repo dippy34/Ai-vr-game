@@ -454,6 +454,8 @@ function overFloor(floors: Box[], x: number, z: number): boolean {
 // Fuse box
 // ---------------------------------------------------------------------------------------------
 
+const _lampC = new THREE.Color();
+const _lampM = new THREE.Matrix4();
 const LAMP_OFF = new THREE.Color(0x4a0808);
 const LAMP_ON = new THREE.Color(0x5cff7e);
 
@@ -513,9 +515,9 @@ class FuseBoxView {
       if (this.fuses) this.fuses.count = Math.min(n, inserted);
     }
     if (!this.lamps || !this.halos) return;
-    const c = new THREE.Color();
+    const c = _lampC;
     let lit = 0;
-    const mtx = new THREE.Matrix4();
+    const mtx = _lampM;
     for (let i = 0; i < n; i++) {
       const on = i < inserted;
       let k = on ? 1 : 0;
@@ -667,7 +669,7 @@ class DoorView {
     // Cold glow beyond the doorway + light spilling onto the floor inside.
     const out = wideX ? new THREE.Vector3(0, 0, outSign) : new THREE.Vector3(outSign, 0, 0);
     this.glowMat = new THREE.MeshBasicMaterial({
-      map: doorGlowTexture(), color: 0xa9c2f0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+      map: doorGlowTexture(), color: 0x9fb6e4, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
     });
     this.glow = new THREE.Mesh(new THREE.PlaneGeometry(width * 1.05, h), this.glowMat);
     this.glow.position.set(cx, door.min.y + h / 2, cz).addScaledVector(out, thick / 2 + 0.06);
@@ -707,7 +709,7 @@ class DoorView {
     this.glowK += ((exitOpen ? 1 : 0) - this.glowK) * damp(0.9, dt);
     const k = this.glowK;
     this.glow.visible = this.spill.visible = k > 0.01;
-    this.glowMat.opacity = 0.55 * k;
+    this.glowMat.opacity = 0.42 * k;
     this.spillMat.opacity = 0.35 * k;
   }
 
@@ -854,7 +856,7 @@ export class LevelView {
     mk(wood, new THREE.MeshLambertMaterial({ map: woodGrainTexture(), vertexColors: true }), 'wood');
     mk(fabric, new THREE.MeshLambertMaterial({ map: fabricTexture(), vertexColors: true }), 'fabric');
     mk(plain, new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 30, specular: 0x222222 }), 'plain');
-    mk(panes, new THREE.MeshBasicMaterial({ map: windowTexture(), color: 0x55658a, fog: false }), 'windows');
+    mk(panes, new THREE.MeshBasicMaterial({ map: windowTexture(), color: 0x46557a, fog: false }), 'windows');
 
     if (shaftPos.length) {
       const sg = new THREE.BufferGeometry();
@@ -863,7 +865,7 @@ export class LevelView {
       sg.setIndex(shaftIdx);
       sg.computeBoundingSphere();
       const shafts = new THREE.Mesh(sg, new THREE.MeshBasicMaterial({
-        map: shaftTexture(), color: 0x1e2a42, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+        map: shaftTexture(), color: 0x151d30, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
       }));
       shafts.name = 'moonShafts';
       shafts.renderOrder = 2;
