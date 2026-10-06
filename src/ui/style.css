@@ -311,6 +311,15 @@ details[open] summary {
   white-space: nowrap;
 }
 
+.hud.reading .crosshair {
+  display: none;
+}
+
+.hud.reading .aim {
+  top: auto;
+  bottom: 74px;
+}
+
 .hud .film {
   position: absolute;
   right: 16px;

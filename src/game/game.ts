@@ -315,7 +315,7 @@ export class Game {
     // ---- desktop ----
     const look = this.lookDirection();
     const target = canPlay ? this.desktopUseTarget(state, held, look) : null;
-    this.ui.hud.setAim(this.reading ? 'E · stand up' : target?.kind === 'read' ? 'E · read' : '');
+    this.ui.hud.setAim(this.reading ? 'E · stand up' : target?.kind === 'read' ? 'E · read' : '', !!this.reading);
     if (frame.usePressed && canPlay) this.desktopUse(target);
     if (frame.triggerPressed.left || frame.triggerPressed.right) {
       const camHand: Handedness | null =

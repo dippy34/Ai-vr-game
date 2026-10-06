@@ -173,14 +173,14 @@ describe('Game', () => {
       const { notes, next, frames, input, ui, at } = reading();
       notes.push({ position: at(1.1), readYaw: 0.5 });
       frames(1);
-      expect(ui.hud.setAim).toHaveBeenLastCalledWith('E · read');
+      expect(ui.hud.setAim).toHaveBeenLastCalledWith('E · read', false);
       next.use = true;
       frames(1);
       expect(input.setLean).toHaveBeenLastCalledWith(expect.objectContaining({ yaw: 0.5 }));
       const lean = input.setLean.mock.calls.at(-1)![0] as { position: { y: number } };
       expect(lean.position.y).toBeCloseTo(notes[0].position.y + 0.3, 5);
       frames(1);
-      expect(ui.hud.setAim).toHaveBeenLastCalledWith('E · stand up');
+      expect(ui.hud.setAim).toHaveBeenLastCalledWith('E · stand up', true);
       next.use = true;
       frames(1);
       expect(input.setLean).toHaveBeenLastCalledWith(null);

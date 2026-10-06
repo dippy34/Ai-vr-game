@@ -472,9 +472,13 @@ export class Hud {
     this.status.replaceChildren(...lines.flatMap((l, i) => (i ? [el('br'), l] : [l])));
   }
 
-  /** What E does for what's under the crosshair ('' = nothing to say). */
-  setAim(text: string): void {
+  /**
+   * What E does for what's under the crosshair ('' = nothing to say). While `reading` the
+   * crosshair hides and the prompt moves down, off the note's text.
+   */
+  setAim(text: string, reading = false): void {
     if (this.aim.textContent !== text) this.aim.textContent = text;
+    this.root.classList.toggle('reading', reading);
   }
 
   setFilm(film: number | null): void {
