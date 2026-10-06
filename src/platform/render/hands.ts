@@ -53,6 +53,7 @@ export class SkinnedHand implements Hand {
   constructor(readonly handedness: Handedness, instance: THREE.Object3D, material: THREE.Material) {
     this.mesh.name = `hand-${handedness}`;
     this.mesh.add(instance);
+    instance.updateMatrixWorld(true);
     instance.traverse((o) => {
       const ud = o.userData as { curlAxis?: number[]; curlAngle?: number; finger?: number };
       if (Array.isArray(ud.curlAxis) && typeof ud.curlAngle === 'number' && typeof ud.finger === 'number') {
@@ -66,7 +67,15 @@ export class SkinnedHand implements Hand {
       }
       const m = o as THREE.Mesh;
       if (m.isMesh) {
-        m.frustumCulled = false;
+        // Cull against a fixed sphere that covers every finger curl (skinned bounds don't follow).
+        const sk = m as THREE.SkinnedMesh;
+        if (sk.isSkinnedMesh) {
+          sk.computeBoundingSphere();
+          if (sk.boundingSphere) sk.boundingSphere.radius = Math.max(sk.boundingSphere.radius * 1.3, 0.16);
+          sk.frustumCulled = !!sk.boundingSphere;
+        } else {
+          m.frustumCulled = false;
+        }
         this.skins.push(m);
       }
     });

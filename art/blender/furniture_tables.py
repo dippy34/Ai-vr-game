@@ -18,8 +18,8 @@ def build_table_dining():
     """2.4 m dining table: three-board top (two halves + a warped leaf), apron, turned legs."""
     P = F.Piece('table_dining', seed=12)
     wood = J.mahogany('dining_mahogany', seed=1.0, rings=1.0, stains=0.5, burn=0.3, peel=0.3)
-    wiped = J.mahogany('dining_wiped', seed=1.0, rings=1.0, stains=0.5, burn=0.3, peel=0.3, dust=0.2, film=0.08)
-    smear = J.mahogany('dining_smear', seed=1.0, rings=1.0, stains=0.5, burn=0.3, peel=0.3, dust=0.4, film=0.1)
+    wiped = J.mahogany('dining_wiped', seed=1.0, rings=1.0, stains=0.5, burn=0.3, peel=0.3, dust=0.42, film=0.12)
+    smear = J.mahogany('dining_smear', seed=1.0, rings=1.0, stains=0.5, burn=0.3, peel=0.3, dust=0.55, film=0.12)
     W, D, H = 2.4, 1.0, 0.76
     t = 0.032
     seams = [-0.32, 0.32]
@@ -53,7 +53,7 @@ def build_table_dining():
         for i in range(9):
             u = i / 8
             pts.append((-1.05 + 0.6 * u + 0.02 * k * (1 - u), -0.25 + 0.03 * k + 0.22 * math.sin(u * 2.2) - 0.1 * u))
-        trails.append(P.ribbon(b0, pts, 0.014, H + 0.0006, wiped, o0))
+        trails.append(P.ribbon(b0, pts, 0.017, H + 0.0006, wiped, o0))
     b2, o2 = boards[2]
     for k in range(3):  # a smeared palm wipe: overlapping soft strokes
         pts = [(0.62 + 0.03 * k + 0.035 * i, 0.22 - 0.08 * i + 0.015 * math.sin(i * 1.7 + k)) for i in range(7)]

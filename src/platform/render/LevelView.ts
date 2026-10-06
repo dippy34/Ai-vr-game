@@ -590,7 +590,7 @@ class FuseBoxView {
       // The procedural fuse lies along X: stand it up.
       if (!prop.modelled) prop.group.rotation.z = Math.PI / 2;
       // Powered fuses glow faintly warm.
-      prop.setGlint(0.95);
+      prop.setGlint(1.1);
       holder.add(prop.group);
       holder.visible = false;
       live.add(holder);
@@ -928,6 +928,12 @@ function paintGeo(g: THREE.BufferGeometry, color: number): THREE.BufferGeometry 
 // LevelView
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * Static Blender models merge per source mesh within XZ cells of this size (m), so rooms behind
+ * the viewer are frustum culled (Quest triangle budget) at the cost of a few draw calls.
+ */
+const STATIC_CHUNK = 5.5;
+
 export class LevelView {
   readonly group = new THREE.Group();
   /** Wall boxes for line-of-sight tests (flash afterimages). */
@@ -944,7 +950,7 @@ export class LevelView {
   constructor(level: LevelData, models: ModelLibrary | null = null) {
     this.group.name = 'level';
     // Every static Blender model (furniture, dressing, fuse box body, door frame) merges here.
-    const batcher = new StaticBatcher();
+    const batcher = new StaticBatcher(STATIC_CHUNK);
     this.furnitureModels = models ? new FurnitureSet(models, batcher) : null;
     const wallBoxes = level.boxes.filter((b) => b.kind === 'wall');
     const floorBoxes = level.boxes.filter((b) => b.kind === 'floor');
@@ -1056,7 +1062,8 @@ export class LevelView {
       // Shaft: extrude the pane rectangle along the moonlight direction down to the floor.
       const d = inward.clone().multiplyScalar(Math.cos(elev)).add(new THREE.Vector3(0, -Math.sin(elev), 0));
       const corner = (sx: number, sy: number): THREE.Vector3 => new THREE.Vector3(sx * W / 2 * 0.92, sy * H / 2 * 0.92, 0.01).applyMatrix4(m);
-      const toFloor = (p: THREE.Vector3): THREE.Vector3 => p.clone().addScaledVector(d, Math.max(0, p.y - 0.01) / Math.sin(elev));
+      // Floor patches float 2 cm up so rugs (~1-1.5 cm) don't swallow them.
+      const toFloor = (p: THREE.Vector3): THREE.Vector3 => p.clone().addScaledVector(d, Math.max(0, p.y - 0.02) / Math.sin(elev));
       const tl = corner(-1, 1), tr = corner(1, 1), bl = corner(-1, -1), br = corner(1, -1);
       const ftl = toFloor(tl), ftr = toFloor(tr), fbl = toFloor(bl), fbr = toFloor(br);
       const quad = (pos: number[], uvs: number[], idx: number[], a: THREE.Vector3, b: THREE.Vector3, cc: THREE.Vector3, dd: THREE.Vector3, ua: number[]): void => {

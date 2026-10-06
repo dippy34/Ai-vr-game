@@ -12,6 +12,9 @@ import bpy  # noqa: F401,I001 (bpy before bmesh)
 import bmesh
 from mathutils import Matrix, Vector
 
+import numpy as np
+
+import dressing_img as I
 import dressing_lib as L
 from dressing_lib import hexc, xf
 
@@ -191,3 +194,174 @@ def build_chair_fallen():
     lo, hi = L.bounds([p['obj'] for p in P.parts])
     P.transform_all(Matrix.Rotation(math.radians(-12), 4, 'Z'))
     P.finish(previews=dict(yaw=30, pitch=28))
+
+
+# =============================================================================================
+# Boarded-up window
+# =============================================================================================
+
+WALL = Matrix.Rotation(math.radians(180), 4, 'Z') @ Matrix.Rotation(math.radians(90), 4, 'X')
+
+
+def plank_outline(length, width, seed, broken=False):
+    """Rough-sawn board face (X along the board): wavy long edges, off-square saw cuts, or a
+    jagged snapped end on the right."""
+    rnd = random.Random(seed)
+    n = 6
+    bot, top = [], []
+    for i in range(n + 1):
+        x = -length / 2 + length * i / n
+        bot.append((x, -width / 2 + rnd.uniform(-0.002, 0.004)))
+        top.append((x, width / 2 + rnd.uniform(-0.004, 0.002)))
+    if broken:
+        right = []
+        k = 5
+        for i in range(1, k):
+            t = i / k
+            right.append((length / 2 - rnd.uniform(0.0, 0.07) - (0.04 if i % 2 else 0.0),
+                          -width / 2 + width * t))
+        bot[-1] = (length / 2 - 0.02, bot[-1][1])
+        top[-1] = (length / 2 - 0.09, top[-1][1])
+    else:
+        right = []
+    bot[0] = (bot[0][0] + rnd.uniform(-0.01, 0.01), bot[0][1])
+    top[0] = (top[0][0] + rnd.uniform(-0.01, 0.01), top[0][1])
+    return bot + right + list(reversed(top))
+
+
+def mat_planks(name, light, dark, seed, nails, gray=0.0):
+    """Weathered raw boards with checks along the grain and rust streaks running down from nails.
+    nails: [(x, z)] in final Blender coordinates (front view)."""
+    mat = L.new_material(name)
+    g = L.G(mat)
+    col, h = L.wood_pattern(g, light, dark, ring=0.008, figure=0.9, seed=seed)
+    p = g.pos()
+    x, y, z = g.sep(p)
+    rough = g.add(0.78, g.mul(g.noise(None, 8.0, 2, 0.5), 0.15))
+    # weather checks
+    ck = g.vor(g.vmul(g.gc(), (1.2, 30.0, 30.0)), 3.0, 'DISTANCE_TO_EDGE', offset=(seed, 0, 0))
+    cm = g.mul(g.rng(ck, 0.05, 0.0), g.rng(g.noise(g.gc(), 2.0, 2, 0.5, stretch=(0.5, 3.0, 3.0)), 0.4, 0.6))
+    col = g.mix(cm, col, hexc('100b07'))
+    h = g.sub(h, g.mul(cm, 1.5))
+    # sawmill marks (circular saw arcs) on the faces
+    saw = g.wave(g.vmul(g.gc(), (1.0, 1.0, 0.0)), 18.0, 'RINGS', rings_dir='SPHERICAL', dist=0.5)
+    col = g.mix(g.mul(g.rng(saw, 0.4, 0.6), 0.12), col, g.hsv(col, v=0.75))
+    rust = None
+    for (nx, nz) in nails:
+        dx = g.absf(g.sub(x, nx))
+        dz = g.sub(nz, z)  # > 0 below the nail
+        width = g.add(0.004, g.mul(g.mx(dz, 0.0), 0.05))
+        streak = g.mul(g.rng(dx, width, 0.0), g.mul(g.rng(dz, 0.16, 0.0), g.rng(dz, -0.004, 0.004)))
+        ring = g.rng(g.m('SQRT', g.add(g.mul(dx, dx), g.mul(dz, dz))), 0.014, 0.004)
+        r = g.mx(streak, ring)
+        rust = r if rust is None else g.mx(rust, r)
+    if rust is not None:
+        rn = g.noise(p, 60.0, 2, 0.6, stretch=(3.0, 1.0, 0.3))
+        rust = g.mul(rust, g.rng(rn, 0.25, 0.6, 0.3, 1.0))
+        col = g.mix(g.mul(rust, 0.8), col, hexc('5a2c14'))
+        rough = g.mixf(rust, rough, 0.9)
+    if gray:
+        col = g.mix(gray, col, g.mix(0.5, g.hsv(col, s=0.2, v=1.1), hexc('7a7468')))
+    col, rough, h = L.age(g, col, rough, h, dust=0.55, grime=0.8, wear=0.3, scratch=0.3, stains=0.4, seed=seed,
+                          film=0.08)
+    return g.finish(col, rough, h, bump_dist=0.0012, soft=0.003)
+
+
+def build_boards():
+    P = L.Piece('boards', 'wall', tex=512, max_tris=1500, ao=0.12, bevel=0.004, ao_small=0.012, seed=31)
+    M = WALL
+    paint = L.mat_paint('window_paint', hexc('b0a88e'), hexc('6a5038'), gloss=0.5, chip=0.75, dust=0.7, grime=1.0,
+                        wear=0.6, seed=1.0, stains=0.6, fade=0.3)
+    # casing (molded trim) around the opening + stool + apron
+    OW, OH = 0.51, 0.71
+    path = [(-OW, -OH), (OW, -OH), (OW, OH), (-OW, OH)]
+    prof = [(0.0, 0.0), (0.0, 0.016), (0.006, 0.022), (0.05, 0.022), (0.062, 0.019), (0.072, 0.014), (0.08, 0.012),
+            (0.08, 0.0)]
+    P.add(L.sweep('casing', prof, path, M=M), paint, smooth=30)
+    P.add(L.box('stool', (1.12, 0.028, 0.065), M @ xf((0, -OH + 0.06, 0.0325)), bevel=0.004), paint)
+    P.add(L.box('apron', (0.9, 0.06, 0.018), M @ xf((0, -OH - 0.012, 0.009)), bevel=0.003), paint, weight=0.6)
+    # two-over-two sash inside the opening (lower sash a touch proud of the upper one)
+    IW, IH = OW - 0.08, OH - 0.08
+    sash = L.mat_paint('sash_paint', hexc('a49c84'), hexc('5a4430'), gloss=0.45, chip=0.85, dust=0.8, grime=1.0,
+                       wear=0.5, seed=2.0, stains=0.7, fade=0.35)
+    panes = []
+    for si, (y0, y1, z0) in enumerate(((0.0, IH, 0.004), (-IH, 0.0, 0.012))):
+        t = 0.045
+        cy = (y0 + y1) / 2
+        hh = y1 - y0
+        for nm, sz, loc in (('l', (t, hh, 0.02), (-IW + t / 2, cy, z0 + 0.01)), ('r', (t, hh, 0.02), (IW - t / 2, cy, z0 + 0.01)),
+                            ('t', (2 * IW - 2 * t, t, 0.02), (0, y1 - t / 2, z0 + 0.01)),
+                            ('b', (2 * IW - 2 * t, t, 0.02), (0, y0 + t / 2, z0 + 0.01)),
+                            ('m', (0.022, hh - 2 * t, 0.016), (0, cy, z0 + 0.008))):
+            P.add(L.box(f'sash{si}_{nm}', sz, M @ xf(loc), bevel=0.0), sash, weight=0.5, flat=True)
+        for k, (xa, xb) in enumerate(((-IW + t, -0.011), (0.011, IW - t))):
+            panes.append((xa, xb, y0 + t, y1 - t, z0 + 0.006, len(panes)))
+    # dark, dirty glass; one pane smashed (hole + cracks), one cracked
+    crack_tiles = []
+    for i in range(4):
+        if i == 1:
+            crack_tiles.append(I.crack_map_rays(128, 192, 0.45, 0.4, [a * 0.7 for a in range(9)], seed=40 + i))
+        elif i == 2:
+            crack_tiles.append(I.crack_map_rays(128, 192, 0.6, 0.7, [1.0, 2.4, 3.9, 5.2], seed=40 + i) * 0.8)
+        else:
+            crack_tiles.append(np.zeros((192, 128), dtype=np.float32))
+    cimg = L.np_image('window_cracks', np.concatenate(crack_tiles, axis=1), non_color=True)
+    gm = L.new_material('window_glass')
+    g = L.G(gm)
+    p = g.pos()
+    cr = g.sep(g.img(cimg)[0])[0]
+    uvp = g.uv('src')
+    u_, v_, _ = g.sep(uvp)
+    # the smashed hole in tile 1: black void with sharp edges
+    hole = g.rng(g.v('LENGTH', g.vmul(g.vadd(uvp, (-0.3625, -0.4, 0.0)), (4.0, 1.0, 0.0))), 0.13, 0.11)
+    streak = g.noise(p, 3.0, 4, 0.6, stretch=(1.0, 1.0, 0.25))
+    dirt = g.rng(streak, 0.4, 0.75)
+    col = g.mix(dirt, hexc('0b0d0f'), hexc('3a3a34'))
+    col = g.mix(cr, col, hexc('9a9c98'))
+    col = g.mix(hole, col, hexc('000000'))
+    rough = g.mixf(dirt, 0.08, 0.6)
+    rough = g.mixf(hole, rough, 1.0)
+    col, rough, _ = L.age(g, col, rough, 0.0, dust=0.6, grime=0.9, wear=0.0, scratch=0.0, seed=5.0, film=0.05,
+                          up_lo=0.2)
+    g.finish(col, rough, None)
+    for (xa, xb, ya, yb, zz, k) in panes:
+        o = L.grid(f'pane_{k}', 1, 1, lambda u, v: (xa + (xb - xa) * u, ya + (yb - ya) * v, zz), M=M)
+        for d_ in o.data.uv_layers['src'].data:
+            d_.uv = ((k + d_.uv[0]) / 4.0, d_.uv[1])
+        P.add(o, gm, flat=True, uv='smart', weight=0.8)
+    # planks: (center y, angle, width, length, z, broken, seed, material)
+    boards = [(0.43, -4.0, 0.17, 1.12, 0.026, False, 1, 0), (0.12, 3.0, 0.19, 1.16, 0.026, False, 2, 1),
+              (-0.21, -2.0, 0.15, 1.10, 0.026, False, 3, 0), (-0.52, 6.0, 0.18, 1.06, 0.026, True, 4, 1),
+              (-0.02, 37.0, 0.16, 1.52, 0.05, False, 5, 0)]
+    nails, heads = [], []
+    for (cy, ang, wd, ln, zz, broken, sd, mi) in boards:
+        R = Matrix.Rotation(math.radians(ang), 4, 'Z')
+        T = Matrix.Translation((0.0 if ang < 20 else 0.0, cy, zz))
+        for cx in (-0.47, 0.47):
+            if ang > 20:
+                break
+            if broken and cx > 0:
+                continue
+            for sy in (-0.28, 0.28):
+                lp = (T @ R) @ Vector((cx / math.cos(math.radians(ang)), sy * wd, 0.022))
+                heads.append(lp)
+        if ang > 20:
+            for t in (-0.62, 0.0, 0.62):
+                heads.append((T @ R) @ Vector((t, 0.0, 0.022)))
+    for lp in heads:
+        bp = M @ lp
+        nails.append((bp.x, bp.z))
+    mats = [mat_planks('planks_gray', hexc('7a7062'), hexc('4a4238'), 3.0, nails, gray=0.4),
+            mat_planks('planks_brown', hexc('6e5236'), hexc('3e2c1a'), 7.0, nails)]
+    for (cy, ang, wd, ln, zz, broken, sd, mi) in boards:
+        o = L.prism(f'plank_{sd}', plank_outline(ln, wd, sd, broken), 0.022)
+        L.place(o, M @ Matrix.Translation((0, cy, zz)) @ Matrix.Rotation(math.radians(ang), 4, 'Z'), 'x')
+        P.add(o, mats[mi], smooth=30, weight=1.0)
+    iron = L.mat_metal('nail_iron', hexc('3a3632'), rough=0.6, tarnish=0.4, rust=0.8, dust=0.2, seed=8.0)
+    for k, lp in enumerate(heads):
+        pts = [(0.0045 * math.cos(2 * math.pi * i / 5), 0.0045 * math.sin(2 * math.pi * i / 5)) for i in range(5)]
+        o = L.prism(f'nail_{k}', pts, 0.0015)
+        L.place(o, M @ Matrix.Translation(lp))
+        P.add(o, iron, flat=True, weight=0.3)
+    P.finish(origin=(0, 0, 0), previews=dict(yaw=25, pitch=5, extra=[dict(tag='flash_front', yaw=0, pitch=0,
+                                                                          mood='flash')]))

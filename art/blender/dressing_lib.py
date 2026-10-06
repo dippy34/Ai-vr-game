@@ -349,11 +349,14 @@ class G:
     def up(self, lo=0.35, hi=0.9):
         return self.rng(self.nz(), lo, hi)
 
-    def finish(self, col, rough, h=None, metal=0.0, alpha=None, bump_dist=0.0008, normal=None):
-        """Wire the graph. Metal/alpha go to named nodes (baked via emission), not the BSDF."""
+    def finish(self, col, rough, h=None, metal=0.0, alpha=None, bump_dist=0.0008, normal=None, soft=None):
+        """Wire the graph. Metal/alpha go to named nodes (baked via emission), not the BSDF.
+        soft = radius: rounds hard edges in the baked normal map (Bevel shader node)."""
         self.set(self.bsdf.inputs['Base Color'], col)
         self.set(self.bsdf.inputs['Roughness'], rough)
         nrm = normal
+        if soft:
+            nrm = self.node('ShaderNodeBevel', {'Radius': soft}, samples=8).outputs['Normal']
         if h is not None:
             nrm = self.bump(h, bump_dist, 1.0, normal)
         if nrm is not None:
@@ -466,11 +469,18 @@ def wood_pattern(g: G, light, dark, *, ring=0.007, figure=0.6, pores=0.4, vec=No
 
 def mat_wood(name, light, dark, *, gloss=0.38, ring=0.007, figure=0.6, dust=0.6, grime=0.7, wear=0.6,
              scratch=0.4, stains=0.0, floor=0.0, fade=0.15, seed=0.0, raw=False, peel=0.0, peel_col=None,
-             bump=0.0008, film=0.15):
+             bump=0.0008, film=0.15, soft=0.0025, cracks=0.0):
     mat = new_material(name)
     g = G(mat)
     col, h = wood_pattern(g, light, dark, ring=ring, figure=figure, seed=seed)
     rough = g.add(gloss, g.mul(g.noise(None, 8.0, 2, 0.5, offset=(seed, 0, 0)), 0.18))
+    if cracks > 0:
+        # weather checks: dark splits running along the grain
+        ck = g.vor(g.vmul(g.gc(), (1.5, 40.0, 40.0)), 3.0, 'DISTANCE_TO_EDGE', offset=(seed, 0, 0))
+        cm = g.mul(g.rng(ck, 0.04, 0.0), g.rng(g.noise(g.gc(), 2.0, 2, 0.5, stretch=(0.5, 3.0, 3.0)), 0.45, 0.6))
+        cm = g.mul(cm, cracks)
+        col = g.mix(cm, col, hexc('120c08'))
+        h = g.sub(h, g.mul(cm, 1.2))
     if peel > 0:
         # flaking varnish/paint: lighter raw wood exposed in blotches near edges
         pn = g.noise(None, 7.0, 4, 0.65, offset=(seed * 2.0, 3.0, 1.0))
@@ -482,7 +492,7 @@ def mat_wood(name, light, dark, *, gloss=0.38, ring=0.007, figure=0.6, dust=0.6,
     wear_col = g.hsv(light, s=0.6, v=1.35) if not raw else g.hsv(light, s=0.5, v=1.5)
     col, rough, h = age(g, col, rough, h, dust=dust, grime=grime, wear=wear, wear_col=wear_col, wear_rough=0.75,
                         scratch=scratch, stains=stains, floor=floor, fade=fade, seed=seed, film=film)
-    return g.finish(col, rough, h, bump_dist=bump)
+    return g.finish(col, rough, h, bump_dist=bump, soft=soft)
 
 
 def mat_paint(name, color, under, *, gloss=0.55, chip=0.5, dust=0.5, grime=0.8, wear=0.5, seed=0.0,
@@ -502,7 +512,7 @@ def mat_paint(name, color, under, *, gloss=0.55, chip=0.5, dust=0.5, grime=0.8, 
     h = g.mul(g.inv(chipm), 0.6)
     col, rough, h = age(g, col, rough, h, dust=dust, grime=grime, wear=wear, scratch=scratch, stains=stains,
                         fade=fade, seed=seed, floor=floor)
-    return g.finish(col, rough, h)
+    return g.finish(col, rough, h, soft=0.002)
 
 
 def mat_metal(name, color, *, rough=0.38, tarnish=0.5, tarnish_col=None, rust=0.0, dust=0.4, grime=0.8,
@@ -528,7 +538,7 @@ def mat_metal(name, color, *, rough=0.38, tarnish=0.5, tarnish_col=None, rust=0.
     # worn bright high points
     col, r, h = age(g, col, r, h, dust=dust, grime=grime, wear=wear, wear_col=g.hsv(color, s=0.9, v=1.35),
                     wear_rough=0.25, scratch=scratch, seed=seed, film=0.1)
-    return g.finish(col, r, h, metal=metal)
+    return g.finish(col, r, h, metal=metal, soft=0.0015)
 
 
 def mat_fabric(name, base, alt=None, *, weave=420.0, fade=0.4, stains=0.4, dust=0.5, grime=0.9, seed=0.0,
@@ -595,7 +605,7 @@ def mat_plain(name, color, rough=0.7, *, dust=0.4, grime=0.8, noise_amt=0.15, se
     h = g.mul(g.noise(p, 50.0, 2, 0.5), 0.3)
     col, r, h = age(g, col, rough, h, dust=dust, grime=grime, wear=wear, scratch=scratch, stains=stains,
                     fade=fade, seed=seed, floor=floor)
-    return g.finish(col, r, h, metal=metal)
+    return g.finish(col, r, h, metal=metal, soft=0.0015)
 
 
 def mat_image(name, image, *, rough=0.6, dust=0.35, grime=0.6, wear=0.0, fade=0.0, seed=0.0, scratch=0.0,

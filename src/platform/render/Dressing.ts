@@ -257,6 +257,15 @@ const _o = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _p = new THREE.Vector3();
 
+/** Height of a model's top surface at (x, z) in its own frame, by raycasting down. */
+function modelTopAt(root: THREE.Object3D, x: number, z: number, b: THREE.Box3): number | null {
+  root.updateMatrixWorld(true);
+  _raycaster.ray.origin.set(x, b.max.y + 0.1, z);
+  _raycaster.ray.direction.set(0, -1, 0);
+  const hit = _raycaster.intersectObject(root, true)[0];
+  return hit ? hit.point.y : null;
+}
+
 // ---------------------------------------------------------------------------------------------
 // DressingSet
 // ---------------------------------------------------------------------------------------------
@@ -701,7 +710,8 @@ export class DressingSet {
     const p = this.pieces.get('rug')!;
     const rnd = this.rng('rug');
     const rw = p.bounds.max.x - p.bounds.min.x, rd = p.bounds.max.z - p.bounds.min.z;
-    const top = p.bounds.max.y;
+    // The rug's real top (its bounds include curled corners): raycast its middle.
+    const top = Math.min(p.bounds.max.y, modelTopAt(p.scene, (p.bounds.min.x + p.bounds.max.x) / 2, (p.bounds.min.z + p.bounds.max.z) / 2, p.bounds) ?? 0.012);
     const targets: { room: Room; cx: number; cz: number; w: number; d: number; alongX: boolean }[] = [];
     for (const room of this.rooms) {
       const f = room.furniture;
@@ -828,7 +838,7 @@ export class DressingSet {
       kitchen: [C],
       room: [P],
     };
-    const height: Record<string, number> = { [P]: 1.6, [L]: 1.55, [C]: 1.85 };
+    const height: Record<string, number> = { [P]: 1.6, [L]: 1.55, [C]: 1.9 };
     for (const room of this.rooms) {
       const list = perRoom[room.name];
       if (!list) continue;

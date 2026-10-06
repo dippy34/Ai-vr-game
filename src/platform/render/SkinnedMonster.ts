@@ -52,11 +52,19 @@ export class SkinnedMonster {
       if (h > 0.5) instance.scale.multiplyScalar(MONSTER.height / h);
     }
 
+    instance.updateMatrixWorld(true);
     instance.traverse((o) => {
       const m = o as THREE.SkinnedMesh;
       if (m.isMesh) {
-        // Skinned bounds don't follow the animation; never cull the monster.
-        m.frustumCulled = false;
+        // Skinned bounds don't follow the animation: cull against a fixed, generous sphere around
+        // the rest pose (covers the reach of the long arms and the lunge) instead of never culling.
+        if (m.isSkinnedMesh) {
+          m.computeBoundingSphere();
+          if (m.boundingSphere) m.boundingSphere.radius = m.boundingSphere.radius * 1.6 + 0.2;
+          m.frustumCulled = !!m.boundingSphere;
+        } else {
+          m.frustumCulled = false;
+        }
         m.castShadow = m.receiveShadow = false;
       }
     });

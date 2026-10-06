@@ -83,8 +83,15 @@ class Blobs:
 def surface_hit(bvh, origin, direction):
     hit = bvh.ray_cast(Vector(origin), Vector(direction).normalized(), 1.0)
     if hit[0] is None:
-        raise RuntimeError(f'no surface hit from {tuple(origin)} along {tuple(direction)}')
+        # fall back to the closest surface point to where the ray would have landed
+        loc, nrm, _, _ = bvh.find_nearest(Vector(origin) + Vector(direction).normalized() * 0.04)
+        return loc, nrm
     return hit[0], hit[1]
+
+
+def nearest(bvh, p):
+    loc, nrm, _, _ = bvh.find_nearest(Vector(p))
+    return loc, nrm
 
 
 def orient(normal, up=(0, 0, 1)):
@@ -102,19 +109,22 @@ def orient(normal, up=(0, 0, 1)):
 # Teddy bear
 # =============================================================================================
 
-def mat_mohair(name, seed=0.0):
-    """Matted, worn mohair: honey fur rubbed bald to the woven backing, grime, stains, dust, a
-    plaid repair patch on the left leg."""
+def mat_mohair(name, seed=0.0, socket=None):
+    """Matted, worn mohair: honey fur in clumps, rubbed bald to the woven backing, grime, stains,
+    dust, a plaid repair patch on the left leg, and a torn, frayed hole where an eye was."""
     mat = L.new_material(name)
     g = G(mat)
     p = g.pos()
     x, y, z = g.sep(p)
-    # fur clumps + strands lying downward
-    clump = g.noise(p, 55.0, 3, 0.6, offset=(seed, 0, 0))
-    strand = g.noise(p, 260.0, 2, 0.7, stretch=(1.0, 1.0, 0.25))
-    tip = g.noise(p, 18.0, 2, 0.5, offset=(0, seed, 1))
-    fur = g.mix(g.rng(tip, 0.35, 0.7), hexc('5e4428'), hexc('86643c'))
-    fur = g.mix(g.mul(g.rng(clump, 0.55, 0.3), 0.6), fur, hexc('34261a'))
+    # matted clumps (each a slightly different shade/height) + fine strands lying downward
+    cl_d = g.vor(p, 150.0, 'F1', offset=(seed, 0, 0))
+    cl_c = g.sep(g.vor(p, 150.0, 'F1', out='Color', offset=(seed, 0, 0)))[0]
+    clump = g.add(g.rng(cl_d, 0.7, 0.0), g.mul(cl_c, 0.3))
+    strand = g.noise(p, 520.0, 2, 0.7, stretch=(1.0, 1.0, 0.15))
+    tip = g.noise(p, 14.0, 3, 0.55, offset=(0, seed, 1))
+    fur = g.mix(g.rng(tip, 0.3, 0.75), hexc('573c22'), hexc('8a663a'))
+    fur = g.mix(g.mul(g.rng(cl_d, 0.35, 0.7), 0.4), fur, hexc('2e2014'))     # shadowed roots between clumps
+    fur = g.mix(g.mul(g.rng(strand, 0.6, 0.85), 0.3), fur, hexc('a8844e'))   # glinting strand tips
     # bald patches (fur rubbed off by hugging): belly, paws, muzzle tip, ear edges
     bn = g.noise(p, 14.0, 4, 0.65, offset=(seed, 2.0, 0))
     hug = g.rng(g.v('LENGTH', g.vmul(g.vadd(p, (0.012, -0.045, -0.095)), (1.0, 1.4, 0.8))), 0.085, 0.03)
@@ -122,7 +132,7 @@ def mat_mohair(name, seed=0.0):
     wv = g.mul(g.add(g.wave(p, 900.0, 'BANDS', 'X'), g.wave(p, 900.0, 'BANDS', 'Z')), 0.5)
     backing = g.mix(wv, hexc('6e5c42'), hexc('8a7856'))
     col = g.mix(bald, fur, backing)
-    h = g.mixf(bald, g.add(g.mul(clump, 0.6), g.mul(strand, 0.5)), g.mul(wv, 0.15))
+    h = g.mixf(bald, g.add(g.mul(clump, 0.7), g.mul(strand, 0.45)), g.mul(wv, 0.15))
     rough = g.mixf(bald, 0.92, 0.85)
     # plaid repair patch, stitched on the left thigh
     pc = g.vadd(p, (-0.062, -0.085, -0.055))
@@ -141,6 +151,16 @@ def mat_mohair(name, seed=0.0):
     st = g.rng(g.add(chest, g.mul(sn, 0.05)), 0.055, 0.035)
     col = g.mix(g.mul(st, 0.75), col, hexc('2a1810'))
     h = g.sub(h, g.mul(st, 0.3))  # matted flat where it soaked in
+    if socket is not None:
+        # torn eye hole: black hole, frayed pale backing threads around it, grime halo
+        dsk = g.v('DISTANCE', p, tuple(socket))
+        fr = g.noise(p, 900.0, 2, 0.6)
+        edge_n = g.mul(g.sub(g.noise(p, 300.0, 2, 0.6), 0.5), 0.004)
+        dd = g.add(dsk, edge_n)
+        col = g.mix(g.rng(dd, 0.019, 0.012), col, hexc('3a2c1c'))  # grime halo
+        col = g.mix(g.mul(g.rng(dd, 0.0125, 0.0105), g.rng(fr, 0.3, 0.6)), col, hexc('b4a684'))  # frayed threads
+        col = g.mix(g.rng(dd, 0.0098, 0.0085), col, hexc('050403'))
+        h = g.sub(h, g.mul(g.rng(dd, 0.011, 0.008), 1.5))
     col, rough, h = L.age(g, col, rough, h, dust=0.6, grime=1.0, wear=0.0, scratch=0.0, stains=0.5,
                           stain_col=hexc('3a2818'), floor=0.9, floor_h=0.05, fade=0.15, seed=seed, film=0.05,
                           dust_scale=3.0)
@@ -172,17 +192,18 @@ def build_toys():
         B.ball((0, 0.016, 0.112), 0.054)       # round tummy
         B.ball((0, -0.026, 0.17), 0.04)        # humped back
         B.ell((0, 0.0, 0.195), 0.045, (1.25, 0.9, 0.6))  # shoulders
-    torso = blob_part('torso', body, 360, Sb)
+    torso = blob_part('torso', body, 280, Sb)
 
     def headf(B):
         B.ball((0, 0.008, 0.27), 0.058)
         B.ell((0, 0.016, 0.285), 0.05, (1.1, 0.9, 0.9))   # broad forehead / cheeks
-        B.ell((0, 0.06, 0.252), 0.026, (1.0, 1.3, 0.85))  # snout
+        B.ell((0, 0.066, 0.249), 0.026, (1.0, 1.5, 0.84))  # long snout
+        B.ball((0, 0.088, 0.252), 0.016)
         for sx in (-1, 1):
             B.ell((sx * 0.05, -0.004, 0.322), 0.022, (1.0, 0.45, 1.0))
             B.ball((sx * 0.05, 0.009, 0.323), 0.0105, neg=True)  # cupped ears
         B.ball((0.024, 0.06, 0.281), 0.0082, neg=True)  # its LEFT eye: torn out
-    head = blob_part('head', headf, 560, Sh, res=0.0035)
+    head = blob_part('head', headf, 470, Sh, res=0.0035)
 
     shoulder = {sx: Sb @ Vector((sx * 0.062, 0.002, 0.185)) for sx in (-1, 1)}
     hipj = {sx: Vector((sx * 0.046, 0.014, 0.05)) for sx in (-1, 1)}
@@ -199,22 +220,25 @@ def build_toys():
             B.cap(sh, el, 0.025)
             B.cap(el, paw, 0.022)
             B.ell(paw, 0.025, (1.0, 1.0, 1.15))  # spoon paw
-        parts.append(blob_part(f'arm_{sx}', armf, 170))
+        parts.append(blob_part(f'arm_{sx}', armf, 140))
 
         def legf(B, sx=sx):
             hp, ft = hipj[sx], feet[sx]
             B.cap(hp, ft - Vector((0, 0.02, 0)), 0.034)
             B.ell(ft, 0.035, (0.95, 0.72, 1.2))
-        parts.append(blob_part(f'leg_{sx}', legf, 200))
+        parts.append(blob_part(f'leg_{sx}', legf, 160))
     deps = bpy.context.evaluated_depsgraph_get()
     for o in parts:
         L.displace(o, lambda v: Vector((v.x, v.y, max(v.z, 0.0))))
         L.place(o, None, 'z', gc_off=(0, 0, 0))
-    fur = mat_mohair('bear_mohair', 2.0)
-    for o in parts:
-        P.add(o, fur, smooth=180, weight=1.4 if o.name == 'head' else 1.0)
     bvh_head = BVHTree.FromObject(head, deps)
     bvh_body = BVHTree.FromObject(torso, deps)
+    p0 = Sh @ Vector((0, 0.008, 0.27))
+    sd = ((Sh @ Vector((0.024, 0.06, 0.281))) - p0).normalized()
+    socket, _ = surface_hit(bvh_head, p0 + sd * 0.2, -sd)
+    fur = mat_mohair('bear_mohair', 2.0, socket=socket - sd * 0.003)
+    for o in parts:
+        P.add(o, fur, smooth=180, weight=1.5 if o.name == 'head' else 1.0)
 
     felt = L.mat_fabric('bear_felt', hexc('9a8262'), hexc('7a6448'), weave=700.0, fade=0.3, stains=0.8, dust=0.35,
                         grime=1.0, seed=3.0, holes=0.5, floor=0.6)
@@ -222,15 +246,15 @@ def build_toys():
                           grime=0.6, seed=4.0)
     button = L.mat_plain('bear_button', hexc('0a0908'), 0.16, dust=0.35, grime=0.6, noise_amt=0.1, wear=0.4,
                          scratch=0.5, seed=5.0)
-    stuffing = L.mat_fabric('bear_stuffing', hexc('aaa28a'), hexc('857d68'), weave=300.0, fade=0.0, stains=0.6,
-                            dust=0.4, grime=1.0, seed=6.0, rough=0.98)
+    stuffing = L.mat_fabric('bear_stuffing', hexc('c4bca2'), hexc('9a9278'), weave=300.0, fade=0.0, stains=0.5,
+                            dust=0.3, grime=0.8, seed=6.0, rough=0.98)
     ribbon = L.mat_fabric('bear_ribbon', hexc('5e2420'), hexc('4e1e1a'), weave=1200.0, fade=0.45, stains=0.5,
                           dust=0.6, grime=0.9, seed=7.0, rough=0.6)
     # foot pads (felt) on the forward-facing soles
     for sx, ft in feet.items():
         bvh_leg = BVHTree.FromObject(next(o for o in parts if o.name == f'leg_{sx}'), deps)
         hit, n = surface_hit(bvh_leg, ft + Vector((0, 0.08, 0)), (0, -1, 0))
-        pad = L.prism('pad', L.ellipse_pts(0.023, 0.03, 12), 0.003, bevel=0.0012)
+        pad = L.prism('pad', L.ellipse_pts(0.023, 0.03, 12), 0.003, bevel=0.0)
         L.place(pad, Matrix.Translation(hit - n * 0.0015) @ orient(n, (0, 0, 1)), 'x')
         P.add(pad, felt, smooth=40, weight=0.8)
 
@@ -249,13 +273,13 @@ def build_toys():
     # torn-out eye: stuffing tuft + two loose threads hanging
     hit, n = head_ray((0.024, 0.06, 0.281))
     bm = bmesh.new()
-    bmesh.ops.create_icosphere(bm, subdivisions=1, radius=0.0075)
+    bmesh.ops.create_icosphere(bm, subdivisions=1, radius=0.0085)
     tuft = L._link(bm, 'tuft')
     rnd = random.Random(3)
     L.displace(tuft, lambda v: Vector((v.x, v.y, v.z * 0.6)) * (1 + rnd.uniform(-0.3, 0.3)))
     L.place(tuft, Matrix.Translation(hit - n * 0.0045) @ orient(n))
     P.add(tuft, stuffing, smooth=80, weight=0.6)
-    for k, (dx, L_) in enumerate(((0.003, 0.03), (-0.0025, 0.019))):
+    for k, (dx, L_) in enumerate(((0.003, 0.042), (-0.0025, 0.026))):
         st = hit + right_h * dx
         pts = [st - n * 0.002, st + n * 0.004 - up_h * 0.003, st + n * 0.006 - up_h * L_ * 0.55 + right_h * dx,
                st + n * 0.004 - up_h * L_]
@@ -270,16 +294,16 @@ def build_toys():
     for a_, b_ in ((m0, m0 - up_h * 0.009), (m0 - up_h * 0.009, m0 - up_h * 0.013 + right_h * 0.009),
                    (m0 - up_h * 0.009, m0 - up_h * 0.013 - right_h * 0.009)):
         mid = (a_ + b_) / 2
-        h1, n1 = surface_hit(bvh_head, a_ + n * 0.04, -n)
-        h2, n2 = surface_hit(bvh_head, mid + n * 0.04, -n)
-        h3, n3 = surface_hit(bvh_head, b_ + n * 0.04, -n)
+        h1, n1 = nearest(bvh_head, a_)
+        h2, n2 = nearest(bvh_head, mid)
+        h3, n3 = nearest(bvh_head, b_)
         P.add(L.tube('mouth', [h1 + n1 * 0.0004, h2 + n2 * 0.0006, h3 + n3 * 0.0004], 0.0011, segs=4), thread,
               smooth=80, weight=0.3)
     # split side seam on the torso: stuffing bulging out
     side_p = Sb @ Vector((0.065, 0.01, 0.1))
     hit, n = surface_hit(bvh_body, side_p + Vector((0.15, 0, 0)), (-1, 0, 0))
     bm = bmesh.new()
-    bmesh.ops.create_icosphere(bm, subdivisions=1, radius=0.012)
+    bmesh.ops.create_icosphere(bm, subdivisions=0, radius=0.012)
     t2 = L._link(bm, 'seam_tuft')
     L.displace(t2, lambda v: Vector((v.x * 0.6, v.y * 1.25, v.z * 0.9)) * (1 + rnd.uniform(-0.25, 0.25)))
     L.place(t2, Matrix.Translation(hit - n * 0.006) @ orient(n))
@@ -320,16 +344,16 @@ def build_rug():
     P = L.Piece('rug', 'floor', tex=1024, max_tris=600, ao=0.05, bevel=0.002, ao_small=0.006, seed=21,
                 double_sided=True, cutout_tex=256)
     LX, LY = 1.0, 0.7  # half sizes (2.0 x 1.4 m)
-    xs = list(np.linspace(-LX, 0.7, 10)) + list(np.linspace(0.7, LX, 8))[1:]
-    ys = list(np.linspace(-LY, 0.4, 6)) + list(np.linspace(0.4, LY, 7))[1:]
+    xs = list(np.linspace(-LX, 0.62, 9)) + list(np.linspace(0.62, LX, 9))[1:]
+    ys = list(np.linspace(-LY, 0.3, 5)) + list(np.linspace(0.3, LY, 8))[1:]
     # curled corner at (+X, +Y): roll everything beyond the fold line around a cylinder
-    c0 = Vector((0.80, 0.7, 0))
-    c1 = Vector((1.0, 0.45, 0))
+    c0 = Vector((0.72, 0.7, 0))
+    c1 = Vector((1.0, 0.38, 0))
     fold_t = (c1 - c0).normalized()
     fold_n = Vector((fold_t.y, -fold_t.x, 0))
     if fold_n.dot(Vector((1, 1, 0))) < 0:
         fold_n = -fold_n
-    r0 = 0.05
+    r0 = 0.068
     th = 0.006
 
     def deform(x, y, top=True):
@@ -385,8 +409,8 @@ def build_rug():
     col = g.mix(g.mul(smear, 0.65), col, dark)
     h = g.sub(h, g.mul(g.mx(stain, smear), 0.3))
     rough = g.mixf(stain, 0.95, 0.75)
-    col, rough, h = L.age(g, col, rough, h, dust=0.55, grime=0.8, wear=0.0, scratch=0.0, stains=0.6,
-                          stain_col=hexc('3a2a1c'), fade=0.0, seed=4.0, film=0.2, dust_scale=0.6)
+    col, rough, h = L.age(g, col, rough, h, dust=0.32, grime=0.8, wear=0.0, scratch=0.0, stains=0.6,
+                          stain_col=hexc('3a2a1c'), fade=0.0, seed=4.0, film=0.06, dust_scale=0.6)
     g.finish(col, rough, h, bump_dist=0.0015)
     P.add(top, mat, flat=False, smooth=60, uv='src', weight=1.0)
     # bound edge skirt along the perimeter (selvedge)
@@ -431,4 +455,4 @@ def build_rug():
             ff.append((a, a + 2, a + 3, a + 1) if sx > 0 else (a, a + 1, a + 3, a + 2))
         fr = L.mesh(f'fringe_{sx}', fv, ff, uvs=fu)
         P.add(fr, fm, group='cutout', flat=False, smooth=60, uv='src')
-    P.finish(previews=dict(yaw=30, pitch=38, extra=[dict(tag='corner', yaw=50, pitch=25, zoom=2.6)]))
+    P.finish(previews=dict(yaw=30, pitch=38, extra=[dict(tag='corner', yaw=60, pitch=12, zoom=1.3)]))

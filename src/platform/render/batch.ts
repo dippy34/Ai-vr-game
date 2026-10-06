@@ -13,6 +13,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 const _inv = new THREE.Matrix4();
 const _rel = new THREE.Matrix4();
 const _full = new THREE.Matrix4();
+const _c = new THREE.Vector3();
 
 interface Batch {
   material: THREE.Material | THREE.Material[];
@@ -24,6 +25,13 @@ interface Batch {
 export class StaticBatcher {
   private readonly batches = new Map<string, Batch>();
   private tris = 0;
+
+  /**
+   * `chunkSize` > 0 splits merged meshes into square XZ cells of that size (by where each copy's
+   * center lands), so cells outside the view frustum are culled: a few more draw calls, far fewer
+   * triangles per view. 0 = one merged mesh per source mesh for the whole level.
+   */
+  constructor(private readonly chunkSize = 0) {}
 
   /**
    * Queue every visible mesh under `root` (taken in root's own frame, i.e. root's transform is
@@ -48,6 +56,11 @@ export class StaticBatcher {
     g.applyMatrix4(world);
     // A mirrored copy would flip its winding (back faces out); placements never mirror, but be safe.
     if (world.determinant() < 0) flipWinding(g);
+    if (!chunk && this.chunkSize > 0) {
+      g.computeBoundingBox();
+      g.boundingBox!.getCenter(_c);
+      chunk = `${Math.floor(_c.x / this.chunkSize)},${Math.floor(_c.z / this.chunkSize)}`;
+    }
     const key = `${mesh.geometry.uuid}|${uuidOf(mesh.material)}|${chunk}`;
     let b = this.batches.get(key);
     if (!b) {

@@ -1551,6 +1551,8 @@ class Piece:
                 cp = grp['L'].copy()
                 cp.data = grp['L'].data.copy()
                 bpy.context.scene.collection.objects.link(cp)
+                for dec in grp['high']:
+                    transfer_uv(dec, grp['L'])
                 grp['Hi'] = join_all([cp] + grp['high'], f'{name}_Hi{gi}')
 
         # --- shared AO/edge mask texture for hard-surface materials --------------------------------
@@ -1707,6 +1709,31 @@ def uv_mask(obj, size):
             inside &= d > -eps
         mask[ys[inside], xs[inside]] = True
     return mask
+
+
+def transfer_uv(dst, src):
+    """Give decal mesh `dst` the UVs of the nearest point on `src` (so it samples src's mask texture)."""
+    from mathutils.bvhtree import BVHTree
+    from mathutils.geometry import barycentric_transform
+    sm = src.data
+    sm.calc_loop_triangles()
+    verts = [v.co.copy() for v in sm.vertices]
+    tris = [tuple(t.vertices) for t in sm.loop_triangles]
+    tloops = [tuple(t.loops) for t in sm.loop_triangles]
+    tree = BVHTree.FromPolygons(verts, tris)
+    suv = sm.uv_layers.active.data
+    dm = dst.data
+    layer = dm.uv_layers.get(sm.uv_layers.active.name) or dm.uv_layers.new(name=sm.uv_layers.active.name)
+    for loop in dm.loops:
+        co = dm.vertices[loop.vertex_index].co
+        loc, _n, idx, _d = tree.find_nearest(co)
+        if idx is None:
+            continue
+        a, b, c = (verts[i] for i in tris[idx])
+        la, lb, lc = (suv[i].uv for i in tloops[idx])
+        uvw = barycentric_transform(loc, a, b, c, Vector((la.x, la.y, 0)), Vector((lb.x, lb.y, 0)),
+                                    Vector((lc.x, lc.y, 0)))
+        layer.data[loop.index].uv = (uvw.x, uvw.y)
 
 
 def dilate(px, mask, iters):
