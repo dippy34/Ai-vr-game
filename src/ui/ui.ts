@@ -11,6 +11,8 @@ import './style.css';
 type Handler = () => void;
 
 const NAME_KEY = 'mute.playerName';
+const SENS_KEY = 'mute.micSensitivityDb';
+const SENS_RANGE = 15;
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -40,6 +42,23 @@ function loadName(): string {
     return localStorage.getItem(NAME_KEY) ?? '';
   } catch {
     return '';
+  }
+}
+
+function loadSensitivity(): number {
+  try {
+    const v = Number(localStorage.getItem(SENS_KEY));
+    return Number.isFinite(v) ? Math.max(-SENS_RANGE, Math.min(SENS_RANGE, Math.round(v))) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveSensitivity(db: number): void {
+  try {
+    localStorage.setItem(SENS_KEY, String(db));
+  } catch {
+    /* private mode etc. */
   }
 }
 
@@ -117,6 +136,10 @@ export class UI {
   onStartRound: Handler = () => {};
   onLeave: Handler = () => {};
   onResume: Handler = () => {};
+  /** Mic sensitivity changed (dB offset). */
+  onMicSensitivity: (db: number) => void = () => {};
+  /** Saved mic sensitivity (dB offset), applied at startup. */
+  readonly micSensitivity: number = loadSensitivity();
 
   readonly hud: Hud;
 
@@ -229,6 +252,7 @@ export class UI {
         this.lobbyMicStatus,
         this.lobbyMeter.root,
         el('p', { class: 'muted' }, ['Ticks: whisper · talk · shout. The monster hears what this meter hears.']),
+        this.sensitivityControl(),
         el('h2', {}, ['Go']),
         el('div', { class: 'row' }, [this.vrButton, desktopBtn]),
         el('div', { class: 'row', style: 'margin-top:10px' }, [this.startButton, leaveBtn]),
@@ -258,6 +282,30 @@ export class UI {
 
     this.hud = new Hud();
     root.append(this.hud.root, this.title, this.lobby, this.pause);
+  }
+
+  /** Slider so every mic hits the same ticks: talking normally should land near the middle tick. */
+  private sensitivityControl(): HTMLElement {
+    const input = el('input', {
+      type: 'range',
+      min: String(-SENS_RANGE),
+      max: String(SENS_RANGE),
+      step: '1',
+      'aria-label': 'Microphone sensitivity',
+    });
+    input.value = String(this.micSensitivity);
+    const label = el('label', {}, []);
+    const show = (db: number) => {
+      label.textContent = `Mic sensitivity: ${db > 0 ? '+' : ''}${db} dB. Talk normally: the bar should reach the middle tick.`;
+    };
+    show(this.micSensitivity);
+    input.addEventListener('input', () => {
+      const db = Number(input.value) || 0;
+      show(db);
+      saveSensitivity(db);
+      this.onMicSensitivity(db);
+    });
+    return el('div', { class: 'sens' }, [label, input]);
   }
 
   private name(): string {
@@ -326,7 +374,7 @@ export class UI {
   }
 
   setMicLevel(level: number): void {
-    this.lobbyMeter.fill.style.width = `${Math.round(level * 100)}%`;
+    this.lobbyMeter.fill.style.width = `${100 - Math.round(Math.min(1, Math.max(0, level)) * 100)}%`;
     this.hud.setMicLevel(level);
   }
 
@@ -410,7 +458,7 @@ export class Hud {
   }
 
   setMicLevel(level: number): void {
-    this.meter.fill.style.width = `${Math.round(level * 100)}%`;
+    this.meter.fill.style.width = `${100 - Math.round(Math.min(1, Math.max(0, level)) * 100)}%`;
   }
 
   showMessage(text: string, seconds = 3): void {

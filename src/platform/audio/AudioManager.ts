@@ -186,6 +186,11 @@ export class AudioManager implements IAudioManager {
   // Per frame
   // -------------------------------------------------------------------------------------------
 
+  /** Mic sensitivity offset in dB (players' mics differ; see the lobby slider). */
+  setMicSensitivity(db: number): void {
+    this.mic.setSensitivity(db);
+  }
+
   /** The level geometry, so walls can muffle the monster and voices in other rooms. */
   setLevel(level: LevelData | null): void {
     this.level = level;

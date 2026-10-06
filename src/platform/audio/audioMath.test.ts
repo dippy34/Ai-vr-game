@@ -3,6 +3,7 @@ import { MIC, NOISE } from '../../config';
 import { quatFromYaw } from '../../core/math';
 import {
   HEARTBEAT,
+  MIC_SENSITIVITY_RANGE,
   MicMeter,
   breathPeriod,
   dbfsToLevel,
@@ -179,5 +180,20 @@ describe('occlusionMix', () => {
     expect(g5).toBeLessThan(g2);
     expect(lp2).toBeLessThan(lp1);
     expect(lp5).toBeLessThan(lp2);
+  });
+});
+
+describe('mic sensitivity', () => {
+  it('raises the level for the same input when turned up', () => {
+    const rms = 0.01; // about -40 dBFS: quiet talking on a weak mic
+    const flat = new MicMeter();
+    const hot = new MicMeter();
+    hot.sensitivityDb = 10;
+    for (let i = 0; i < 5; i++) {
+      flat.push(rms, 0.02);
+      hot.push(rms, 0.02);
+    }
+    expect(hot.level).toBeGreaterThan(flat.level);
+    expect(MIC_SENSITIVITY_RANGE).toBeGreaterThan(0);
   });
 });

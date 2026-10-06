@@ -55,14 +55,19 @@ export function gateMicLevel(level: number, gate: number = MIC.gate): number {
   return level < gate ? 0 : Math.min(level, 1);
 }
 
+/** Sensitivity slider range in dB (each side of 0). */
+export const MIC_SENSITIVITY_RANGE = 15;
+
 /** Stateful mic meter built from the pure steps above: feed RMS + dt, read the gated level. */
 export class MicMeter {
   private smoothed = 0;
   private out = 0;
+  /** Per-player mic sensitivity offset in dB (mics differ a lot), clamped to ±MIC_SENSITIVITY_RANGE. */
+  sensitivityDb = 0;
 
   /** Push one RMS measurement taken `dt` seconds after the previous one. Returns the gated level. */
   push(rms: number, dt: number): number {
-    const raw = dbfsToLevel(rmsToDbfs(rms));
+    const raw = dbfsToLevel(rmsToDbfs(rms) + this.sensitivityDb);
     this.smoothed = stepMicLevel(this.smoothed, raw, dt);
     this.out = gateMicLevel(this.smoothed);
     return this.out;

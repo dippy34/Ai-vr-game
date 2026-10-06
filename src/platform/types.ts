@@ -121,6 +121,8 @@ export interface IAudioManager {
    * to other players as voice, or null if denied/unavailable. Starts the loudness meter.
    */
   startMic(): Promise<MediaStream | null>;
+  /** Mic sensitivity offset in dB, about -15..+15 (players' mics differ a lot). */
+  setMicSensitivity(db: number): void;
   /** Level geometry, so walls can muffle the monster and voices in other rooms (null = none). */
   setLevel(level: LevelData | null): void;
   /** Smoothed local mic loudness 0..1 using the MIC config mapping. 0 below MIC.gate or without a mic. */

@@ -32,6 +32,8 @@ void isVRSupported().then((ok) => (vrSupported = ok));
 
 input.setEnabled(false);
 ui.showTitle();
+audio.setMicSensitivity(ui.micSensitivity);
+ui.onMicSensitivity = (db) => audio.setMicSensitivity(db);
 
 // Dev-only handle for automated browser tests and console poking.
 if (import.meta.env.DEV) {

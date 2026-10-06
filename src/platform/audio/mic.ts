@@ -5,7 +5,7 @@
  * every engine keeps pulling the analyser.
  */
 
-import { MicMeter, rmsOf } from './audioMath';
+import { MIC_SENSITIVITY_RANGE, MicMeter, rmsOf } from './audioMath';
 
 const nowMs = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -18,6 +18,12 @@ export class MicInput {
   private buf: Float32Array<ArrayBuffer> | null = null;
   private readonly meter = new MicMeter();
   private lastPoll = 0;
+
+  /** Mic sensitivity offset in dB (positive = the monster hears you more easily). */
+  setSensitivity(db: number): void {
+    const r = MIC_SENSITIVITY_RANGE;
+    this.meter.sensitivityDb = Number.isFinite(db) ? Math.max(-r, Math.min(r, db)) : 0;
+  }
 
   get level(): number {
     return this.meter.level;

@@ -220,11 +220,17 @@ button.danger {
   overflow: hidden;
 }
 
+/* The gradient spans the whole meter; a dark cover hides the part above the current level,
+   so quiet levels read green and only loud ones reach red. */
+.meter {
+  background: linear-gradient(90deg, var(--ok), var(--warn) 55%, var(--danger));
+}
+
 .meter > .fill {
   position: absolute;
-  inset: 0 auto 0 0;
-  width: 0%;
-  background: linear-gradient(90deg, var(--ok), var(--warn) 55%, var(--danger));
+  inset: 0 0 0 auto;
+  width: 100%;
+  background: #0b0d11;
   transition: width 0.05s linear;
 }
 
@@ -346,4 +352,13 @@ details[open] summary {
   .hud .hint {
     display: none;
   }
+}
+
+.sens {
+  margin-top: 12px;
+}
+
+.sens input[type='range'] {
+  width: 100%;
+  accent-color: #e8e2cf;
 }
