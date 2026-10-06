@@ -442,6 +442,9 @@ export class GameRenderer implements IGameRenderer {
       _col.setRGB(k, k, k);
       for (let i = from; i < list.length; i++) paint(list[i], _col);
     };
+    // The hand holding the camera is behind its lens: it never freezes into its own flash (it
+    // would sit in the flasher's view as a big white ghost). Their other hand still can.
+    const lensHand = state.camera.holder === event.by ? state.camera.hand : null;
     for (const id in state.players) {
       const pl = state.players[id];
       // Someone being grabbed right now still gets frozen into the flash (with the monster).
@@ -464,7 +467,7 @@ export class GameRenderer implements IGameRenderer {
       // Hands with their exact finger curls right now.
       for (const side of SIDES) {
         const h = pose[side];
-        if (!h.tracked) continue;
+        if (!h.tracked || (id === event.by && side === lensHand)) continue;
         setV(_a, h.position);
         k = captured(_a);
         if (k <= 0) continue;

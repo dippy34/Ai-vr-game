@@ -341,12 +341,21 @@ details[open] summary {
   text-align: center;
   opacity: 0;
   transition: opacity 0.4s;
+  /* left: 50% would only leave half the screen to shrink into (lines wrapped early) */
+  width: max-content;
   max-width: 90vw;
   white-space: pre-line;
 }
 
 .hud .toast.show {
   opacity: 1;
+}
+
+/* Narrower windows: one row up, clear of the noise meter. */
+@media (max-width: 1100px) {
+  .hud .hint {
+    bottom: 48px;
+  }
 }
 
 @media (max-width: 700px) {
