@@ -75,3 +75,30 @@ export function makeRng(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+// ---- additions (core module) ----------------------------------------------------------------
+
+/** Mix two integers into a new 32-bit seed (e.g. level seed + round number). Deterministic. */
+export function mixSeed(a: number, b: number): number {
+  let h = (a ^ Math.imul((b + 1) >>> 0, 0x9e3779b1)) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+/** Wrap an angle into (-PI, PI]. */
+export function wrapAngle(a: number): number {
+  return angleDelta(0, a);
+}
+
+/** Yaw that faces from `from` toward `to` on the XZ plane (0 = -Z, CCW positive). */
+export function yawTowards(from: Vec3, to: Vec3): number {
+  return Math.atan2(-(to.x - from.x), -(to.z - from.z));
+}
+
+export const copyQuat = (q: Quat): Quat => ({ x: q.x, y: q.y, z: q.z, w: q.w });
+
+/** True when every component is a finite number (guards against garbage from the network). */
+export function isFiniteVec3(a: Vec3 | null | undefined): a is Vec3 {
+  return !!a && Number.isFinite(a.x) && Number.isFinite(a.y) && Number.isFinite(a.z);
+}

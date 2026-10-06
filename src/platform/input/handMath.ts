@@ -201,20 +201,23 @@ export function handFrameFromJoints(j: HandJointPositions, handedness: Handednes
 
 /**
  * Curl of one long finger from its 5 joints: sum of the flexion angles between successive bone
- * directions (MCP, PIP, DIP). With a hand frame, angles are signed around the hand's lateral axis
- * (so sideways spread and hyperextension don't count as curl); without one, unsigned.
+ * directions (MCP, PIP, DIP). With a hand frame, bones are projected onto the plane perpendicular
+ * to the hand's lateral (flexion) axis and the angles are signed, so sideways spread and
+ * hyperextension don't count as curl; without a frame, plain unsigned angles are used.
  */
 export function fingerCurlFromChain(points: Vec3[], flexAxis: Vec3 | null): number {
   let sum = 0;
   let prev: Vec3 | null = null;
   for (let i = 1; i < points.length; i++) {
-    const bone = unit(sub3(points[i], points[i - 1]));
-    if (!bone) continue;
+    let bone = sub3(points[i], points[i - 1]);
+    if (flexAxis) bone = sub3(bone, scale3(flexAxis, dot3(bone, flexAxis)));
+    const b = unit(bone);
+    if (!b) continue;
     if (prev) {
-      const a = flexAxis ? signedAngle(prev, bone, flexAxis) : angleBetween(prev, bone);
+      const a = flexAxis ? signedAngle(prev, b, flexAxis) : angleBetween(prev, b);
       sum += Math.max(0, a);
     }
-    prev = bone;
+    prev = b;
   }
   return clamp((sum - FINGER_STRAIGHT_RAD) / (FINGER_CURLED_RAD - FINGER_STRAIGHT_RAD), 0, 1);
 }
@@ -326,9 +329,14 @@ export const CONTROLLER_INDEX_TOUCH_CURL = 0.35;
 /** Thumb curl while it rests on a face button / stick / thumbrest. */
 export const CONTROLLER_THUMB_REST_CURL = 0.8;
 
-function btnValue(b: ButtonLike | null | undefined): number {
+/**
+ * Analog value of a button. Uses `value` when the runtime reports one (Quest's `pressed` flips at
+ * its own threshold, so it must not override the analog value); digital buttons fall back to 0/1.
+ */
+export function buttonValue(b: ButtonLike | null | undefined): number {
   if (!b) return 0;
-  return Math.max(b.value || 0, b.pressed ? 1 : 0);
+  const v = Number.isFinite(b.value) ? b.value : 0;
+  return v > 0 ? clamp(v, 0, 1) : b.pressed ? 1 : 0;
 }
 
 function btnTouched(b: ButtonLike | null | undefined): boolean {
@@ -343,9 +351,9 @@ function btnTouched(b: ButtonLike | null | undefined): boolean {
  */
 export function controllerCurls(buttons: readonly (ButtonLike | null | undefined)[]): FingerCurls {
   const trig = buttons[XR_BUTTON.trigger];
-  const tv = btnValue(trig);
+  const tv = buttonValue(trig);
   const index = btnTouched(trig) ? CONTROLLER_INDEX_TOUCH_CURL + (1 - CONTROLLER_INDEX_TOUCH_CURL) * tv : 0;
-  const sq = clamp(btnValue(buttons[XR_BUTTON.squeeze]), 0, 1);
+  const sq = clamp(buttonValue(buttons[XR_BUTTON.squeeze]), 0, 1);
   let thumbDown = false;
   for (let i = XR_BUTTON.touchpad; i <= XR_BUTTON.thumbrest; i++) {
     if (btnTouched(buttons[i])) thumbDown = true;

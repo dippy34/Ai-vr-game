@@ -4,5 +4,5 @@ dist/
 .DS_Store
 .vite/
 coverage/
-.blender-venv/
+.blender-venv
 art/previews/*.blend1
