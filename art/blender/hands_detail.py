@@ -175,7 +175,7 @@ def evaluate(P: np.ndarray, N: np.ndarray, region: np.ndarray, sk: hg.Skeleton, 
             dip = [(-1.9 * MM, .6), (-0.8 * MM, 1), (0.3 * MM, .9), (1.3 * MM, .5)]
             w = wrinkle_set(d1, [(c * sc, ww) for c, ww in pip], 0.13 * MM, 0.19 * MM, -1.3 * MM, dorsal * lat_fade)
             w += wrinkle_set(d2, [(c * sc, ww) for c, ww in dip], 0.09 * MM, 0.17 * MM, -0.9 * MM, dorsal * lat_fade)
-            w += wrinkle_set(d0, [(4.0 * MM, .5), (6.0 * MM, .35)], 0.05 * MM, 0.3 * MM, -1.0 * MM, dorsal * lat_fade)
+            w += wrinkle_set(d0, [(4.0 * MM, .5), (6.0 * MM, .35)], 0.025 * MM, 0.35 * MM, -1.0 * MM, dorsal * lat_fade)
             hh += w
             cr += w
             # palmar flexion creases

@@ -341,8 +341,9 @@ def felt(name: str, color=(0.012, 0.010, 0.010)) -> 'bpy.types.Material':
 # Fuse box / door recipes
 # ---------------------------------------------------------------------------------------------
 
-def painted_steel(name: str, paint=(0.095, 0.120, 0.100), s: float = 1.0, chips: float = 1.0, rust: float = 1.0,
-                  dust: float = 1.0, primer=(0.20, 0.055, 0.03), marks: Sequence[dict] = ()) -> 'bpy.types.Material':
+def painted_steel(name: str, paint=(0.115, 0.150, 0.120), s: float = 1.0, chips: float = 1.0, rust: float = 1.0,
+                  dust: float = 1.0, primer=(0.20, 0.055, 0.03), edge_dist: float = 0.0009,
+                  marks: Sequence[dict] = ()) -> 'bpy.types.Material':
     """Old enamel on sheet steel: hammer-tone texture, chipped edges down to red-oxide primer and
     bare/rusty steel, rust blooming in seams with streaks running down, dust settled on every
     upward-facing surface."""
@@ -352,21 +353,22 @@ def painted_steel(name: str, paint=(0.095, 0.120, 0.100), s: float = 1.0, chips:
         n2 = k.noise(scale=70 / s, detail=6, rough=0.62)
         n3 = k.noise(scale=700 / s, detail=3)
         hammer = k.voronoi(scale=260 / s, feature='F1', rand=1.0)
-        edge = k.edges(dist=0.005 * s, lo=0.5, hi=0.92)
-        cav = k.cavity(dist=0.03 * s, lo=0.45, hi=0.97)
+        edge = k.edges(dist=edge_dist, lo=0.5, hi=0.9)
+        cav = k.cavity(dist=0.012 * s, lo=0.5, hi=0.97)
         x, y, z = k.xyz(k.coord())
         nz = k.xyz(k.geo('Normal'))[2]
-        # chips: edges + random spots, primer ring around bare steel
-        spots = k.ramp_f(k.noise(scale=45 / s, detail=6, rough=0.7), 0.70, 0.73)
-        chipf = k.add(k.mul(edge, 0.85), k.mul(n2, 0.5))
+        # chips: along edges (noisy) + a few random spots; red-oxide primer ring around bare steel
+        spot_n = k.noise(scale=38 / s, detail=6, rough=0.7)
+        spots = k.ramp_f(spot_n, 0.700, 0.715)
+        chipf = k.add(k.mul(edge, 0.9), k.mul(n2, 0.45))
         chip_primer = k.mul(k.maxf(k.ramp_f(chipf, 0.80, 0.83), spots), chips)
-        chip_bare = k.mul(k.maxf(k.ramp_f(chipf, 0.88, 0.91),
-                                 k.ramp_f(k.noise(scale=45 / s, detail=6, rough=0.7), 0.735, 0.75)), chips)
-        rustm = k.mul(k.ramp_f(k.add(k.mul(cav, 0.55), k.mul(n1, 0.55)), 0.62, 0.80), rust)
-        streak_n = k.noise(scale=22 / s, detail=5, vec=k.mapping(scale=(26, 26, 1.2)))
-        streak = k.mul(k.mul(k.ramp_f(streak_n, 0.58, 0.72), k.ramp_f(n1, 0.4, 0.7)), 0.7 * rust)
-        dustm = k.mul(k.mul(k.ramp_f(nz, 0.35, 0.85), k.add(0.55, k.mul(n2, 0.6))), dust)
-        dustm = k.minf(k.add(dustm, k.mul(cav, 0.25 * dust)), 1.0)
+        chip_bare = k.mul(k.maxf(k.ramp_f(chipf, 0.88, 0.91), k.ramp_f(spot_n, 0.725, 0.74)), chips)
+        rustm = k.mul(k.ramp_f(k.add(k.mul(cav, 0.6), k.mul(n1, 0.45)), 0.66, 0.82), rust)
+        rustm = k.maxf(rustm, k.mul(chip_bare, k.ramp_f(n2, 0.4, 0.6)))
+        streak_n = k.noise(scale=22 / s, detail=5, vec=k.mapping(scale=(30, 30, 1.2)))
+        streak = k.mul(k.mul(k.ramp_f(streak_n, 0.60, 0.74), k.ramp_f(n1, 0.45, 0.7)), 0.6 * rust)
+        dustm = k.mul(k.mul(k.ramp_f(nz, 0.45, 0.9), k.add(0.45, k.mul(n2, 0.6))), dust)
+        dustm = k.minf(k.add(dustm, k.mul(cav, 0.15 * dust)), 1.0)
         # paint color: slight variation + hammer-tone cells
         pc = k.mix(k.ramp_f(n1, 0.3, 0.7), tuple(c * 0.82 for c in paint), tuple(c * 1.15 for c in paint))
         pc = k.mix(k.mul(k.ramp_f(hammer, 0.1, 0.6), 0.25), pc, tuple(c * 0.75 for c in paint))
@@ -478,5 +480,117 @@ def paper(name: str, ink_mask: Callable, s: float = 1.0, color=(0.52, 0.44, 0.28
         col = k.mix(k.mul(ink, 0.85), col, (0.035, 0.03, 0.04))
         return dict(color=col, rough=k.add(0.82, k.mul(n2, 0.1)), metal=0.0, height=k.add(k.mul(n2, 0.4), k.mul(n1, 0.3)),
                     bump=0.4, bump_dist=0.0004 * s)
+
+    return L.pbr(name, fn, marks=marks)
+
+
+def _grain(k: Kit, axis: str, s: float, rot: float = 0.0, scale: float = 1.0):
+    """Wood grain value (0..1): long streaks along `axis` (object space), optional rotation about Y."""
+    stretch = {'Z': (1.0, 1.0, 0.035), 'X': (0.035, 1.0, 1.0)}[axis]
+    v = k.mapping(rot=(0, rot, 0), scale=stretch)
+    d = 'Y' if axis == 'Z' else 'Y'
+    rings = k.wave(scale=38 * scale / s, vec=v, kind='BANDS', direction='X' if axis == 'Z' else 'Z', distortion=7.0,
+                   detail=4, detail_scale=1.5)
+    fine = k.noise(scale=900 / s, detail=3, vec=v)
+    _ = d
+    return k.add(k.mul(rings, 0.75), k.mul(fine, 0.25))
+
+
+def painted_wood(name: str, paint=(0.040, 0.055, 0.045), under=(0.40, 0.37, 0.28), wood=(0.17, 0.11, 0.06),
+                 grain: str = 'Z', s: float = 1.0, peel: float = 1.0, grime: float = 1.0, crack: float = 1.0,
+                 rot: float = 0.0, marks: Sequence[dict] = ()) -> 'bpy.types.Material':
+    """Old paint on wood: two coats (top + cream undercoat) peeling in flakes with lifted edges,
+    alligator cracking, bare grey wood where both coats are gone, grime low down and in
+    crevices, exterior faces (normal -Y) sun-bleached and more weathered."""
+
+    def fn(k: Kit):
+        x, y, z = k.xyz(k.coord())
+        ny = k.xyz(k.geo('Normal'))[1]
+        ext = k.ramp_f(ny, -0.3, -0.8)        # exterior side of the wall
+        g = _grain(k, grain, s, rot)
+        n1 = k.noise(scale=4.5 / s, detail=8, rough=0.62)
+        n2 = k.noise(scale=22 / s, detail=6, rough=0.6)
+        n3 = k.noise(scale=300 / s, detail=3)
+        edge = k.edges(dist=0.004 * s, lo=0.5, hi=0.9)
+        cav = k.cavity(dist=0.02 * s, lo=0.5, hi=0.97)
+        low = k.ramp_f(z, 0.45, 0.05)          # kick zone near the floor
+        # paint loss
+        pv = k.add(k.add(k.mul(n1, 0.62), k.mul(n2, 0.30)), k.mul(edge, 0.30))
+        pv = k.add(pv, k.mul(low, 0.10))
+        pv = k.add(pv, k.mul(ext, 0.10))
+        pv = k.add(pv, k.mul(g, 0.06))         # flakes follow the grain a little
+        th = 0.74 - 0.10 * peel
+        top_gone = k.ramp_f(pv, th, th + 0.008)
+        lifted = k.sub(k.ramp_f(pv, th - 0.018, th - 0.004), top_gone, clamp=True)   # rim of the flake
+        under_gone = k.mul(top_gone, k.ramp_f(k.add(k.mul(n2, 0.7), k.mul(n3, 0.3)), 0.56, 0.58))
+        # alligator cracks in the remaining top coat
+        cells = k.voronoi(scale=55 / s, feature='DISTANCE_TO_EDGE', rand=1.0)
+        cr = k.mul(k.mul(k.ramp_f(cells, 0.035, 0.0), k.ramp_f(n2, 0.45, 0.6)), crack)
+        cr = k.mul(cr, k.inv(top_gone))
+        # colors
+        woodc = k.mix(k.ramp_f(g, 0.3, 0.7), tuple(c * 0.75 for c in wood), wood)
+        woodc = k.mix(k.mul(ext, 0.7), woodc, (0.20, 0.18, 0.15))           # silvered outside
+        topc = k.mix(k.ramp_f(n2, 0.3, 0.7), tuple(c * 0.85 for c in paint), tuple(c * 1.12 for c in paint))
+        topc = k.mix(k.mul(ext, 0.55), topc, tuple(min(1.0, c * 1.6 + 0.03) for c in paint))   # sun faded
+        underc = k.mix(k.ramp_f(n3, 0.3, 0.7), under, tuple(c * 0.85 for c in under))
+        col = k.mix(top_gone, topc, underc)
+        col = k.mix(under_gone, col, woodc)
+        col = k.mix(k.mul(lifted, 0.6), col, tuple(min(1.0, c * 1.5 + 0.02) for c in paint))
+        col = k.mix(k.mul(cr, 0.8), col, (0.012, 0.010, 0.008))
+        dirt = k.minf(k.add(k.mul(cav, 0.7), k.mul(k.mul(low, k.ramp_f(n2, 0.3, 0.7)), 0.55)), 1.0)
+        dirt = k.mul(dirt, grime)
+        col = k.mix(dirt, col, (0.035, 0.028, 0.020))
+        rough = k.add(0.55, k.mul(n3, 0.1))
+        rough = k.mixf(top_gone, rough, 0.75)
+        rough = k.mixf(under_gone, rough, 0.88)
+        rough = k.mixf(dirt, rough, 0.85)
+        rough = k.add(rough, k.mul(ext, 0.12))
+        h = k.mul(k.inv(top_gone), 0.6)
+        h = k.add(h, k.mul(lifted, 0.5))
+        h = k.add(h, k.mul(k.inv(under_gone), 0.3))
+        h = k.add(h, k.mul(k.mul(under_gone, g), 0.4))
+        h = k.sub(h, k.mul(cr, 0.4))
+        return dict(color=col, rough=rough, metal=0.0, height=h, bump=0.7, bump_dist=0.0008 * s)
+
+    return L.pbr(name, fn, marks=marks)
+
+
+def raw_wood(name: str, wood=(0.16, 0.12, 0.08), grain: str = 'X', rot: float = 0.0, s: float = 1.0, wear_z=None,
+             marks: Sequence[dict] = ()) -> 'bpy.types.Material':
+    """Weathered bare wood (boards, threshold): silvered, open grain, splits, dirt."""
+
+    def fn(k: Kit):
+        g = _grain(k, grain, s, rot, scale=1.3)
+        n1 = k.noise(scale=12 / s, detail=6)
+        n2 = k.noise(scale=200 / s, detail=4)
+        cav = k.cavity(dist=0.015 * s, lo=0.5, hi=0.97)
+        edge = k.edges(dist=0.003 * s)
+        split = k.mul(k.ramp_f(g, 0.86, 0.9), k.ramp_f(n1, 0.55, 0.65))
+        col = k.mix(k.ramp_f(g, 0.25, 0.75), tuple(c * 0.6 for c in wood), wood)
+        col = k.mix(k.mul(k.ramp_f(n1, 0.3, 0.7), 0.6), col, (0.19, 0.17, 0.14))
+        col = k.mix(k.mul(edge, 0.5), col, tuple(min(1.0, c * 1.4) for c in wood))
+        col = k.mix(split, col, (0.02, 0.015, 0.01))
+        col = k.mix(k.mul(cav, 0.8), col, (0.03, 0.025, 0.018))
+        rough = k.add(0.72, k.mul(n2, 0.12))
+        if wear_z is not None:
+            x, y, z = k.xyz(k.coord())
+            worn = k.mul(k.ramp_f(k.math('ABSOLUTE', x), 0.35, 0.05), k.ramp_f(n1, 0.2, 0.6))
+            col = k.mix(k.mul(worn, 0.5), col, tuple(min(1.0, c * 1.6) for c in wood))
+            rough = k.sub(rough, k.mul(worn, 0.25))
+        h = k.add(k.mul(g, 0.6), k.mul(split, -1.2))
+        h = k.add(h, k.mul(n2, 0.2))
+        return dict(color=col, rough=rough, metal=0.0, height=h, bump=0.6, bump_dist=0.0008 * s)
+
+    return L.pbr(name, fn, marks=marks)
+
+
+def iron(name: str, s: float = 1.0, marks: Sequence[dict] = ()):
+    """Rusty iron (nail heads, hinge pins)."""
+
+    def fn(k: Kit):
+        n = k.noise(scale=500 / s, detail=5)
+        col = k.mix(n, (0.05, 0.035, 0.025), (0.20, 0.08, 0.03))
+        return dict(color=col, rough=k.add(0.7, k.mul(n, 0.2)), metal=k.mul(k.inv(n), 0.5), height=n, bump=0.5,
+                    bump_dist=0.0002 * s)
 
     return L.pbr(name, fn, marks=marks)

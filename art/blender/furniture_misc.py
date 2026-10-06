@@ -13,8 +13,8 @@ def build() -> None:
 
 
 def _pine(name, seed=0.0, decal=None):
-    return F.mat_wood(name, hexc('8f7c62'), hexc('4a3c2c'), finish=0.84, ring=0.014, figure=1.0, pores=0.3,
-                      dust=0.75, grime=0.9, wear=0.6, raw=hexc('b8a27e'), scratch=0.5, tide=0.07,
+    return F.mat_wood(name, hexc('7d6e5a'), hexc('3b3127'), finish=0.84, ring=0.014, figure=1.0, pores=0.3,
+                      dust=0.75, grime=0.95, wear=0.6, raw=hexc('a8977a'), scratch=0.5, tide=0.07,
                       stains=0.6, seed=seed, tone=0.35, bevel_r=0.004, decal=decal)
 
 
@@ -36,6 +36,7 @@ def _crate(P: F.Piece, S: float, planks: int, lid_open: bool, stencils, broken=(
     straw = F.mat_plain('crate_straw', hexc('8a7440'), 0.95, dust=0.6, grime=1.0, noise_amt=0.5)
     t = 0.018           # board thickness
     bt = 0.022          # batten thickness
+    S = S - 2 * bt      # S = outer size including the battens
     bw = 0.075 * S / 0.8  # batten width
     skid = 0.05
     gap = 0.007
@@ -73,16 +74,17 @@ def _crate(P: F.Piece, S: float, planks: int, lid_open: bool, stencils, broken=(
                 P.box((bw, bt, H), (x, y, skid + H / 2), wood, bevel=0.004, grain='z', name='batten')
             for z in (skid + bw / 2, skid + H - bw / 2):
                 P.box((S - 2 * bw, bt, bw), (0, y, z), wood, bevel=0.004, name='batten')
-            ln = math.hypot(S - 2 * bw, H - 2 * bw)
-            ang = math.degrees(math.atan2(H - 2 * bw, S - 2 * bw)) * (1 if sign > 0 else -1)
-            P.box((ln - bw * 0.6, bt * 0.9, bw * 0.85), (0, y, skid + H / 2), wood, rot=(0, -ang, 0), bevel=0.004,
-                  name='brace')
         else:
             x = sign * off
             for yy in (-S / 2 - bt + bw / 2, S / 2 + bt - bw / 2):
                 P.box((bt, bw, H), (x, yy, skid + H / 2), wood, bevel=0.004, grain='z', name='batten')
             for z in (skid + bw / 2, skid + H - bw / 2):
                 P.box((bt, S + 2 * bt - 2 * bw, bw), (x, 0, z), wood, bevel=0.004, grain='y', name='batten')
+            if sign > 0:  # one diagonal brace (stencils go on the other faces)
+                ln = math.hypot(S - 2 * bw, H - 2 * bw)
+                ang = math.degrees(math.atan2(H - 2 * bw, S - 2 * bw))
+                P.box((bt * 0.9, ln - bw * 0.6, bw * 0.85), (x, 0, skid + H / 2), wood, rot=(ang, 0, 0), bevel=0.004,
+                      grain='y', name='brace')
         faces[(axis, sign)] = objs
 
     for axis, sign in (('y', 1), ('y', -1), ('x', 1), ('x', -1)):
@@ -107,7 +109,7 @@ def _crate(P: F.Piece, S: float, planks: int, lid_open: bool, stencils, broken=(
     if lid_open:
         import bpy
         from furniture_lib import _xf
-        m = _xf((0.05, 0.035, 0.02), (0, 0, 7), pivot=(0, 0, S)) @ _xf((0, 0, 0), (-5, 0, 0), pivot=(0, S / 2, S))
+        m = _xf((0.025, 0.02, 0.012), (0, 0, 4), pivot=(0, 0, S)) @ _xf((0, 0, 0), (-3.5, 0, 0), pivot=(0, S / 2, S))
         for o in lid:
             o.data.transform(m)
     # stencils (decal bake on the boards they sit on)
@@ -130,13 +132,13 @@ def build_crate():
     P = F.Piece('crate', seed=11)
     S = 0.8
     _crate(P, S, 5, True, [
-        ('y', 1, 'FRAGILE', 0.11, 0.0, 0.47),
-        ('y', 1, 'No 47', 0.07, 0.0, 0.30),
-        ('x', 1, 'KEEP DRY', 0.08, 0.0, 0.47),
-        ('x', -1, 'HANDLE WITH CARE', 0.05, 0.0, 0.55),
+        ('y', 1, 'FRAGILE', 0.12, 0.0, 0.50),
+        ('y', 1, 'No 47', 0.075, 0.0, 0.33),
+        ('x', -1, 'KEEP DRY', 0.08, 0.0, 0.47),
+        ('y', -1, 'HANDLE WITH CARE', 0.05, 0.0, 0.55),
         ('y', -1, '1953', 0.08, 0.0, 0.4),
     ], broken=(('x', -1, 4),))
-    P.finish(tex=1024, max_tris=2500)
+    P.finish(tex=1024, max_tris=2500, fit=(S, S, S))
 
 
 def build_crate_small():
@@ -145,6 +147,6 @@ def build_crate_small():
     _crate(P, S, 4, False, [
         ('y', 1, 'GLASS', 0.085, 0.0, 0.36),
         ('y', 1, 'THIS SIDE UP', 0.04, 0.0, 0.22),
-        ('x', 1, 'No 12', 0.07, 0.0, 0.38),
+        ('x', -1, 'No 12', 0.07, 0.0, 0.38),
     ], broken=(('y', -1, 3),))
-    P.finish(tex=1024, max_tris=2500)
+    P.finish(tex=1024, max_tris=2500, fit=(S, S, S))

@@ -148,8 +148,8 @@ class Skeleton:
         d2 = v3(-0.43, 0.90, 0.0).normalized()
         d3 = v3(-0.30, 0.95, 0.03).normalized()
         mcp = cmc + d1 * 0.0455
-        ip = mcp + d2 * 0.0325
-        tip = ip + d3 * 0.0290
+        ip = mcp + d2 * 0.0340
+        tip = ip + d3 * 0.0300
         # progressive pronation: metacarpal back faces mostly up, the nail faces radially
         dors = []
         for dd, nv in ((d1, v3(-0.38, 0.0, 0.92)), (d2, v3(-0.64, 0.0, 0.77)), (d3, v3(-0.80, 0.02, 0.60))):
@@ -189,8 +189,8 @@ THUMB_PROFILE = {
            (2.0, 0.0080), (2.25, 0.0091), (2.6, 0.0095), (2.86, 0.0080), (2.97, 0.0046)],
 }
 
-FINGER_STATIONS = [0.64, 0.86, 1.0, 1.2, 1.75, 2.0, 2.25, 2.6, 2.86, 2.965]
-THUMB_STATIONS = [0.86, 1.0, 1.2, 1.6, 1.88, 2.0, 2.25, 2.6, 2.86, 2.965]
+FINGER_STATIONS = [0.64, 0.86, 0.94, 1.0, 1.06, 1.2, 1.75, 1.92, 2.0, 2.08, 2.25, 2.6, 2.86, 2.965]
+THUMB_STATIONS = [0.86, 0.94, 1.0, 1.06, 1.2, 1.6, 1.86, 1.93, 2.0, 2.07, 2.25, 2.6, 2.86, 2.965]
 
 
 def ring_points(p: Vector, u: Vector, v: Vector, hw: float, hd: float, hp: float, n: float = 2.5,
@@ -255,6 +255,21 @@ def finger_weights(name: str, s: float) -> dict[str, float]:
         t = smoothstep(1.86, 2.14, s)
         return {b2: 1 - t, b3: t}
     return {b3: 1.0}
+
+
+def joint_weights(name: str, s: float, phi_deg: float) -> dict[str, float]:
+    """Like finger_weights, but around PIP/DIP the dorsal side follows the distal bone more and the
+    palmar side the proximal one: the knuckle keeps its roundness when the finger curls (linear
+    blend skinning would otherwise collapse a 50/50 ring to cos(angle/2) of its radius)."""
+    w = finger_weights(name, s)
+    j = round(s)
+    if j in (1, 2) and abs(s - j) < 0.13:
+        b0, b1 = f'{name}_{j}', f'{name}_{j + 1}'
+        t = w.get(b1, 0.0)
+        fall = 1 - abs(s - j) / 0.13
+        t = min(1.0, max(0.0, t + 0.30 * math.sin(math.radians(phi_deg)) * fall))
+        return {b0: 1 - t, b1: t}
+    return w
 
 
 def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
@@ -459,6 +474,8 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
         w = palm_w(r, top, j)
         if HOLE[0] <= r <= HOLE[1] + 1 and j <= 2:
             amt = [0.30, 0.12, 0.04][j] * (0.6 if top else 1.0)
+            # nothing at the wrist end (the cuff stays put), full toward the web
+            amt *= {HOLE[0]: 0.0, HOLE[0] + 1: 0.25, HOLE[0] + 2: 0.65}.get(r, 1.0)
             if r == HOLE[1] + 1:
                 amt *= 0.5
             w = {k: x * (1 - amt) for k, x in w.items()}
@@ -501,13 +518,13 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
         prev = ring0
         rings = [ring0]
         for pts, w, st in (pre or []):
-            ids = [hm.add(q, w, station=(c.name, st)) for q in pts]
+            ids = [hm.add(q, {f'{c.name}_1': w, 'wrist': 1 - w}, station=(c.name, st)) for q in pts]
             hm.bridge(prev, ids)
             rings.append(ids)
             prev = ids
         for s in stations:
             pts = station_ring(c, s, profile, n_exp)
-            ids = [hm.add(q, finger_weights(c.name, s), station=(c.name, s)) for q in pts]
+            ids = [hm.add(q, joint_weights(c.name, s, RING_PHI[i]), station=(c.name, s)) for i, q in enumerate(pts)]
             hm.bridge(prev, ids)
             rings.append(ids)
             prev = ids
@@ -537,7 +554,7 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
     for fi, c in enumerate(fingers):
         ti, bi = palm_ids[NPR - 1]
         ring0 = ti[K * fi:K * fi + K + 1] + list(reversed(bi[K * fi:K * fi + K + 1]))
-        tube(c, ring0, FINGER_STATIONS, FINGER_PROFILE, 2.5)
+        tube(c, ring0, FINGER_STATIONS, FINGER_PROFILE, 2.25)
 
     # ---------------- thumb -----------------
     th = ch['thumb']
@@ -558,8 +575,16 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
             web_side = 0.35 if i in (K - 1, K, K + 1, K + 2) else 1.0   # toward the index: thin web
             q = q + n_h * (bulge * (1.0 if sv < 0 else 0.6) * web_side)
             pts.append(q)
-        pre.append((pts, {'thumb_1': wt, 'wrist': 1 - wt}, t * THUMB_STATIONS[0]))
+        pre.append((pts, wt, t * THUMB_STATIONS[0]))
+    # per-vertex weights for the thenar rings: weaker toward the wrist end of the hole
+    ring_r = [HOLE[0] + (i if i <= K else NR - 1 - i) for i in range(NR)]
     rings_th = tube(th, hole, THUMB_STATIONS, THUMB_PROFILE, 2.3, pre=pre, seam_line=K + 1)
+    for pi_, (_, wt, _) in enumerate(pre):
+        ring = rings_th[1 + pi_]
+        for i, vid in enumerate(ring):
+            g = {HOLE[0]: 0.35 + 0.3 * pi_, HOLE[0] + 1: 0.65 + 0.2 * pi_}.get(ring_r[i], 1.0)
+            w = wt * g
+            hm.weights[vid] = {'thumb_1': w, 'wrist': 1 - w}
 
     # ---------------- relax -----------------
     # even out the palm / thenar quads without changing the shape (tangential), then soften the

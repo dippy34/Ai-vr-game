@@ -331,21 +331,30 @@ def skin_material() -> bpy.types.Material:
     nb.set(warp.inputs[2], P)
     Pw = warp.outputs[0]
 
-    base = (0.42, 0.415, 0.385)
-    col = nb.mix(nb.ramp(nb.noise(P, 5.5, 6, 0.6), 0.35, 0.75), base, (0.29, 0.275, 0.285))  # mottling
-    blot = nb.ramp(nb.noise(Pw, 2.3, 3, 0.5, 0.4), 0.56, 0.70)
-    col = nb.mix(nb.math('MULTIPLY', blot, 0.55), col, (0.24, 0.20, 0.22))                      # bruises
-    sick = nb.ramp(nb.noise(Pw, 3.1, 2, 0.5), 0.60, 0.74)
-    col = nb.mix(nb.math('MULTIPLY', sick, 0.30), col, (0.45, 0.42, 0.28))                      # jaundiced patches
-    # veins: warped voronoi edges, two scales, masked by thin-skin density + breakup noise
-    v1 = nb.math('SUBTRACT', 1.0, nb.ramp(nb.voronoi_edge(Pw, 11.0), 0.0, 0.045))
-    v2 = nb.math('SUBTRACT', 1.0, nb.ramp(nb.voronoi_edge(Pw, 29.0), 0.0, 0.035))
-    brk = nb.ramp(nb.noise(P, 4.0, 2), 0.42, 0.62)
+    base = (0.40, 0.395, 0.37)
+    col = nb.mix(nb.ramp(nb.noise(P, 1.4, 2, 0.5), 0.3, 0.7), (0.46, 0.45, 0.42), (0.33, 0.32, 0.31))  # broad value drift
+    col = nb.mix(nb.math('MULTIPLY', nb.ramp(nb.noise(P, 5.5, 6, 0.62), 0.40, 0.72), 0.85), col, (0.25, 0.23, 0.25))  # mottling
+    blot = nb.ramp(nb.noise(Pw, 2.3, 4, 0.55, 0.4), 0.55, 0.70)
+    col = nb.mix(nb.math('MULTIPLY', blot, 0.75), col, (0.17, 0.13, 0.15))                      # necrotic bruises
+    rim = nb.math('MULTIPLY', nb.ramp(nb.noise(Pw, 2.3, 4, 0.55, 0.4), 0.50, 0.56), nb.math('SUBTRACT', 1.0, blot))
+    col = nb.mix(nb.math('MULTIPLY', rim, 0.35), col, (0.34, 0.16, 0.16))                       # inflamed bruise edges
+    sick = nb.ramp(nb.noise(Pw, 3.1, 3, 0.5), 0.58, 0.74)
+    col = nb.mix(nb.math('MULTIPLY', sick, 0.40), col, (0.40, 0.38, 0.22))                      # jaundiced patches
+    # veins: sinuous iso-lines of warped noise (two widths), masked by thin-skin density
+    def isoline(vec, scale, width, detail=2.0):
+        nz = nb.noise(vec, scale, detail, 0.5)
+        dist = nb.math('ABSOLUTE', nb.math('SUBTRACT', nz, 0.5))
+        return nb.math('SUBTRACT', 1.0, nb.ramp(dist, 0.0, width))
+    v1 = isoline(Pw, 4.5, 0.020)
+    off = nb.n('ShaderNodeVectorMath', operation='ADD', in_Vector=Pw)
+    off.inputs[1].default_value = (3.7, 1.3, 5.1)
+    v2 = nb.math('MULTIPLY', isoline(off.outputs[0], 11.0, 0.016), 0.7)
+    brk = nb.ramp(nb.noise(P, 3.0, 2), 0.40, 0.60)
     vmask = nb.math('MULTIPLY', vein_d, brk)
-    veins = nb.math('MULTIPLY', nb.math('MAXIMUM', v1, nb.math('MULTIPLY', v2, 0.6)), vmask, clamp=True)
-    col = nb.mix(nb.math('MULTIPLY', veins, 0.72), col, (0.11, 0.12, 0.19))
-    cap = nb.math('MULTIPLY', nb.math('SUBTRACT', 1.0, nb.ramp(nb.voronoi_edge(Pw, 70.0), 0.0, 0.05)), 0.35)
-    col = nb.mix(nb.math('MULTIPLY', cap, vein_d), col, (0.30, 0.15, 0.18))                    # capillaries
+    veins = nb.math('MULTIPLY', nb.math('MAXIMUM', v1, v2), vmask, clamp=True)
+    col = nb.mix(nb.math('MULTIPLY', veins, 0.80), col, (0.08, 0.09, 0.16))
+    cap = nb.math('MULTIPLY', isoline(Pw, 30.0, 0.025), 0.45)
+    col = nb.mix(nb.math('MULTIPLY', cap, vein_d), col, (0.30, 0.12, 0.15))                    # capillaries
     # ears: thinner, pinker, veinier
     col = nb.mix(nb.math('MULTIPLY', ear, 0.45), col, (0.50, 0.36, 0.36))
     # stretched skin over bone (convex) lighter; crevices darker + redder
@@ -365,7 +374,7 @@ def skin_material() -> bpy.types.Material:
     nb.set(bsdf.inputs['Base Color'], col)
 
     # roughness: wet (low) overall, drier blotches/extremities, wettest in the mouth & crevices
-    rough = nb.mixf(nb.noise(P, 9.0, 3), 0.20, 0.36)
+    rough = nb.mixf(nb.noise(P, 9.0, 3), 0.18, 0.34)
     rough = nb.mixf(nb.math('MULTIPLY', blot, 0.8), rough, 0.48)
     rough = nb.mixf(ext, rough, 0.50)
     rough = nb.mixf(nb.math('MULTIPLY', crev, 0.6), rough, 0.17)
@@ -375,7 +384,7 @@ def skin_material() -> bpy.types.Material:
 
     # bump: raised veins, crepey wrinkles, pores, lumps
     hgt = nb.math('MULTIPLY', veins, 0.55)
-    crepe = nb.math('SUBTRACT', 1.0, nb.ramp(nb.voronoi_edge(Pw, 48.0), 0.0, 0.06))
+    crepe = isoline(Pw, 55.0, 0.05, 3.0)
     hgt = nb.math('SUBTRACT', hgt, nb.math('MULTIPLY', crepe, 0.22))
     hgt = nb.math('ADD', hgt, nb.math('MULTIPLY', nb.noise(P, 160.0, 2), 0.18))
     hgt = nb.math('ADD', hgt, nb.math('MULTIPLY', nb.noise(P, 22.0, 3), 0.25))
@@ -637,6 +646,39 @@ def chart_unwrap(low, llab, J):
         return part + side
 
     ch = [chart_of(i) for i in range(nf)]
+    # absorb small disconnected fragments of a chart into the neighbouring chart they touch most
+    for _ in range(6):
+        comp = -np.ones(nf, int)
+        sizes = []
+        for i in range(nf):
+            if comp[i] >= 0:
+                continue
+            stack, cid = [i], len(sizes)
+            comp[i] = cid
+            n_ = 0
+            while stack:
+                k = stack.pop()
+                n_ += 1
+                for j in nbr[k]:
+                    if comp[j] < 0 and ch[j] == ch[k]:
+                        comp[j] = cid
+                        stack.append(j)
+            sizes.append(n_)
+        sizes = np.array(sizes)
+        small = sizes[comp] < 40
+        if not small.any():
+            break
+        changed = False
+        for i in np.nonzero(small)[0]:
+            votes = {}
+            for j in nbr[i]:
+                if ch[j] != ch[i]:
+                    votes[ch[j]] = votes.get(ch[j], 0) + (0 if sizes[comp[j]] < 40 else 1) + 0.01
+            if votes:
+                ch[i] = max(votes, key=votes.get)
+                changed = True
+        if not changed:
+            break
     # tube cuts: (axis a->b, hidden-side reference direction)
     cuts = {'head': (S.v3(0, 0.20, 1.98), S.v3(0, 0.20, 2.40), S.v3(0, -1, 0)),
             'neck': (S.v3(J['C7']), S.v3(J['atlas']), S.v3(0, -1, 0))}

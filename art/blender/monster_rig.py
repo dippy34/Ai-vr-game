@@ -542,7 +542,7 @@ def _plant(P: Poser, J, side, s, dy=0.0, dx=0.0, pitch=0.0, knee_out=0.15):
 def _hips(P: Poser, dpos=(0, 0, 0), pitch=0.0, yaw=0.0, roll=0.0):
     rest = P.rest['hips']
     R = (Matrix.Rotation(math.radians(yaw), 3, 'Z') @ Matrix.Rotation(math.radians(roll), 3, 'Y')
-         @ Matrix.Rotation(math.radians(pitch), 3, 'X'))
+         @ Matrix.Rotation(math.radians(-pitch), 3, 'X'))     # +pitch = lean forward
     M = Matrix.Translation(rest.translation + Vector(dpos)) @ (R @ rest.to_3x3()).to_4x4()
     P.set_armature('hips', M)
     P.fk()
@@ -596,27 +596,32 @@ def _hand(P: Poser, side, rx=0.0, ry=0.0, rz=0.0):
 # ---- individual actions ----------------------------------------------------------------------
 
 def pose_idle(P: Poser, J, t, T=4.0):
+    """Hunched, predatory stance: weight on the right leg, head jutting forward and cocked,
+    arms dangling in front of the knees, fingers slowly curling; 3 slow breaths per loop."""
     ph = t / T
     w = 2 * math.pi * ph
     P.reset()
-    breathe = 0.5 + 0.5 * math.sin(w * 3)          # 3 breaths per loop
+    breathe = 0.5 + 0.5 * math.sin(w * 3)
     sway = math.sin(w)
-    _hips(P, (0.012 * sway, 0.0, -0.045 + 0.006 * math.sin(w * 2)), pitch=4, roll=1.5 * sway, yaw=2 * math.sin(w + 1))
-    _spine(P, pitch=(6, 9 + 1.5 * breathe, 10), yaw=(0, -1.5 * sway, -2 * sway), roll=(0, -1 * sway, -1 * sway), breathe=breathe)
+    _hips(P, (0.02 + 0.010 * sway, -0.02, -0.07 + 0.006 * math.sin(w * 2)), pitch=12, roll=-3 + 1.2 * sway,
+          yaw=-4 + 2 * math.sin(w + 1))
+    _spine(P, pitch=(10, 16 + 1.5 * breathe, 20), yaw=(1, 2 - 1.5 * sway, 3 - 2 * sway), roll=(2, 2 - sway, 2 - sway),
+           breathe=breathe)
     tw = pulse(ph, 0.37, 0.012, 0.06, 0.10) - 0.7 * pulse(ph, 0.71, 0.01, 0.03, 0.12)
-    _neck_head(P, neck=(-8, 6 * math.sin(w + 0.5), 0), neck2=(-6, 0, 0),
-               head=(-6 + 3 * math.sin(w * 2), 14 * math.sin(w + 0.8), 9 * tw + 3 * math.sin(w)))
+    _neck_head(P, neck=(-22, 4 * math.sin(w + 0.5), -3), neck2=(-16, 3, 0),
+               head=(-8 + 3 * math.sin(w * 2), 10 * math.sin(w + 0.8) + 4, 12 + 9 * tw + 3 * math.sin(w)))
     _jaw(P, open_=2.5 + 2.5 * math.sin(w * 3 + 1.2))
     et = pulse(ph, 0.52, 0.01, 0.02, 0.06)
     _ears(P, L=(-6 * et, 0, 0), R=(-3 * pulse(ph, 0.22, 0.01, 0.02, 0.06), 0, 0))
-    _shoulders(P, L=(0, 0, -2 + 1.5 * breathe), R=(0, 0, 2 - 1.5 * breathe))
+    _shoulders(P, L=(8, 0, 6 + 1.5 * breathe), R=(10, 0, -4 - 1.5 * breathe))
     for side, s in (('L', -1), ('R', 1)):
-        _arm_hang(P, side, s, swing=0.02 * math.sin(w + (0 if s > 0 else 2)), out=0.0, fwd=0.02, elbow=0.6)
-        _hand(P, side, rx=8, ry=s * -12)
-        ft = [12 * pulse(ph + i * 0.07 + (0.3 if s > 0 else 0), 0.6, 0.02, 0.05, 0.2) for i in range(5)]
-        _fingers(P, side, curl=14 + 6 * math.sin(w * 2 + s), spread=3, twitch=ft)
-    _plant(P, J, 'L', -1, dy=0.03, dx=0.01)
-    _plant(P, J, 'R', 1, dy=-0.02, dx=0.0)
+        _arm_hang(P, side, s, swing=0.02 * math.sin(w + (0 if s > 0 else 2)), out=0.02 if s > 0 else 0.05,
+                  fwd=0.14 if s > 0 else 0.20, elbow=0.9 if s > 0 else 0.6)
+        _hand(P, side, rx=10, ry=s * -14)
+        ft = [14 * pulse(ph + i * 0.07 + (0.3 if s > 0 else 0), 0.6, 0.02, 0.05, 0.2) for i in range(5)]
+        _fingers(P, side, curl=18 + 8 * math.sin(w * 2 + s), spread=4, twitch=ft)
+    _plant(P, J, 'L', -1, dy=0.08, dx=0.03, knee_out=0.25)
+    _plant(P, J, 'R', 1, dy=-0.04, dx=0.0, knee_out=0.15)
 
 
 def pose_walk(P: Poser, J, t, T=1.4):

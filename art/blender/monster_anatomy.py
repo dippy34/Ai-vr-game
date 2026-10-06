@@ -213,7 +213,7 @@ def _ear_prim(base, u, nrm, side_s, L=0.225, Wmax=0.060, seed=0.0, notches=(), h
     def w0(t, rel):
         return 0.022 * rel * rel * np.clip(t * 3, 0, 1) * (1 - 0.45 * t) - 0.008 * t * t
 
-    TH = 0.0042
+    TH = 0.0050
 
     def fn(p):
         q = (p - base32) @ M

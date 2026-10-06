@@ -422,8 +422,8 @@ class Masks:
 
 
 def age(g: G, mk: Masks, col, rough, h, *, dust=0.6, grime=0.7, wear=0.5, wear_col=None, wear_rough=0.8,
-        tide=0.0, stains=0.0, scratch=0.4, film=0.12, rings=0.0, burn=0.0, seed=0.0):
-    """Common aging: grime -> edge wear -> scratches -> stains/rings -> tide line -> dust."""
+        tide=0.0, stains=0.0, scratch=0.4, film=0.12, rings=0.0, burn=0.0, seed=0.0, floor=0.5):
+    """Common aging: grime -> edge wear -> scratches -> stains/rings -> tide line -> floor dirt -> dust."""
     off = (seed * 13.1, seed * 7.7, seed * 3.3)
     pos = g.pos()
     # grime in crevices and corners
@@ -490,6 +490,13 @@ def age(g: G, mk: Masks, col, rough, h, *, dust=0.6, grime=0.7, wear=0.5, wear_c
         col = g.mix(g.mul(below, 0.55), col, g.hsv(col, s=0.55, v=0.55))
         col = g.mix(g.mul(line, 0.55), col, hexc('9b9182'))
         rough = g.add(rough, g.mul(below, 0.2), clamp=True)
+    # dirt splashed up from the floor / mop line
+    if floor > 0:
+        fz = g.rng(mk.z(), 0.22, 0.0, smooth=True)
+        fnz = g.noise(pos, 5.0, 3, 0.6, offset=(off[0], 1.0, 7.0))
+        fm = g.mul(g.mul(fz, g.rng(fnz, 0.25, 0.75, 0.4, 1.0)), floor)
+        col = g.mix(fm, col, g.mix(0.5, g.hsv(col, s=0.5, v=0.45), hexc('2a241c')))
+        rough = g.add(rough, g.mul(fm, 0.15), clamp=True)
     # dust: a thin film everywhere, a thick fluffy layer on up-facing surfaces
     if dust > 0:
         dn = g.noise(pos, 3.5, 3, 0.6, offset=(off[1], 2.0, 5.0))
@@ -671,14 +678,19 @@ def mat_fabric(name, base, alt=None, *, pattern='tweed', fade=0.4, stains=0.5, d
         col = g.mix(w, col, g.hsv(col, s=0.5, v=1.6))
         h = g.sub(h, g.mul(w, 0.2))
     if stains > 0:
-        sn = g.noise(pos, 2.4, 3, 0.55, offset=(seed + 3, 1, 2))
-        inside = g.rng(sn, 0.6, 0.63, smooth=True)
-        rim = g.mul(g.rng(sn, 0.585, 0.605, smooth=True), g.rng(sn, 0.65, 0.625, smooth=True))
-        col = g.mix(g.mul(inside, 0.45 * stains), col, g.mix(0.5, g.hsv(col, v=0.6), hexc('5a4628')))
-        col = g.mix(g.mul(rim, 0.8 * stains), col, hexc('3a2a16'))
-        sn2 = g.noise(pos, 6.0, 3, 0.55, offset=(seed + 7, 4, 1))
-        small = g.mul(g.rng(sn2, 0.68, 0.7, smooth=True), stains)
-        col = g.mix(g.mul(small, 0.6), col, hexc('2c2014'))
+        # a few big, faint water/body stains with a soft darker tide line ...
+        sel = g.noise(pos, 0.9, 1, 0.5, offset=(seed + 11, 3, 5))
+        sn = g.noise(pos, 2.0, 3, 0.55, offset=(seed + 3, 1, 2))
+        sv = g.add(sn, g.mul(g.sub(sel, 0.5), 0.5))
+        inside = g.rng(sv, 0.66, 0.69, smooth=True)
+        rim = g.mul(g.rng(sv, 0.645, 0.665, smooth=True), g.rng(sv, 0.70, 0.675, smooth=True))
+        col = g.mix(g.mul(inside, 0.3 * stains), col, g.mix(0.5, g.hsv(col, v=0.7), hexc('6a5530')))
+        col = g.mix(g.mul(rim, 0.55 * stains), col, g.hsv(col, s=1.1, v=0.5))
+        # ... and a few small dark spills
+        sn2 = g.noise(pos, 7.0, 3, 0.55, offset=(seed + 7, 4, 1))
+        small = g.mul(g.mul(g.rng(sn2, 0.70, 0.72, smooth=True), g.rng(sel, 0.45, 0.6)), stains)
+        col = g.mix(g.mul(small, 0.7), col, hexc('241a10'))
+        rough = g.mixf(g.mul(small, 0.6), rough, 0.6)
     if mold > 0:
         mn = g.noise(pos, 1.5, 2, 0.5, offset=(seed, 8, 8))
         sp = g.voronoi(pos, 180.0, 'F1')
@@ -694,6 +706,12 @@ def mat_fabric(name, base, alt=None, *, pattern='tweed', fade=0.4, stains=0.5, d
         tz = g.add(g.mul(g.noise(pos, 3.0, 2, 0.5), 0.05), tide)
         below = g.rng(g.sub(z, tz), 0.005, -0.02, smooth=True)
         col = g.mix(g.mul(below, 0.5), col, g.hsv(col, s=0.6, v=0.5))
+    # body wear where people sat/leaned: darker, flattened, slightly shiny (skin oils)
+    use = g.attr('use', 'Fac')
+    un = g.noise(pos, 4.0, 2, 0.5, offset=(seed, 6, 6))
+    um = g.mul(g.clamp(g.mul(use, g.rng(un, 0.2, 0.8, 0.6, 1.2))), 0.75)
+    col = g.mix(um, col, g.mix(0.4, g.hsv(col, s=0.8, v=0.5), hexc('2e2618')))
+    rough = g.mixf(um, rough, 0.62)
     # tears: foam + dark cavity, frayed light threads at the rim
     tear = g.attr('tear', 'Fac')
     foam_c = foam or hexc('b39a5e')
@@ -927,8 +945,9 @@ class Piece:
             a.data.foreach_set(key, data.astype(np.float32).ravel())
         a = me.attributes.get('pv') or me.attributes.new('pv', 'FLOAT', 'POINT')
         a.data.foreach_set('value', np.full(n, pv, dtype=np.float32))
-        if 'tear' not in me.attributes:
-            me.attributes.new('tear', 'FLOAT', 'POINT')
+        for extra in ('tear', 'use'):
+            if extra not in me.attributes:
+                me.attributes.new(extra, 'FLOAT', 'POINT')
         return offset, pv
 
     def _mats(self, obj, mats, local_normals=None):
@@ -1160,7 +1179,7 @@ class Piece:
     def cushion(self, size, loc=(0, 0, 0), mat=None, *, rot=(0, 0, 0), radius=0.04, bulge=(0.01, 0.01, 0.02),
                 sag=None, dents=(), wrinkle=0.006, piping=0.004, tufts=(), tears=(), lowres=(1, 2, 1),
                 skip_bottom=False, crease=0.0, seed=0, name='cushion', pv=None, ext=0.025, flat_bottom=False,
-                squash=None):
+                squash=None, front_drop=0.0, use=(), twist=0.0):
         """
         Upholstered rounded box. Returns the LOW object (the high one is registered for baking).
           sag:    (depth, sx, sy) broad dip of the top face (sx/sy as fractions of width/depth)
@@ -1168,7 +1187,10 @@ class Piece:
           tufts:  [(x, y)] button tufts on top (local, meters)
           tears:  [(x, y, radius)] holes in the top showing foam
           lowres: interior grid lines (x, y, z) of the low-poly
-          squash: (axis_frac, amount) – lean/slump: shifts the top toward +Y by amount*h
+          squash: lean/slump: shifts the top toward +Y by squash*h
+          front_drop: crushes the top front edge down (m)
+          use:    [(x, y, radius)] body-wear spots (darker/shinier), in addition to dents
+          twist:  corner-to-corner warp of the top (m), makes cushions look less machined
         """
         w, d, h = size
         rr = min(radius, w / 2, d / 2, h / 2) * 0.999
@@ -1193,6 +1215,10 @@ class Piece:
                 # material pushed outward a little around the dent
             if squash:
                 q.y += squash * (s + 1) / 2 * h
+            if front_drop:
+                q.z -= front_drop * max(0.0, v) ** 2 * top * (0.6 + 0.4 * fu)
+            if twist:
+                q.z += twist * u * v * top
             return q
 
         def detail(p: Vector, q: Vector, n: Vector):
@@ -1245,6 +1271,14 @@ class Piece:
                         tear = max(tear, 0.5 * (1 - f))
             return disp, tear
 
+        def use_at(p):
+            u_ = 0.0
+            for (dx, dy, dep, rad) in dents:
+                u_ = max(u_, math.exp(-(((p.x - dx) ** 2 + (p.y - dy) ** 2) / ((rad * 1.3) ** 2))) * min(1.0, dep / 0.025))
+            for (ux, uy, rad) in use:
+                u_ = max(u_, math.exp(-(((p.x - ux) ** 2 + (p.y - uy) ** 2) / (rad * rad))))
+            return u_ if p.z > -h * 0.2 else 0.0
+
         def make(k_band, step, lines_xyz, high: bool):
             def axis(E, m_lines):
                 half = E / 2
@@ -1279,6 +1313,7 @@ class Piece:
             grid(Y, Z, lambda a, b: (-hw, -a, b))
             bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
             tear_vals = []
+            use_vals = []
             for vtx in bm.verts:
                 p = vtx.co.copy()
                 lim = Vector((hw - rr, hd - rr, hh - rr))
@@ -1291,6 +1326,7 @@ class Piece:
                     nn = Vector((0, 0, 1))
                     pr = p
                 q = shape(pr, nn)
+                use_vals.append(use_at(pr))
                 t = 0.0
                 if high:
                     disp, t = detail(pr, q, nn)
@@ -1300,13 +1336,14 @@ class Piece:
             bm.normal_update()
             bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
             obj = _link(self._name(name + ('_hi' if high else '')), bm)
-            return obj, tear_vals
+            return obj, tear_vals, use_vals
 
-        low, _ = make(1, 0.0, lowres, False)
-        high, tv = make(6 if not DRAFT else 4, 0.014 if not DRAFT else 0.025, lowres, True)
+        low, _, _ = make(1, 0.0, lowres, False)
+        high, tv, uv_ = make(6 if not DRAFT else 4, 0.012 if not DRAFT else 0.02, lowres, True)
         off, pvv = self._stamp(low, 'x', pv)
         self._stamp(high, 'x', pvv, off)
         high.data.attributes['tear'].data.foreach_set('value', np.array(tv, dtype=np.float32))
+        high.data.attributes['use'].data.foreach_set('value', np.array(uv_, dtype=np.float32))
         for o in (low, high):
             if mat is not None:
                 o.data.materials.append(mat)
@@ -1476,7 +1513,7 @@ class Piece:
         final.data.materials.append(final_mat)
         for p in final.data.polygons:
             p.material_index = 0
-        for a in ('grp', 'gc', 'lp', 'pv', 'tear'):
+        for a in ('grp', 'gc', 'lp', 'pv', 'tear', 'use'):
             if a in final.data.attributes:
                 final.data.attributes.remove(final.data.attributes[a])
         for grp in self.groups:
@@ -1489,6 +1526,10 @@ class Piece:
         bpy.context.view_layer.update()
 
         lo, hi = C._bounds([final])
+        if abs(lo.z) > 1e-4:  # sit exactly on the floor
+            final.data.transform(Matrix.Translation((0, 0, -lo.z)))
+            final.data.update()
+            lo, hi = C._bounds([final])
         dims = hi - lo
         size3 = [round(dims.x, 3), round(dims.z, 3), round(dims.y, 3)]
         final['size'] = size3

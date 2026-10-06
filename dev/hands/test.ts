@@ -84,7 +84,34 @@ function applyCurls(bones: CurlBone[], curls: FingerCurls, sign: number): void {
 const loader = new GLTFLoader();
 const load = (name: string) => loader.loadAsync(`../../models/${name}.glb`);
 
+function pairView(gr: THREE.Group, gl: THREE.Group): void {
+  // Both hands flat, back up, seen from above with a grazing light from +X: raised detail
+  // (tendons, veins, knuckles) must be lit on the +X side on BOTH hands (mirror/tangent check).
+  scene.clear();
+  scene.background = new THREE.Color(0x202022);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 0.25));
+  const sun = new THREE.DirectionalLight(0xffffff, 3.0);
+  sun.position.set(3, 0.6, 0);
+  scene.add(sun);
+  const zoom = q.get('zoom') === '1';
+  [gr, gl].forEach((g, i) => {
+    g.position.set(i === 0 ? 0.06 : -0.06, 0, zoom ? -0.04 : -0.08);
+    scene.add(g);
+  });
+  camera.position.set(0, zoom ? 0.2 : 0.42, zoom ? -0.04 : -0.08);
+  camera.up.set(0, 0, -1);
+  camera.lookAt(0, 0, zoom ? -0.04 : -0.08);
+  renderer.setAnimationLoop(() => {
+    renderer.render(scene, camera);
+    (window as unknown as { __ready: boolean }).__ready = true;
+  });
+}
+
 Promise.all([load('hand_right'), load('hand_left')]).then(([gr, gl]) => {
+  if (q.get('pair')) {
+    pairView(gr.scene, gl.scene);
+    return;
+  }
   const src: Record<Handedness, THREE.Group> = { right: gr.scene, left: gl.scene };
   const cols = SIGN_PRESETS.length;
   const rows: { hand: Handedness; view: 'signer' | 'teammate'; label: string }[] = [
@@ -93,9 +120,9 @@ Promise.all([load('hand_right'), load('hand_left')]).then(([gr, gl]) => {
     { hand: 'left', view: 'signer', label: 'left · own view' },
     { hand: 'left', view: 'teammate', label: 'left · seen by teammate' },
   ];
-  const dist = 1.75;
-  const dx = 0.27;
-  const dy = 0.255;
+  const dist = 2.05;
+  const dx = 0.255;
+  const dy = 0.262;
   let tris = 0;
   const yaw180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
   const labels: { text: string; pos: THREE.Vector3; cls: string }[] = [];
@@ -127,9 +154,9 @@ Promise.all([load('hand_right'), load('hand_left')]).then(([gr, gl]) => {
           tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
         }
       });
-      if (ri === 0) labels.push({ text: `${preset.key} ${preset.name}`, pos: new THREE.Vector3(cx, cy + 0.15, -dist), cls: 'label' });
+      if (ri === 0) labels.push({ text: `${preset.key} · ${preset.name}`, pos: new THREE.Vector3(cx, cy + 0.155, -dist), cls: 'label' });
     });
-    labels.push({ text: row.label, pos: new THREE.Vector3(-((cols - 1) / 2) * dx - 0.13, ((rows.length - 1) / 2 - ri) * dy - 0.02, -dist), cls: 'row' });
+    labels.push({ text: row.label, pos: new THREE.Vector3(-((cols - 1) / 2) * dx - 0.115, ((rows.length - 1) / 2 - ri) * dy + 0.105, -dist), cls: 'row' });
   });
   for (const l of labels) {
     const p = l.pos.clone().project(camera);
@@ -142,7 +169,7 @@ Promise.all([load('hand_right'), load('hand_left')]).then(([gr, gl]) => {
   }
   const ex = gr.scene.children[0]?.userData;
   const stats = { trianglesPerHand: Math.round(tris / (rows.length * cols)), extras: ex };
-  info.textContent = JSON.stringify(stats);
+  info.textContent = q.get('shot') ? `MUTE hands · ${stats.trianglesPerHand} tris/hand · curls from SIGN_PRESETS` : JSON.stringify(stats);
   (window as unknown as { __stats: unknown }).__stats = stats;
   renderer.setAnimationLoop(() => {
     renderer.render(scene, camera);

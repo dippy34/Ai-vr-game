@@ -139,8 +139,10 @@ def _materials(imgs):
 
     mats = dict(
         steel=M.painted_steel('fb_steel', marks=[M.printed(side_text, (0.42, 0.40, 0.34), rough=0.6)]),
-        steel_door=M.painted_steel('fb_steel_door', marks=[M.printed(danger, (0.30, 0.035, 0.02), rough=0.55)]),
-        panel=M.painted_steel('fb_panel', paint=(0.020, 0.021, 0.020), chips=0.6, rust=0.45, dust=0.8,
+        steel_door=M.painted_steel('fb_steel_door', edge_dist=0.0007,
+                                   marks=[M.printed(danger, (0.30, 0.035, 0.02), rough=0.55)]),
+        panel=M.painted_steel('fb_panel', paint=(0.018, 0.019, 0.018), chips=0.6, rust=0.35, dust=0.8,
+                              edge_dist=0.0015,
                               marks=[M.printed(panel_text, (0.48, 0.46, 0.40), rough=0.6)]),
         porcelain=M.porcelain('fb_porcelain'),
         brass=M.brass('fb_brass', s=0.6, tarnish=0.7),
@@ -445,4 +447,5 @@ def _preview_fuses(slots):
                 o.location = Vector(o.location) + s.location
         out += [o for o in new if o.type == 'MESH']
     bpy.context.view_layer.update()
+    print('[fusebox] preview fuses:', [(o.name, tuple(round(c, 3) for c in o.matrix_world.translation)) for o in out])
     return out

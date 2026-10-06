@@ -333,24 +333,64 @@ def tex_review(ob, arm):
                        up=Vector((0, 1, 0)), lens=60, size=480, samples=8)
 
 
+def orient(arm: bpy.types.Object, fingers, back, location=(0, 0, 0)) -> None:
+    """Place the rig so the fingers point along `fingers` and the back of the hand faces `back`
+    (Blender world). Canonical: local +Y = fingers, +Z = back."""
+    y = Vector(fingers).normalized()
+    z = Vector(back)
+    z = (z - y * z.dot(y)).normalized()
+    x = y.cross(z)
+    m = Matrix((x, y, z)).transposed().to_4x4()
+    m.translation = Vector(location)
+    arm.matrix_world = m
+    bpy.context.view_layer.update()
+
+
+def eval_points(objs) -> list[Vector]:
+    deps = bpy.context.evaluated_depsgraph_get()
+    pts = []
+    for o in objs:
+        ev = o.evaluated_get(deps)
+        me = ev.to_mesh()
+        mw = ev.matrix_world
+        pts.extend(mw @ v.co for v in me.vertices)
+        ev.to_mesh_clear()
+    return pts
+
+
+def framed_render(path, objs, cam_dir, up=Vector((0, 0, 1)), lens=55, size=640, samples=48, fill=1.0, mood='studio'):
+    pts = eval_points(objs)
+    lo = Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts)))
+    hi = Vector((max(p.x for p in pts), max(p.y for p in pts), max(p.z for p in pts)))
+    c = (lo + hi) / 2
+    r = max((p - c).length for p in pts)
+    fov = 2 * math.atan(18 / lens)
+    dist = r / math.sin(fov / 2) * 0.92 / fill
+    d = Vector(cam_dir).normalized()
+    hu.render_view(path, c, c + d * dist, up=up, lens=lens, size=size, samples=samples, mood=mood)
+
+
+PREVIEW_SHOTS = {
+    # name: (sign, fingers, back, camera direction)   Blender world, camera looks at the hand
+    'hand_open': ('open', (0.0, 0.08, 1.0), (0.12, 1.0, 0.0), (0.42, -1.0, 0.12)),
+    'hand_fist': ('fist', (0.0, 0.10, 1.0), (0.0, 1.0, 0.0), (0.75, -1.0, 0.30)),
+    'hand_point': ('point', (-1.0, -0.25, 0.08), (0.0, 0.25, 1.0), (-0.15, -1.0, 0.55)),
+    'hand_thumbsup': ('thumbsup', (0.35, -1.0, 0.0), (-1.0, -0.35, 0.0), (0.55, -1.0, 0.18)),
+}
+
+
 def renders(arm, ob, arm_l, ob_l):
-    """Final previews (Blender, posed) -> art/previews/hand_*.png"""
-    hide = [arm_l, ob_l]
-    for o in hide:
+    """Final previews (Blender, posed like the signs, seen by a teammate) -> art/previews/hand_*.png"""
+    for o in (arm_l, ob_l):
         o.hide_render = True
-    shots = {
-        # name: (curls, target, camera offset, up)
-        'hand_open': ('open', Vector((0.0, 0.085, 0.0)), Vector((0.10, -0.12, 0.30)), Vector((0, 1, 0.3))),
-        'hand_fist': ('fist', Vector((-0.005, 0.07, -0.005)), Vector((-0.20, 0.14, 0.14)), Vector((0, 0, 1))),
-        'hand_point': ('point', Vector((-0.01, 0.10, 0.0)), Vector((-0.20, 0.06, 0.20)), Vector((0, 0, 1))),
-        'hand_thumbsup': ('thumbsup', Vector((-0.01, 0.07, 0.0)), Vector((-0.06, 0.26, 0.08)), Vector((0, 0, 1))),
-    }
-    for name, (sign, tgt, off, up) in shots.items():
+    samples = int(os.environ.get('HANDS_SAMPLES', '48'))
+    for name, (sign, fingers, back, cam) in PREVIEW_SHOTS.items():
+        orient(arm, fingers, back)
         apply_curls(arm, SIGNS[sign])
-        hu.render_view(os.path.join(common.PREVIEW_DIR, f'{name}.png'), tgt, tgt + off, up=up, lens=55,
-                       size=640, samples=int(os.environ.get('HANDS_SAMPLES', '48')))
+        framed_render(os.path.join(common.PREVIEW_DIR, f'{name}.png'), [ob], cam, samples=samples)
     apply_curls(arm, [0] * 5)
-    for o in hide:
+    arm.matrix_world = Matrix.Identity(4)
+    for o in (arm_l, ob_l):
         o.hide_render = False
 
 
