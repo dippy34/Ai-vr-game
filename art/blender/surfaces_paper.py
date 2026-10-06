@@ -342,7 +342,7 @@ def wallpaper_a(n: int = 1024, seed: int = 11) -> dict:
     G.tear(L, F, 0.03, 0.80, 0.03, 0.045, plaster, depth=0.0003)
 
     return G.finish(L, normal_strength=1.6, cavity_radii=(0.0015, 0.006), cavity_scale=0.0002,
-                    ao_strength=0.5, color_cavity=0.18)
+                    ao_strength=0.5, color_cavity=0.18, roll=(0.125, 0.0))
 
 
 # =============================================================================================
@@ -402,20 +402,19 @@ def wallpaper_b(n: int = 1024, seed: int = 23) -> dict:
     G.paper_seam(L, F, 0.5, lifts=[(0.62, 0.98, 1, 0.0025), (0.02, 0.12, -1, 0.0010)])
 
     # a torn patch revealing the OLDER damask paper underneath (and a bit of plaster)
-    old = wallpaper_a_color_only(T) * T.full((0.78, 0.72, 0.62))
-    G.tear(L, F, 0.56, 0.86, 0.04, 0.06, old, depth=0.0002, rim=(0.80, 0.78, 0.70))
-    plaster = T.full(hexc('#776a52')) * (0.85 + 0.15 * F.detail + 0.1 * F.warp_hi)[..., None]
-    G.tear(L, F, 0.565, 0.84, 0.018, 0.03, plaster, depth=0.00025)
+    # (kept small and quiet: anything distinctive repeats every meter along a wall)
+    old = wallpaper_a_color_only(T) * T.full((0.62, 0.62, 0.60))
+    G.tear(L, F, 0.515, 0.86, 0.018, 0.028, old, depth=0.0002, rim=(0.70, 0.70, 0.66))
 
     return G.finish(L, normal_strength=1.6, cavity_radii=(0.0015, 0.006), cavity_scale=0.0002,
-                    ao_strength=0.5, color_cavity=0.18)
+                    ao_strength=0.5, color_cavity=0.18, roll=(0.125, 0.0))
 
 
 def wallpaper_a_color_only(T: Tex) -> np.ndarray:
     """Cheap version of the damask (no grime) to show under torn top paper."""
     main, _ = damask_motif(T.texel)
     m = T.zeros()
-    paste(T, m, main, 0.55, 0.8)
+    paste(T, m, main, 0.53, 0.8)
     base = T.full(hexc('#6f6a4a'))
     c = lerp(base, T.full(hexc('#8e845e')), m)
     return (c * 0.92).astype(F32)

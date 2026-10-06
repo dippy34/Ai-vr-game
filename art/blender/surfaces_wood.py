@@ -133,7 +133,7 @@ def wood_floor(n: int = 1024, seed: int = 41) -> dict:
     warm = g('warm')[..., None]
     base = base * tone * (1 + np.concatenate([warm, warm * 0.2, -warm], -1))
     # some boards have weathered grayer (sun / old water)
-    gray = sstep(0.75, 1.0, g('gray'))
+    gray = sstep(0.82, 1.0, g('gray'))
     l = (base[..., 0] * 0.3 + base[..., 1] * 0.6 + base[..., 2] * 0.1)[..., None]
     base = lerp(base, l * np.array([1.05, 1.0, 0.94], F32), gray * 0.35)
 
@@ -155,7 +155,7 @@ def wood_floor(n: int = 1024, seed: int = 41) -> dict:
     # --- finish, patina, dust ----------------------------------------------------------------------
     traffic = sstep(-0.15, 0.55, T.fbm(2, 3, octaves=4) + 0.25 * T.fbm(8, octaves=2))
     # patina: ground-in dirt, darker + grayer, worn smooth
-    L.multiply(traffic, (0.66, 0.62, 0.58), 0.6)
+    L.multiply(traffic, (0.72, 0.68, 0.64), 0.5)
     L.rough = L.rough + (0.42 - L.rough) * traffic * 0.6
     # remaining amber finish crazes and dulls elsewhere
     craze_f1, craze_f2, _ = T.worley(int(T.size_m / 0.012))
@@ -228,7 +228,7 @@ def wood_floor(n: int = 1024, seed: int = 41) -> dict:
     G.fly_specks(L, 200, color=(0.08, 0.06, 0.04), size_px=(0.5, 1.4), opacity=0.6)
 
     return G.finish(L, normal_strength=1.3, cavity_radii=(0.004, 0.012), cavity_scale=0.0004,
-                    ao_strength=0.55, color_cavity=0.15)
+                    ao_strength=0.55, color_cavity=0.15, roll=(0.0, 0.5 / rows))
 
 
 # =============================================================================================
@@ -250,7 +250,7 @@ def wood_trim(n: int = 1024, seed: int = 53) -> dict:
 
     # --- paint stack: old sage green coat, then cream enamel ---------------------------------------
     green = T.full(hexc('#6e745e')) * (0.95 + 0.05 * F.detail)[..., None]
-    cream = T.full(hexc('#bcb196'))
+    cream = T.full(hexc('#b1a78d'))
     L = G.Layers(T, cream, rough=0.42)
 
     # brush strokes along u (ridges in the enamel) + orange peel
@@ -278,7 +278,7 @@ def wood_trim(n: int = 1024, seed: int = 53) -> dict:
     from surfaces_lib import standardize
     chip_n = standardize(T.fbm(9, octaves=6, gain=0.62, u=T.u + warp_u, v=T.v + warp_v))
     zone = sstep(-0.1, 0.5, T.fbm(3, octaves=3) + 0.2 * F.warp_lo)
-    thr1 = 1.9 - 1.6 * zone  # in std units: ~3% coverage outside the peeling zones, ~35% inside
+    thr1 = 1.95 - 1.45 * zone  # in std units: ~3% coverage outside the peeling zones, ~30% inside
     top_lost = sstep(thr1, thr1 + 0.04, chip_n)
     wood_bare = sstep(thr1 + 0.3, thr1 + 0.34, chip_n)
     # a scatter of tiny knocks (irregular) everywhere

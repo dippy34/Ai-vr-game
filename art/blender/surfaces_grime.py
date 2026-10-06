@@ -284,12 +284,18 @@ def fade(L: Layers, F: Fields, *, amount: float = 0.12, desat: float = 0.85, gri
 
 def finish(L: Layers, *, normal_strength: float = 1.0, cavity_radii=(0.002, 0.008, 0.03),
            cavity_scale: float = 0.0005, ao_strength: float = 0.6, color_cavity: float = 0.25,
-           rough_range=(0.04, 1.0)) -> dict:
-    """Layers -> {'color': sRGB, 'normal': encoded OpenGL tangent normal, 'orm': AO/rough/metal}."""
+           rough_range=(0.04, 1.0), roll=(0.0, 0.0)) -> dict:
+    """Layers -> {'color': sRGB, 'normal': encoded OpenGL tangent normal, 'orm': AO/rough/metal}.
+    roll=(du, dv) shifts the finished tile (periodic, so still seamless) so that no strong pattern
+    edge (paper seam, plank gap, grout line) sits exactly on the wrap edge."""
     T = L.T
     cav = T.cavity(L.height, cavity_radii, cavity_scale)
     ao = np.clip(L.ao * (1 - ao_strength * cav), 0, 1)
     color = np.clip(L.color * (1 - color_cavity * cav)[..., None], 0, 1)
     normal = T.normal_from_height(L.height, normal_strength)
     orm = np.stack([ao, np.clip(L.rough, *rough_range), np.clip(L.metal, 0, 0.8)], axis=-1)
-    return {'color': color.astype(F32), 'normal': normal, 'orm': orm.astype(F32), 'height': L.height}
+    out = {'color': color.astype(F32), 'normal': normal, 'orm': orm.astype(F32), 'height': L.height}
+    ru, rv = int(round(roll[0] * T.n)), int(round(roll[1] * T.n))
+    if ru or rv:
+        out = {k: np.roll(np.roll(a, rv, axis=0), ru, axis=1) for k, a in out.items()}
+    return out

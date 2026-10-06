@@ -169,4 +169,4 @@ def tile_floor(n: int = 1024, seed: int = 61) -> dict:
                   tint=(0.75, 0.70, 0.62), tide=(0.20, 0.16, 0.11), warp=0.6, rough_delta=0.15)
     G.fly_specks(L, 240, color=(0.10, 0.08, 0.06), size_px=(0.6, 1.6), opacity=0.7)
     return G.finish(L, normal_strength=1.0, cavity_radii=(0.002, 0.006), cavity_scale=0.0004,
-                    ao_strength=0.5, color_cavity=0.15, rough_range=(0.12, 1.0))
+                    ao_strength=0.5, color_cavity=0.15, rough_range=(0.12, 1.0), roll=(0.5 / k, 0.5 / k))

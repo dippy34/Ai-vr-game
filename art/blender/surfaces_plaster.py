@@ -61,9 +61,9 @@ def plaster_ceiling(n: int = 1024, seed: int = 31) -> dict:
     L.multiply(ghost.astype(F32), (0.9, 0.89, 0.87), 0.45)
 
     # --- water stains (big ring stain + a smaller one + a faint one) --------------------------------
-    st1 = G.water_stain(L, F, 0.30, 0.62, 0.30, stretch=(1.1, 0.9), strength=0.9, rings=6, buckle=0.0012,
+    st1 = G.water_stain(L, F, 0.30, 0.62, 0.30, stretch=(1.1, 0.9), strength=0.72, rings=6, buckle=0.0012,
                         tint=(0.93, 0.86, 0.72), tide=(0.42, 0.30, 0.17), warp=0.6)
-    st2 = G.water_stain(L, F, 0.78, 0.22, 0.17, stretch=(0.9, 1.15), strength=0.8, rings=4, buckle=0.0008,
+    st2 = G.water_stain(L, F, 0.78, 0.22, 0.17, stretch=(0.9, 1.15), strength=0.6, rings=4, buckle=0.0008,
                         tint=(0.93, 0.87, 0.74), tide=(0.44, 0.33, 0.19), warp=0.6)
     G.water_stain(L, F, 0.80, 0.80, 0.07, strength=0.5, rings=1, tint=(0.94, 0.9, 0.8))
 

@@ -205,7 +205,8 @@ def tiled_preview(name: str, tile, samples: int = 24, size: int = 900) -> str:
 
 
 def room_corner(path: str, wall: str, floor: str, ceiling: str = 'plaster_ceiling', trim: str = 'wood_trim',
-                tiles: dict | None = None, samples: int = 48, extras=None) -> str:
+                tiles: dict | None = None, samples: int = 48, extras=None, eye=(0.75, 0.6, 1.6),
+                look=None, lens: float = 17.0, size=(960, 720)) -> str:
     """Corner of a 3.2 x 3.2 m room, 2.8 m ceiling: two papered walls, baseboards, floor, ceiling.
     Moonlight (cold, dim) from a window behind the camera + a camera flash at the viewer's eye."""
     C.reset()
@@ -235,13 +236,13 @@ def room_corner(path: str, wall: str, floor: str, ceiling: str = 'plaster_ceilin
         box_world_uv(nm, lo, hi, tt[0], tt[1], m_trim)
     for ob in extras or []:
         ob()
-    eye = Vector((0.75, 0.6, 1.6))
-    look = Vector((R - 0.2, R - 0.25, 1.05))
-    _camera(eye, look, lens=17)
+    eye = Vector(eye)
+    look = Vector(look or (R - 0.2, R - 0.25, 1.05))
+    _camera(eye, look, lens=lens)
     _world((0.02, 0.025, 0.04), 0.4)
     # moonlight through a window behind/left of the camera: cold, dim, hard-ish
     _light('SPOT', 140, (-0.6, 1.6, 2.2), (R, R - 0.6, 0.6), color=(0.55, 0.65, 1.0), size=0.25, spot=40)
     # camera flash: just right of / below the eye, very bright, tiny source
     _light('SPOT', 260, eye + Vector((0.12, 0.0, -0.08)), look, color=(1.0, 0.98, 0.95), size=0.02, spot=95)
-    _render(path, 960, 720, samples)
+    _render(path, size[0], size[1], samples)
     return path

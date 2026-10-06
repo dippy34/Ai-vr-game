@@ -40,6 +40,8 @@ SETS = {
 }
 
 QUALITY = {'color': 92, 'normal': 95, 'orm': 92}
+# the trim set is dense fine detail (0.5 mm texels) and ships inside the trim GLBs too: lighter
+QUALITY_OVERRIDE = {'wood_trim': {'color': 86, 'normal': 88, 'orm': 84}}
 
 
 def build_set(name: str) -> dict:
@@ -49,7 +51,7 @@ def build_set(name: str) -> dict:
     maps = getattr(mod, fn)()
     for kind in ('color', 'normal', 'orm'):
         path = os.path.join(TEX_DIR, f'{name}_{kind}.webp')
-        save_image(path, maps[kind], quality=QUALITY[kind])
+        save_image(path, maps[kind], quality=QUALITY_OVERRIDE.get(name, QUALITY)[kind])
         print(f'[texture] {path} ({os.path.getsize(path) / 1024:.0f} KB)  {seam_report(kind, maps[kind])}')
     print(f'[surfaces] {name} built in {time.time() - t0:.1f}s')
     return maps
@@ -74,6 +76,9 @@ def previews(names) -> None:
         P.tiled_preview(name, tiles[name])
     if set(names) & {'wallpaper_a', 'wood_floor', 'plaster_ceiling', 'wood_trim'}:
         P.room_corner(os.path.join(C.PREVIEW_DIR, 'surface_room_flash.png'), 'wallpaper_a', 'wood_floor', tiles=tiles)
+        # arm's-length look at the wall / baseboard / floor junction, as a crouching player sees it
+        P.room_corner(os.path.join(C.PREVIEW_DIR, 'surface_room_closeup.png'), 'wallpaper_a', 'wood_floor', tiles=tiles,
+                      eye=(2.35, 2.3, 0.75), look=(3.2, 2.9, 0.35), lens=22, size=(800, 800), samples=40)
     if set(names) & {'wallpaper_b', 'tile_floor', 'plaster_ceiling', 'wood_trim'}:
         P.room_corner(os.path.join(C.PREVIEW_DIR, 'surface_room_flash_b.png'), 'wallpaper_b', 'tile_floor', tiles=tiles)
 
