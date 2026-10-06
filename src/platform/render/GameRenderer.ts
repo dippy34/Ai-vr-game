@@ -12,11 +12,13 @@ import type {
 import type { IGameRenderer, RenderContext } from '../types';
 import { FlashEffect } from './FlashEffect';
 import { HandFactory, type Hand } from './hands';
+import { Jumpscare } from './Jumpscare';
 import { LevelView } from './LevelView';
 import { MessagePanel } from './MessagePanel';
 import { MonsterModel } from './MonsterModel';
 import { createKTX2Loader, ModelLibrary } from './assets';
 import { PerfHud, perfHudRequested } from './PerfHud';
+import { StaticBatcher } from './batch';
 import { SurfaceLibrary } from './SurfaceTextures';
 import { SkinnedMonster } from './SkinnedMonster';
 import { FURNITURE_MODEL_NAMES } from './FurnitureModels';
@@ -91,6 +93,8 @@ export class GameRenderer implements IGameRenderer {
   private readonly seenItems = new Set<number>();
   private cameraProp: CameraProp;
   private readonly flashFx: FlashEffect;
+  /** Catch sequence (local jumpscare, others being grabbed) + the ghost look while caught. */
+  private readonly jumpscare: Jumpscare;
   private readonly meter: NoiseMeter;
   private readonly message: MessagePanel;
   private readonly dynamic = new THREE.Group();
@@ -160,6 +164,8 @@ export class GameRenderer implements IGameRenderer {
     this.dynamic.add(this.cameraProp.group);
 
     this.flashFx = new FlashEffect(scene, camera);
+    this.jumpscare = new Jumpscare(scene, camera, this.hemi, this.nearLight, this.flashFx, RENDER.jumpscare);
+    this.jumpscare.onDeferredMessage = (text, seconds) => this.message.show(text, seconds);
     this.meter = new NoiseMeter();
     this.dynamic.add(this.meter.mesh);
     this.message = new MessagePanel();
@@ -177,6 +183,8 @@ export class GameRenderer implements IGameRenderer {
     const ktx2 = createKTX2Loader(renderer);
     this.models.useKTX2(ktx2);
     this.surfaces.useKTX2(ktx2);
+    // The level batcher fills its texture arrays on the GPU.
+    StaticBatcher.useRenderer(renderer);
     // Models and the house's surface textures load together; the level is rebuilt once with both.
     void Promise.all([this.models.load(MODEL_NAMES, MODEL_PREFIXES), this.surfaces.load()]).then(() => this.applyModels());
   }
@@ -250,11 +258,13 @@ export class GameRenderer implements IGameRenderer {
     }
     this.clearItems();
     this.flashFx.clearAfterimages();
+    this.jumpscare.reset(this.monster);
     this.levelData = level;
     this.level = new LevelView(level, this.models, this.surfaces);
     this.ctx.scene.add(this.level.group);
     // Compile every shader now (incl. afterimage + whiteout) so the first flash doesn't hitch.
     this.flashFx.setWarmupVisible(true);
+    this.jumpscare.setWarmupVisible(true);
     const hidden: THREE.Object3D[] = [];
     this.dynamic.traverse((o) => { if (!o.visible) { hidden.push(o); o.visible = true; } });
     try {
@@ -264,6 +274,7 @@ export class GameRenderer implements IGameRenderer {
     }
     for (const o of hidden) o.visible = false;
     this.flashFx.setWarmupVisible(false);
+    this.jumpscare.setWarmupVisible(false);
   }
 
   // -------------------------------------------------------------------------------------------
@@ -293,6 +304,8 @@ export class GameRenderer implements IGameRenderer {
     this.localRight.setPose(localPose.right);
 
     this.updateAvatars(state, localId, dt);
+    // Catch sequence: poses/places the monster (visual only) and owns the near light + ghost look.
+    this.jumpscare.update(state, localId, this.headPos, this.headQuat, this.monster, this.time, dt, this.victimHead);
     this.monster.update(state.monster, dt);
     this.updateItems(state, localId, localPose);
     this.flashFx.update(this.time);
@@ -431,7 +444,8 @@ export class GameRenderer implements IGameRenderer {
     };
     for (const id in state.players) {
       const pl = state.players[id];
-      if (pl.status !== 'alive') continue;
+      // Someone being grabbed right now still gets frozen into the flash (with the monster).
+      if (pl.status !== 'alive' && !this.jumpscare.grabbing(id)) continue;
       let pose: PlayerPose = pl.pose;
       if (id === localId) pose = localPose;
       else {
@@ -497,16 +511,35 @@ export class GameRenderer implements IGameRenderer {
     this.cameraProp.flashed(this.time);
   }
 
-  /** Catch sequence hook (see IGameRenderer.caught). */
+  /** Catch sequence hook (see IGameRenderer.caught and Jumpscare). */
   caught(event: { id: PlayerId; position: Vec3 }, state: WorldState, localId: PlayerId, localPose: PlayerPose): void {
-    void event; void state; void localId; void localPose;
+    void state;
+    if (event.id === localId) {
+      setV(_a, localPose.head.position);
+      setQ(_q, localPose.head.rotation);
+      this.message.mesh.visible = false;
+      this.jumpscare.startLocal(this.time, _a, _q, this.level ? this.level.blockers() : []);
+    } else {
+      if (!this.victimHead(event.id, _a)) setV(_a, event.position);
+      this.jumpscare.startRemote(event.id, this.time, _a);
+    }
   }
+
+  /** A remote player's smoothed head (for the monster's lunge at them). */
+  private readonly victimHead = (id: PlayerId, out: THREE.Vector3): boolean => {
+    const av = this.avatars.get(id);
+    if (!av?.target) return false;
+    out.copy(av.headPos);
+    return true;
+  };
 
   setLocalNoiseLevel(level: number): void {
     this.meter.setLevel(level);
   }
 
   showMessage(text: string, seconds?: number): void {
+    // Not over the monster's face mid-jumpscare: shown once the ghost view has faded in.
+    if (this.jumpscare.deferMessage(text, seconds ?? 3)) return;
     this.message.show(text, seconds ?? 3);
   }
 
@@ -557,6 +590,7 @@ export class GameRenderer implements IGameRenderer {
     this.localHandMat.dispose();
     this.ghostMat.dispose();
     this.flashFx.dispose();
+    this.jumpscare.dispose();
     this.meter.dispose();
     this.message.dispose();
     this.perf?.dispose();

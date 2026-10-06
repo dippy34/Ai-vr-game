@@ -44,7 +44,20 @@ export function createKTX2Loader(renderer: THREE.WebGLRenderer): KTX2Loader | nu
   try {
     const loader = new KTX2Loader();
     if (BASIS_PATH) loader.setTranscoderPath(BASIS_PATH);
-    return loader.detectSupport(renderer);
+    loader.detectSupport(renderer);
+    // three turns ETC/ASTC off on "desktop Linux" (Mesa emulates them), and standalone headset
+    // browsers say "X11; Linux" too, but their mobile GPUs really have them (ETC2/ASTC are what
+    // Quest samples best): keep them there.
+    if (typeof navigator !== 'undefined' && /OculusBrowser|Quest|Pico/i.test(navigator.userAgent)) {
+      const cfg = (loader as unknown as { workerConfig: Record<string, boolean> | null }).workerConfig;
+      const ext = renderer.extensions;
+      if (cfg) {
+        cfg.astcSupported = ext.has('WEBGL_compressed_texture_astc');
+        cfg.etc2Supported = ext.has('WEBGL_compressed_texture_etc');
+        cfg.etc1Supported = ext.has('WEBGL_compressed_texture_etc1');
+      }
+    }
+    return loader;
   } catch (err) {
     console.warn('[models] KTX2 textures unavailable, using WebP', err);
     return null;

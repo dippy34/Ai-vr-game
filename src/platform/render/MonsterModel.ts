@@ -2,11 +2,14 @@
  * The monster: very tall and thin, arms past the knees, eyeless egg head with a vertical mouth slit,
  * dark slightly glossy skin. One InstancedMesh of capsules (one draw call), animated procedurally
  * through an Object3D joint hierarchy: walk cycle scaled by speed, listening head-tilt, twitches.
+ * The catch (Jumpscare.setCatch) is a procedural copy of the Blender Attack clip's timing: rear up,
+ * lunge with the mouth slit tearing wide open, claws closing.
  */
 
 import * as THREE from 'three';
 import { MONSTER } from '../../config';
 import type { MonsterState } from '../../core/types';
+import type { CatchPoser } from './Jumpscare';
 import { damp, positionNormalOnly, setV, unitCapsule } from './util';
 
 interface Part {
@@ -21,13 +24,32 @@ const SKIN = 1.0;
 const BONE = 1.12;
 const MOUTH = 0.06;
 
+/** Face point in the 'face' joint frame: just in front of the mouth slit. */
+const FACE_POINT = new THREE.Vector3(0, 0.1, -0.13);
+
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
 const _v = new THREE.Vector3();
+const _f = new THREE.Vector3();
 const _c = new THREE.Color();
 
-export class MonsterModel {
+/** Catch arm pose on top of the normal one: flung wide (ra), reaching (rl), claws closing (rg). */
+function catchArm(sh: THREE.Object3D, el: THREE.Object3D, fi: THREE.Object3D, sx: number, ra: number, rl: number, rg: number): void {
+  sh.rotation.x += 2.3 * ra + 1.25 * rl * (1 - ra);
+  sh.rotation.z += sx * (1.0 * ra + 0.55 * rl * (1 - rg * 0.8));
+  el.rotation.x += 0.2 * ra + 0.15 * rl + 0.9 * rg;
+  fi.rotation.x += -0.4 * (ra + rl) * (1 - rg) + 1.2 * rg;
+}
+
+const smooth = (a: number, b: number, x: number): number => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
+export class MonsterModel implements CatchPoser {
   readonly mesh: THREE.InstancedMesh;
+  readonly facePitch = 0.12;
+  lungeReach = 0.6;
   readonly root = new THREE.Object3D();
   private readonly parts: Part[] = [];
   private readonly j: Record<string, THREE.Object3D> = {};
@@ -45,6 +67,17 @@ export class MonsterModel {
   private readonly twitch = { hx: 0, hy: 0, hz: 0, sl: 0, sr: 0, fl: 0, fr: 0, sp: 0 };
   private readonly twitchTarget = { hx: 0, hy: 0, hz: 0, sl: 0, sr: 0, fl: 0, fr: 0, sp: 0 };
   private readonly hipHeight = 1.12;
+  /** Smoothed sim position (the root may be placed elsewhere by the catch). */
+  private readonly pos = new THREE.Vector3();
+  // Catch override (Jumpscare): Attack-clip time and placement, set every frame while active.
+  private catchClip = -1;
+  private catchPlace: 'face' | 'root' = 'face';
+  private readonly catchTarget = new THREE.Vector3();
+  private catchYaw = 0;
+  private catchPitch = 0;
+  private catchWeight = 1;
+  /** Rear-up, lunge, claws-closed and mouth-open factors 0..1 from the catch clip time. */
+  private readonly atk = { a: 0, l: 0, g: 0, jaw: 0 };
 
   constructor() {
     this.material = new THREE.MeshPhongMaterial({
@@ -58,7 +91,48 @@ export class MonsterModel {
     // Slight per-part tone variation so it doesn't read as one smooth plastic.
     this.parts.forEach((p, i) => this.mesh.setColorAt(i, _c.setScalar(p.color * (p.color === MOUTH ? 1 : 0.88 + ((i * 37) % 11) / 40))));
     this.root.scale.setScalar(MONSTER.height / 2.3);
+    // Measure how far ahead of its feet the face gets at the peak of the lunge.
+    this.setAttack(0.5);
     this.pose(0);
+    this.root.worldToLocal(this.facePoint(_f)).multiply(this.root.scale);
+    this.lungeReach = Math.max(0.3, Math.hypot(_f.x, _f.z));
+    this.setAttack(-1);
+    this.pose(0);
+  }
+
+  setCatch(clip: number, place: 'face' | 'root', target: THREE.Vector3, yaw: number, pitch: number, weight: number): void {
+    this.catchClip = Math.max(0, clip);
+    this.catchPlace = place;
+    this.catchTarget.copy(target);
+    this.catchYaw = yaw;
+    this.catchPitch = pitch;
+    this.catchWeight = weight;
+  }
+
+  clearCatch(): void {
+    if (this.catchClip < 0) return;
+    this.catchClip = -1;
+    this.setAttack(-1);
+    this.root.position.copy(this.pos);
+    this.root.rotation.set(0, this.yaw, 0);
+  }
+
+  /** Attack factors at clip time t (same beats as the Blender clip); t < 0 = none. */
+  private setAttack(t: number): void {
+    const k = this.atk;
+    if (t < 0) {
+      k.a = k.l = k.g = k.jaw = 0;
+      return;
+    }
+    k.a = smooth(0, 0.3, t) * (1 - smooth(0.3, 0.46, t));
+    k.l = smooth(0.28, 0.5, t) * (1 - smooth(0.85, 1.2, t));
+    k.g = smooth(0.48, 0.6, t) * (1 - smooth(0.95, 1.2, t));
+    k.jaw = Math.min(1, Math.max(0, (3 + 14 * k.a + 26 * k.l - 12 * k.g) / 29));
+  }
+
+  /** World position of the face (in front of the mouth). Needs up-to-date joint matrices. */
+  private facePoint(out: THREE.Vector3): THREE.Vector3 {
+    return this.j.face.localToWorld(out.copy(FACE_POINT));
   }
 
   private joint(name: string, parent: THREE.Object3D | null, x: number, y: number, z: number): THREE.Object3D {
@@ -151,17 +225,31 @@ export class MonsterModel {
   update(m: MonsterState, dt: number): void {
     this.time += dt;
     setV(_v, m.position);
-    if (!this.initialized || this.root.position.distanceToSquared(_v) > 9) {
-      this.root.position.copy(_v);
+    if (!this.initialized || this.pos.distanceToSquared(_v) > 9) {
+      this.pos.copy(_v);
       this.yaw = m.yaw;
       this.initialized = true;
     } else {
-      this.root.position.lerp(_v, damp(12, dt));
+      this.pos.lerp(_v, damp(12, dt));
       let d = m.yaw - this.yaw;
       d = Math.atan2(Math.sin(d), Math.cos(d));
       this.yaw += d * damp(10, dt);
     }
-    this.root.rotation.y = this.yaw;
+    const catching = this.catchClip >= 0;
+    if (catching) {
+      this.setAttack(this.catchClip);
+      const w = this.catchWeight;
+      if (this.catchPlace === 'face') {
+        this.root.rotation.set(this.catchPitch, this.catchYaw, 0, 'YXZ');
+      } else {
+        this.root.position.lerpVectors(this.pos, this.catchTarget, w);
+        const d = Math.atan2(Math.sin(this.catchYaw - this.yaw), Math.cos(this.catchYaw - this.yaw));
+        this.root.rotation.set(0, this.yaw + d * w, 0);
+      }
+    } else {
+      this.root.position.copy(this.pos);
+      this.root.rotation.set(0, this.yaw, 0);
+    }
     this.speed += (m.speed - this.speed) * damp(6, dt);
     this.alert += (m.alert - this.alert) * damp(4, dt);
     const listening = m.mode === 'feeding' || (m.mode === 'investigate' && m.speed < 0.35);
@@ -173,6 +261,12 @@ export class MonsterModel {
     this.phase += dt * (this.speed / stride) * Math.PI * 2;
     this.updateTwitch(dt);
     this.pose(dt);
+    if (catching && this.catchPlace === 'face') {
+      // Move the whole body so its face lands on the target, then re-write the instances.
+      this.root.worldToLocal(this.facePoint(_f)).multiply(this.root.scale).applyQuaternion(this.root.quaternion);
+      this.root.position.copy(this.catchTarget).sub(_f);
+      this.writeInstances();
+    }
   }
 
   private updateTwitch(dt: number): void {
@@ -204,52 +298,78 @@ export class MonsterModel {
     const amp = Math.min(1, s / 1.1);
     const ph = this.phase;
     const sinP = Math.sin(ph), cosP = Math.cos(ph);
-    const ck = this.chaseK, lk = this.listenK, fk = this.feedK, tw = this.twitch;
+    const ck = this.chaseK, lk = this.listenK, tw = this.twitch;
+    const fk = this.feedK;
     const breathe = Math.sin(t * 1.3);
+    const { a: ra, l: rl, g: rg } = this.atk;
+    // During the catch the feeding crouch waits until the lunge is over.
+    const fkc = fk * (1 - Math.max(ra, rl));
 
     // Legs.
     const swing = (0.42 + 0.12 * ck) * amp;
-    J.hipL.rotation.x = 0.1 + sinP * swing - fk * 0.5;
-    J.hipR.rotation.x = 0.1 - sinP * swing - fk * 0.5;
-    J.kneeL.rotation.x = -(0.2 + amp * (0.85 + 0.3 * ck) * Math.max(0, cosP)) - fk * 0.9;
-    J.kneeR.rotation.x = -(0.2 + amp * (0.85 + 0.3 * ck) * Math.max(0, -cosP)) - fk * 0.9;
+    J.hipL.rotation.x = 0.1 + sinP * swing - fkc * 0.5;
+    J.hipR.rotation.x = 0.1 - sinP * swing - fkc * 0.5;
+    J.kneeL.rotation.x = -(0.2 + amp * (0.85 + 0.3 * ck) * Math.max(0, cosP)) - fkc * 0.9;
+    J.kneeR.rotation.x = -(0.2 + amp * (0.85 + 0.3 * ck) * Math.max(0, -cosP)) - fkc * 0.9;
     J.ankleL.rotation.x = -(J.hipL.rotation.x + J.kneeL.rotation.x) * 0.6;
     J.ankleR.rotation.x = -(J.hipR.rotation.x + J.kneeR.rotation.x) * 0.6;
     J.hipL.rotation.z = 0.03;
     J.hipR.rotation.z = -0.03;
 
     // Body: bob, sway, hunch (more when chasing / feeding).
-    const crouch = fk * 0.36;
+    const crouch = fkc * 0.36;
     J.hips.position.y = this.hipHeight - amp * 0.045 * sinP * sinP - crouch + 0.006 * breathe;
     J.hips.rotation.y = sinP * 0.12 * amp;
     J.hips.rotation.z = cosP * 0.05 * amp;
-    J.spine.rotation.x = -0.22 - 0.32 * ck - 0.55 * fk + tw.sp;
+    J.spine.rotation.x = -0.22 - 0.32 * ck - 0.55 * fkc + tw.sp;
     J.spine.rotation.y = -sinP * 0.1 * amp;
     J.chest.rotation.x = -0.16 - 0.12 * ck + 0.015 * breathe;
-    J.neck.rotation.x = -0.62 - 0.2 * ck + 0.2 * fk;
+    J.neck.rotation.x = -0.62 - 0.2 * ck + 0.2 * fkc;
 
     // Head: hangs forward; listening = slow tilt and turn; twitches when agitated.
-    J.head.rotation.x = 0.55 + 0.3 * ck - 0.3 * fk + tw.hx + lk * 0.12 * Math.sin(t * 0.9);
+    J.head.rotation.x = 0.55 + 0.3 * ck - 0.3 * fkc + tw.hx + lk * 0.12 * Math.sin(t * 0.9);
     J.head.rotation.y = lk * 0.65 * Math.sin(t * 0.37) + tw.hy;
     J.head.rotation.z = lk * (0.5 * Math.sin(t * 0.61) + 0.15) + tw.hz;
 
     // Arms: long dangling swing, opposite the legs; reach forward when chasing.
     const armSwing = 0.32 * amp * (1 - 0.6 * ck);
-    J.shoulderL.rotation.x = -sinP * armSwing + 0.12 + ck * 1.0 + tw.sl + fk * 0.9;
-    J.shoulderR.rotation.x = sinP * armSwing + 0.12 + ck * 0.85 + tw.sr + fk * 0.7;
+    J.shoulderL.rotation.x = -sinP * armSwing + 0.12 + ck * 1.0 + tw.sl + fkc * 0.9;
+    J.shoulderR.rotation.x = sinP * armSwing + 0.12 + ck * 0.85 + tw.sr + fkc * 0.7;
     J.shoulderL.rotation.z = -0.07 - 0.15 * ck - 0.02 * breathe;
     J.shoulderR.rotation.z = 0.07 + 0.15 * ck + 0.02 * breathe;
-    J.elbowL.rotation.x = 0.16 + 0.12 * amp + 0.25 * ck + 0.6 * fk;
-    J.elbowR.rotation.x = 0.16 + 0.12 * amp + 0.25 * ck + 0.6 * fk;
+    J.elbowL.rotation.x = 0.16 + 0.12 * amp + 0.25 * ck + 0.6 * fkc;
+    J.elbowR.rotation.x = 0.16 + 0.12 * amp + 0.25 * ck + 0.6 * fkc;
     J.fingersL.rotation.x = 0.2 + 0.9 * tw.fl - 0.25 * ck;
     J.fingersR.rotation.x = 0.2 + 0.9 * tw.fr - 0.25 * ck;
 
+    if (ra > 0 || rl > 0 || rg > 0) {
+      // Catch: rear up with the arms flung wide, then the whole body lunges, head thrust straight
+      // out (face level), arms reaching past the prey; the claws then close in.
+      J.spine.rotation.x += 0.25 * ra - 0.35 * rl;
+      J.chest.rotation.x += 0.1 * ra - 0.1 * rl;
+      J.neck.rotation.x += 0.35 * ra + 0.25 * rl;
+      J.head.rotation.x += -0.55 * ra - 0.2 * rl;
+      J.head.rotation.y *= 1 - Math.max(ra, rl);
+      J.head.rotation.z *= 1 - Math.max(ra, rl);
+      J.hips.position.y += 0.06 * ra;
+      catchArm(J.shoulderL, J.elbowL, J.fingersL, -1, ra, rl, rg);
+      catchArm(J.shoulderR, J.elbowR, J.fingersR, 1, ra, rl, rg);
+    }
+
+    this.writeInstances();
+  }
+
+  private writeInstances(): void {
     this.root.updateMatrixWorld(true);
-    const alertMouth = 1 + this.alert * 1.2 + ck * 0.6;
+    const jaw = this.atk.jaw;
+    const alertMouth = 1 + this.alert * 1.2 + this.chaseK * 0.6;
+    // The slit tears open into a wide maw during the catch.
+    const mouthW = Math.max(alertMouth, 1 + 5.5 * jaw);
+    const mouthH = 1 + this.alert * 0.25 + 0.45 * jaw;
     for (let i = 0; i < this.parts.length; i++) {
       const p = this.parts[i];
       _m.multiplyMatrices(p.joint.matrixWorld, p.local);
-      if (p.mouth) _m.multiply(_m2.makeScale(alertMouth, 1 + this.alert * 0.25, 1));
+      if (p.mouth) _m.multiply(_m2.makeScale(mouthW, mouthH, 1 + jaw));
       this.mesh.setMatrixAt(i, _m);
     }
     this.mesh.instanceMatrix.needsUpdate = true;

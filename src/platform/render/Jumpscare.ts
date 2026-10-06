@@ -1,7 +1,7 @@
 /**
  * The catch sequence ("jumpscare"), ~1.6 s, played when the monster catches the LOCAL player:
  *
- *   0.00 s  The monster's face snaps in front of yours (0.62 m -> 0.40 m in 90 ms) mid-lunge, jaws
+ *   0.00 s  The monster's face snaps in front of yours (0.52 m -> 0.40 m in 70 ms) mid-lunge, jaws
  *           splitting open (Attack clip, time-driven), and a harsh flash-like burst from your eyes
  *           lights it (the existing near "dark-adapted eyes" light, boosted: no extra light).
  *           A single red/black vignette pulse floods in from the edges.
@@ -14,8 +14,9 @@
  *   1.30 s  Fade into the ghost (spectator) view, done at 1.60 s.
  *
  * VR comfort: the camera is never moved (the MONSTER is placed relative to the head pose, visual
- * only; the sim keeps its position). Full-view effects are a single short white pop (<= 50 ms), a
- * single red pulse and smooth fades, with no flicker. Vignette is computed per eye from the view
+ * only; the sim keeps its position). There is no full-view white at all (the burst lights only
+ * what is within ~1.3 m, i.e. the face, the arms and your hands); full-view effects are a single
+ * red edge pulse and smooth fades, no flicker. The vignette is computed per eye from the view
  * direction, so it sits at infinity instead of at the overlay quad's depth.
  *
  * Other players being caught: the monster turns to their head and plays Attack at them (no screen
@@ -36,8 +37,8 @@ import { damp, paint } from './util';
 
 export const JUMPSCARE_TIMING = {
   /** The face snaps from `far` to `near` over this many seconds. */
-  lunge: 0.09,
-  far: 0.62,
+  lunge: 0.07,
+  far: 0.52,
   near: 0.4,
   /** Where it has pressed in to by the cut. */
   press: 0.34,
@@ -54,8 +55,6 @@ export const JUMPSCARE_TIMING = {
   clipOpen: 0.5,
   jawOpenAt: 0.2,
   clipCut: 0.66,
-  /** Full-view white pop at the impact (VR comfort: well under ~80 ms). */
-  whitePop: 0.05,
 } as const;
 
 export const REMOTE_GRAB_TIMING = {
@@ -74,11 +73,10 @@ export interface JumpscareFrame {
   clip: number;
   /** Face-burst light 0..1. */
   light: number;
-  /** Red flood 0..1, edge darkening ("tunnel") 0..1, full black 0..1, white pop 0..1. */
+  /** Red flood 0..1, edge darkening ("tunnel") 0..1, full black 0..1. */
   red: number;
   tunnel: number;
   black: number;
-  white: number;
   /** Head-shake amplitude (m) of the face. */
   shake: number;
   /** True once the monster should be back at its sim position (hidden by the black). */
@@ -88,7 +86,7 @@ export interface JumpscareFrame {
 }
 
 export const newJumpscareFrame = (): JumpscareFrame => ({
-  dist: 0, clip: 0, light: 0, red: 0, tunnel: 0, black: 0, white: 0, shake: 0, released: false, done: false,
+  dist: 0, clip: 0, light: 0, red: 0, tunnel: 0, black: 0, shake: 0, released: false, done: false,
 });
 
 const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
@@ -114,13 +112,12 @@ export function jumpscareFrame(t: number, out: JumpscareFrame): JumpscareFrame {
   out.black = t < J.holdEnd ? smooth(J.cutStart, J.cutEnd, t) : 1 - smooth(J.holdEnd, J.end, t);
   const lit = 1 - smooth(J.cutStart, J.cutEnd, t);
   // Face burst: full for 35 ms, then one smooth decay to a dim sustained glow (no flicker).
-  const burst = t < 0.035 ? 1 : 0.16 + 0.84 * Math.exp(-(t - 0.035) / 0.085);
+  const burst = t < 0.035 ? 1 : 0.065 + 0.935 * Math.exp(-(t - 0.035) / 0.085);
   out.light = burst * lit;
   // One red pulse (peak at 30 ms), a little red lingers until the cut.
   const pulse = t < 0.03 ? t / 0.03 : Math.exp(-(t - 0.03) / 0.2);
   out.red = Math.max(pulse, 0.18 * smooth(0, 0.2, t)) * lit;
   out.tunnel = (0.5 * smooth(0, 0.12, t) + 0.5 * smooth(0.3, J.cutStart, t)) * lit;
-  out.white = t < J.whitePop ? 0.32 * (1 - t / J.whitePop) : 0;
   out.shake = 0.011 * Math.exp(-t / 0.35) * lit;
   out.released = t >= J.cutEnd;
   out.done = t >= J.end;
@@ -164,13 +161,13 @@ export interface CatchPoser {
 // ---------------------------------------------------------------------------------------------
 
 /** Burst light (re-using the near light at the eyes: the light count never changes). */
-const BURST = { intensity: 2.4, distance: 1.35, color: 0xf2f5ff, below: 0.07 } as const;
+const BURST = { intensity: 6, distance: 1.35, color: 0xf2f5ff, below: 0.07 } as const;
 /** Ghost view while the local player is caught: tints (and a little more ambient, "ghost sight"). */
 const GHOST_LOOK = {
   sky: 0xc09a9a, ground: 0x3c1f1f, ambient: 1.45, fog: 0x0e0405, background: 0x050102, near: 0xd8a0a0,
 } as const;
 /** Pale afterimage of the face left by the flash, seen over the black. */
-const BURN = { brightness: 0.55, strength: 0.5, push: 2.6 } as const;
+const BURN = { brightness: 0.55, strength: 0.4, push: 2.6 } as const;
 /** Head pitch the face follows is clamped to this (rad) so it never ends up in the floor/ceiling. */
 const PITCH_LIMIT = { down: 0.4, up: 0.25 } as const;
 
@@ -182,23 +179,20 @@ void main() {
   gl_Position = projectionMatrix * mv;
 }`;
 
-// Composited back to front: white pop, red flood, edge darkening, black. Premultiplied alpha.
+// Composited back to front: red flood, edge darkening, black. Premultiplied alpha.
 const FRAG = /* glsl */ `
 uniform float uRed;
 uniform float uTunnel;
 uniform float uBlack;
-uniform float uWhite;
 varying vec3 vView;
 void main() {
   // tan of the angle off this eye's view axis: 0 center, ~1.2 at a Quest's edge.
   float r = length(vView.xy / max(-vView.z, 1e-3));
   float inner = mix(1.25, 0.2, uTunnel);
   float aD = smoothstep(inner, inner + 0.6, r) * min(1.0, uTunnel * 1.8);
-  float aR = uRed * mix(0.28, 0.9, smoothstep(0.05, 1.0, r));
-  vec3 c = vec3(uWhite);
-  float a = uWhite;
-  c = vec3(0.36, 0.0, 0.012) * aR + c * (1.0 - aR);
-  a = aR + a * (1.0 - aR);
+  float aR = uRed * mix(0.05, 0.92, smoothstep(0.12, 1.05, r));
+  vec3 c = vec3(0.2, 0.0, 0.006) * aR;
+  float a = aR;
   c *= 1.0 - aD;
   a = aD + a * (1.0 - aD);
   c *= 1.0 - uBlack;
@@ -247,6 +241,9 @@ export class Jumpscare {
   private readonly remote: RemoteRun = { id: '', start: 0, victim: new THREE.Vector3() };
   private remoteActive = false;
   private ghost = 0;
+  /** What applyLook() last wrote (it only touches the lights/fog when these change). */
+  private appliedGhost = -1;
+  private appliedBurst = -1;
   private deferred: { text: string; seconds: number } | null = null;
   /** Shown when the sequence ends (messages that arrived during it). */
   onDeferredMessage: (text: string, seconds: number) => void = () => {};
@@ -267,7 +264,7 @@ export class Jumpscare {
     this.mat = new THREE.ShaderMaterial({
       vertexShader: VERT,
       fragmentShader: FRAG,
-      uniforms: { uRed: { value: 0 }, uTunnel: { value: 0 }, uBlack: { value: 0 }, uWhite: { value: 0 } },
+      uniforms: { uRed: { value: 0 }, uTunnel: { value: 0 }, uBlack: { value: 0 } },
       transparent: true,
       premultipliedAlpha: true,
       depthTest: false,
@@ -346,6 +343,7 @@ export class Jumpscare {
     this.overlay.visible = false;
     this.deferred = null;
     this.ghost = 0;
+    this.appliedGhost = -1;
     this.applyLook(0, 0);
   }
 
@@ -373,7 +371,7 @@ export class Jumpscare {
     const target = caught ? 1 : 0;
     if (this.localActive && !this.local.released) this.ghost = 0;
     else if (this.localActive || !caught) this.ghost = target;
-    else this.ghost += (target - this.ghost) * damp(3, dt);
+    else this.ghost = Math.abs(target - this.ghost) < 0.002 ? target : this.ghost + (target - this.ghost) * damp(3, dt);
     this.applyLook(this.ghost, light);
   }
 
@@ -422,7 +420,6 @@ export class Jumpscare {
     u.uRed.value = f.red;
     u.uTunnel.value = f.tunnel;
     u.uBlack.value = f.black;
-    u.uWhite.value = f.white;
     if (f.done) this.finishLocal(monster);
     return f.light;
   }
@@ -470,6 +467,9 @@ export class Jumpscare {
   }
 
   private applyLook(ghost: number, burst: number): void {
+    if (ghost === this.appliedGhost && burst === this.appliedBurst) return;
+    this.appliedGhost = ghost;
+    this.appliedBurst = burst;
     const b = this.base;
     this.hemi.color.copy(b.sky).lerp(_c.set(GHOST_LOOK.sky), ghost);
     this.hemi.groundColor.copy(b.ground).lerp(_c.set(GHOST_LOOK.ground), ghost);

@@ -140,6 +140,11 @@ export const RENDER = {
   xrFramebufferScale: 0.9,
   /** Desktop canvas devicePixelRatio cap. */
   maxPixelRatio: 2,
+  /**
+   * JUMPSCARE: the ~1.6 s catch sequence (the monster's face lunging into yours, a flash burst, a
+   * red vignette pulse, cut to black). false = being caught just turns you into a ghost.
+   */
+  jumpscare: true as boolean,
 } as const;
 
 /** Player colors (avatar tints), assigned in join order. */

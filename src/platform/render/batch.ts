@@ -49,6 +49,14 @@ interface Entry {
 }
 
 export class StaticBatcher {
+  /**
+   * Fill texture arrays on the GPU, straight from decoded source images (else they're read back
+   * through a 2D canvas: a CPU copy of every array until it is uploaded). Call once at startup.
+   */
+  static useRenderer(renderer: THREE.WebGLRenderer | null): void {
+    gpu = renderer;
+  }
+
   private readonly entries: Entry[] = [];
   private tris = 0;
   /** Max XZ extent of one merged mesh (0 = no spatial split). */
@@ -441,11 +449,28 @@ export function textureArrayChunk(slot: Slot): string {
   return src.split(sample).join(`texture( ${slot}Array, vec3( ${uv}, vTexLayer ) )`);
 }
 
+/** Renderer for GPU-side texture-array fills (StaticBatcher.useRenderer); null: fill on the CPU. */
+let gpu: THREE.WebGLRenderer | null = null;
+const _layer = new THREE.Vector3();
+
+/** Copy sampling/colour settings from the source textures to their array. */
+function copySettings(arr: THREE.Texture, t0: THREE.Texture, list: THREE.Texture[]): void {
+  arr.colorSpace = t0.colorSpace;
+  arr.wrapS = t0.wrapS;
+  arr.wrapT = t0.wrapT;
+  arr.magFilter = t0.magFilter;
+  arr.minFilter = t0.minFilter;
+  arr.anisotropy = t0.anisotropy;
+  arr.premultiplyAlpha = t0.premultiplyAlpha;
+  arr.flipY = false;
+  arr.name = `texarray(${list.map((t) => t.name).join('+')})`.slice(0, 160);
+  arr.userData.shared = true;
+}
+
 /** Stack same-size, same-format textures into one array texture (layer i = list[i]). */
 function buildArray(list: THREE.Texture[]): THREE.Texture {
   const t0 = list[0];
   const n = list.length;
-  let arr: THREE.Texture;
   if ((t0 as THREE.CompressedTexture).isCompressedTexture) {
     // Compressed blocks are copied as they are (each layer = one source texture, all mip levels).
     const src = list.map((t) => (t as THREE.CompressedTexture).mipmaps as unknown as Mip[]);
@@ -460,51 +485,62 @@ function buildArray(list: THREE.Texture[]): THREE.Texture {
     }
     const c = new THREE.CompressedArrayTexture(mipmaps as unknown as ImageData[], mipmaps[0].width, mipmaps[0].height, n, t0.format as THREE.CompressedPixelFormat, t0.type);
     c.userData.gpuBytes = mipmaps.reduce((a, m) => a + m.data.byteLength, 0);
-    arr = c;
-  } else {
-    const w = (t0.image as { width: number }).width;
-    const h = (t0.image as { height: number }).height;
-    const layer = w * h * 4;
-    const data = new Uint8Array(layer * n);
-    let ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
-    list.forEach((t, i) => {
-      const img = t.image as unknown;
-      if (isDrawable(img)) {
-        if (!ctx) {
-          const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
-          ctx = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
-          if (!ctx) throw new Error('no 2D canvas');
-        }
-        ctx.clearRect(0, 0, w, h);
-        ctx.drawImage(img, 0, 0, w, h);
-        data.set(ctx.getImageData(0, 0, w, h).data, i * layer);
-      } else {
-        data.set((img as { data: Uint8Array }).data.subarray(0, layer), i * layer);
-      }
-    });
-    const d = new THREE.DataArrayTexture(data, w, h, n);
+    copySettings(c, t0, list);
+    c.needsUpdate = true;
+    // The GPU keeps the blocks: drop the CPU copy once uploaded.
+    c.onUpdate = () => {
+      c.mipmaps = [];
+    };
+    return c;
+  }
+  const w = (t0.image as { width: number }).width;
+  const h = (t0.image as { height: number }).height;
+  const layer = w * h * 4;
+  const mips = t0.generateMipmaps;
+  if (gpu && list.every((t) => isDrawable(t.image))) {
+    // Decoded images (WebP in dev): copy each straight into its GPU layer, no CPU readback.
+    const d = new THREE.DataArrayTexture(null, w, h, n);
+    d.source.dataReady = false; // allocate only; the layers come from the copies below
     d.format = THREE.RGBAFormat;
     d.type = THREE.UnsignedByteType;
-    d.generateMipmaps = t0.generateMipmaps;
-    d.unpackAlignment = 4;
-    d.userData.gpuBytes = data.byteLength * (d.generateMipmaps ? 4 / 3 : 1);
-    arr = d;
+    copySettings(d, t0, list);
+    d.userData.gpuBytes = layer * n * (mips ? 4 / 3 : 1);
+    d.needsUpdate = true;
+    list.forEach((t, i) => {
+      // Mip storage is allocated on the first copy, the chain built once after the last.
+      d.generateMipmaps = mips && (i === 0 || i === n - 1);
+      gpu!.copyTextureToTexture(t, d, null, _layer.set(0, 0, i));
+    });
+    d.generateMipmaps = mips;
+    return d;
   }
-  arr.colorSpace = t0.colorSpace;
-  arr.wrapS = t0.wrapS;
-  arr.wrapT = t0.wrapT;
-  arr.magFilter = t0.magFilter;
-  arr.minFilter = t0.minFilter;
-  arr.anisotropy = t0.anisotropy;
-  arr.premultiplyAlpha = t0.premultiplyAlpha;
-  arr.flipY = false;
-  arr.name = `texarray(${list.map((t) => t.name).join('+')})`.slice(0, 160);
-  arr.userData.shared = true;
-  arr.needsUpdate = true;
-  // The GPU keeps the texels; don't also keep a CPU copy of every array for the app's lifetime.
-  arr.onUpdate = () => {
-    if ((arr as THREE.CompressedArrayTexture).isCompressedArrayTexture) (arr as THREE.CompressedArrayTexture).mipmaps = [];
-    else (arr.image as { data: Uint8Array | null }).data = null;
+  const data = new Uint8Array(layer * n);
+  let ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
+  list.forEach((t, i) => {
+    const img = t.image as unknown;
+    if (isDrawable(img)) {
+      if (!ctx) {
+        const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
+        ctx = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+        if (!ctx) throw new Error('no 2D canvas');
+      }
+      ctx.clearRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      data.set(ctx.getImageData(0, 0, w, h).data, i * layer);
+    } else {
+      data.set((img as { data: Uint8Array }).data.subarray(0, layer), i * layer);
+    }
+  });
+  const d = new THREE.DataArrayTexture(data, w, h, n);
+  d.format = THREE.RGBAFormat;
+  d.type = THREE.UnsignedByteType;
+  d.generateMipmaps = mips;
+  d.unpackAlignment = 4;
+  d.userData.gpuBytes = data.byteLength * (mips ? 4 / 3 : 1);
+  copySettings(d, t0, list);
+  d.needsUpdate = true;
+  d.onUpdate = () => {
+    d.image.data = null;
   };
-  return arr;
+  return d;
 }
