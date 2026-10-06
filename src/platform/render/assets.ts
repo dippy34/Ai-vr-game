@@ -24,21 +24,48 @@ export class ModelLibrary {
   private readonly models = new Map<string, ModelAsset>();
   private readonly loader = new GLTFLoader();
 
-  /** Load the given models in parallel. Missing/broken files are skipped with a warning. */
+  /**
+   * Load the given models in parallel, skipping any not listed in models/manifest.json (generated
+   * by the Vite config from public/models). Broken files are skipped with a warning.
+   */
   async load(names: readonly string[]): Promise<void> {
+    const available = await this.manifest();
     await Promise.all(
       names.map(async (name) => {
+        if (available && !available.has(name)) return;
         if (this.models.has(name)) return;
         try {
           const gltf = await this.loader.loadAsync(`${MODEL_BASE}${name}.glb`);
           const extras: Record<string, unknown> = {};
-          gltf.scene.traverse((o) => Object.assign(extras, o.userData));
+          gltf.scene.traverse((o) => {
+            Object.assign(extras, o.userData);
+            // Library-owned: instances and merged copies must never dispose these.
+            const mesh = o as THREE.Mesh;
+            if (!mesh.isMesh) return;
+            mesh.geometry.userData.shared = true;
+            for (const mat of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+              mat.userData.shared = true;
+              for (const v of Object.values(mat)) if (v instanceof THREE.Texture) v.userData.shared = true;
+            }
+          });
           this.models.set(name, { name, scene: gltf.scene, animations: gltf.animations, extras });
         } catch (err) {
           console.warn(`[models] ${name}.glb not loaded, using the built-in fallback`, err);
         }
       }),
     );
+  }
+
+  /** Names of the GLBs that exist, or null if the manifest is unavailable (then: try everything). */
+  private async manifest(): Promise<Set<string> | null> {
+    try {
+      const res = await fetch(`${MODEL_BASE}manifest.json`, { cache: 'no-store' });
+      if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null;
+      const list: unknown = await res.json();
+      return Array.isArray(list) ? new Set(list.filter((n): n is string => typeof n === 'string')) : null;
+    } catch {
+      return null;
+    }
   }
 
   has(name: string): boolean {

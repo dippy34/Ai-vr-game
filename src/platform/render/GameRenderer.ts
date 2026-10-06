@@ -16,6 +16,7 @@ import { MessagePanel } from './MessagePanel';
 import { MonsterModel } from './MonsterModel';
 import { ModelLibrary } from './assets';
 import { SkinnedMonster } from './SkinnedMonster';
+import { FURNITURE_MODEL_NAMES } from './FurnitureModels';
 import { NoiseMeter } from './NoiseMeter';
 import { CameraProp, FilmProp, FuseProp, type Prop } from './Props';
 import { RemoteAvatar, headGhostGeometry } from './RemoteAvatar';
@@ -37,7 +38,7 @@ const NEAR_LIGHT = { intensity: 0.016, distance: 2.2, decay: 2 };
 const FOG_COLOR = 0x04060b;
 const AFTERIMAGE_MIN_DOT = 0.1;
 /** GLB models the renderer knows how to use (public/models/<name>.glb). */
-const MODEL_NAMES = ['monster'] as const;
+const MODEL_NAMES = ['monster', ...FURNITURE_MODEL_NAMES];
 
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
@@ -53,6 +54,7 @@ export class GameRenderer implements IGameRenderer {
   private readonly hemi: THREE.HemisphereLight;
   private readonly nearLight: THREE.PointLight;
   private level: LevelView | null = null;
+  private levelData: LevelData | null = null;
   private readonly localHandMat: THREE.MeshLambertMaterial;
   private readonly localLeft: HandModel;
   private readonly localRight: HandModel;
@@ -153,6 +155,8 @@ export class GameRenderer implements IGameRenderer {
       this.monster = next;
       this.dynamic.add(next.object);
     }
+    // A level built before the models arrived gets rebuilt with them.
+    if (this.levelData && this.models.names().some((n) => n.startsWith('furniture_'))) this.loadLevel(this.levelData);
   }
 
   // -------------------------------------------------------------------------------------------
@@ -171,7 +175,8 @@ export class GameRenderer implements IGameRenderer {
     }
     this.items.clear();
     this.flashFx.clearAfterimages();
-    this.level = new LevelView(level);
+    this.levelData = level;
+    this.level = new LevelView(level, this.models);
     this.ctx.scene.add(this.level.group);
     // Compile every shader now (incl. afterimage + whiteout) so the first flash doesn't hitch.
     this.flashFx.setWarmupVisible(true);

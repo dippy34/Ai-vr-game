@@ -21,6 +21,8 @@ import {
   woodGrainTexture,
 } from './textures';
 import { aabbOf, damp, disposeTree, rayAabb, unitCapsule, type Aabb } from './util';
+import type { ModelLibrary } from './assets';
+import { FurnitureSet } from './FurnitureModels';
 
 // ---------------------------------------------------------------------------------------------
 // Geometry buckets (one merged mesh per material)
@@ -389,7 +391,8 @@ function wallGap(b: Box, dir: [number, number], walls: Box[]): number {
 /** Yaw that maps local +Z (front) to the given world direction. */
 const yawFor = (dir: [number, number]): number => Math.atan2(dir[0], dir[1]);
 
-function buildFurniture(b: Box, walls: Box[], buckets: { wood: Bucket; fabric: Bucket; plain: Bucket }): void {
+/** Which way a furniture box faces and its size in its own frame (front = local +Z). */
+function furnitureFrame(b: Box, walls: Box[]): { yaw: number; w: number; d: number; h: number } {
   const style: PropStyle = b.style ?? 'crate';
   const sx = b.max.x - b.min.x, sz = b.max.z - b.min.z, sy = b.max.y - b.min.y;
   const longX = sx >= sz;
@@ -413,6 +416,13 @@ function buildFurniture(b: Box, walls: Box[], buckets: { wood: Bucket; fabric: B
   const alongX = Math.abs(front[0]) > 0; // front along X => local width is world Z
   const w = alongX ? sz : sx;
   const d = alongX ? sx : sz;
+  return { yaw, w, d, h: sy };
+}
+
+function buildFurniture(b: Box, walls: Box[], buckets: { wood: Bucket; fabric: Bucket; plain: Bucket }): void {
+  const style: PropStyle = b.style ?? 'crate';
+  const sy = b.max.y - b.min.y;
+  const { yaw, w, d } = furnitureFrame(b, walls);
   const m = new THREE.Matrix4()
     .makeTranslation((b.min.x + b.max.x) / 2, b.min.y, (b.min.z + b.max.z) / 2)
     .multiply(new THREE.Matrix4().makeRotationY(yaw));
@@ -740,8 +750,12 @@ export class LevelView {
   private readonly door: DoorView;
   private exitOpen = false;
 
-  constructor(level: LevelData) {
+  /** Blender furniture placed into the level (null = all procedural). */
+  private readonly furnitureModels: FurnitureSet | null;
+
+  constructor(level: LevelData, models: ModelLibrary | null = null) {
     this.group.name = 'level';
+    this.furnitureModels = models ? new FurnitureSet(models) : null;
     const wallBoxes = level.boxes.filter((b) => b.kind === 'wall');
     const floorBoxes = level.boxes.filter((b) => b.kind === 'floor');
     for (const w of wallBoxes) this.walls.push(aabbOf(w.min, w.max));
@@ -771,10 +785,19 @@ export class LevelView {
         case 'ceiling':
           ceilings.add(g, tintFromHint(b.color));
           break;
-        case 'furniture':
+        case 'furniture': {
           g.dispose();
+          const fm = this.furnitureModels;
+          if (fm?.covers(b.style)) {
+            const f = furnitureFrame(b, wallBoxes);
+            const center = new THREE.Vector3((b.min.x + b.max.x) / 2, b.min.y, (b.min.z + b.max.z) / 2);
+            const seed = Math.floor(b.min.x * 73.1 + b.min.z * 191.7) | 0;
+            // GLB fronts face -Z, the procedural frame's front is +Z: turn half a circle.
+            if (fm.place(b, { center, yaw: f.yaw + Math.PI, w: f.w, h: f.h, d: f.d }, seed)) break;
+          }
           buildFurniture(b, wallBoxes, { wood, fabric, plain });
           break;
+        }
       }
     }
 
@@ -849,6 +872,10 @@ export class LevelView {
     this.fuseBox = new FuseBoxView(level, this.walls, plain);
     this.door = new DoorView(level, wood);
     this.group.add(this.fuseBox.group, this.door.group);
+    if (this.furnitureModels) {
+      this.furnitureModels.build();
+      this.group.add(this.furnitureModels.group);
+    }
 
     mk(walls, new THREE.MeshLambertMaterial({ map: wallpaperTexture(), vertexColors: true }), 'walls');
     mk(floors, new THREE.MeshLambertMaterial({ map: floorTexture(), vertexColors: true }), 'floors');
