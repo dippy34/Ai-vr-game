@@ -6,6 +6,40 @@ screenshots from the actual three.js game renderer (`*_threejs`).
 
 **36 models in the game:** `avatar_body`, `avatar_head`, `camera`, `door`, `dressing_chair`, `dressing_clock`, `dressing_frame_landscape`, `dressing_frame_portrait`, `dressing_rug`, `dressing_toys`, `film`, `furniture_armchair`, `furniture_bed`, `furniture_bench`, `furniture_cabinet_low`, `furniture_cabinet_narrow`, `furniture_cabinet_tall`, `furniture_couch`, `furniture_counter_module`, `furniture_counter_sink`, `furniture_counter_stove`, `furniture_crate`, `furniture_crate_small`, `furniture_desk`, `furniture_nightstand`, `furniture_piano`, `furniture_shelf_module`, `furniture_shelf_module_b`, `furniture_table_coffee`, `furniture_table_dining`, `furniture_table_small`, `fuse`, `fusebox`, `hand_left`, `hand_right`, `monster`
 
+## The monster
+
+**monster threejs**
+
+![monster threejs](previews/monster_threejs.png)
+
+**monster flash**
+
+![monster flash](previews/monster_flash.png)
+
+**monster 3q**
+
+![monster 3q](previews/monster_3q.png)
+
+**monster front**
+
+![monster front](previews/monster_front.png)
+
+**monster side**
+
+![monster side](previews/monster_side.png)
+
+**monster walk**
+
+![monster walk](previews/monster_walk.png)
+
+**monster attack**
+
+![monster attack](previews/monster_attack.png)
+
+**monster face**
+
+![monster face](previews/monster_face.png)
+
 ## Hands
 
 **hand threejs signs**
@@ -325,6 +359,14 @@ screenshots from the actual three.js game renderer (`*_threejs`).
 **dressing frame portrait threejs flash**
 
 ![dressing frame portrait threejs flash](previews/dressing_frame_portrait_threejs_flash.png)
+
+**dressing toys threejs**
+
+![dressing toys threejs](previews/dressing_toys_threejs.png)
+
+**dressing toys threejs flash**
+
+![dressing toys threejs flash](previews/dressing_toys_threejs_flash.png)
 
 **dressing chair flash**
 

@@ -44,10 +44,13 @@ export class SkinnedMonster {
     this.object.name = 'monster';
     this.object.add(instance);
 
-    // Fit to the gameplay height (the rules use MONSTER.height for hearing + catching).
-    _box.setFromObject(instance);
-    const h = _box.max.y - _box.min.y;
-    if (h > 0.5) instance.scale.multiplyScalar(MONSTER.height / h);
+    // A model that declares its height (extras.height) is authored at final scale: its hunched
+    // walk already matches MONSTER.height. Anything else gets fitted to the gameplay height.
+    if (typeof asset.extras.height !== 'number') {
+      _box.setFromObject(instance);
+      const h = _box.max.y - _box.min.y;
+      if (h > 0.5) instance.scale.multiplyScalar(MONSTER.height / h);
+    }
 
     instance.traverse((o) => {
       const m = o as THREE.SkinnedMesh;
