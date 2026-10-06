@@ -484,14 +484,14 @@ def decal_mold(w=600, h=1000, seed=404):
     for lv in (0.34, 0.42, 0.52, 0.63):
         q = np.abs(field - lv)
         tide = np.maximum(tide, np.exp(-(q / 0.008) ** 2) * (0.5 + 0.5 * vnoise(w, h, 20, seed + int(lv * 100), 2)))
-    rgb = lerp(hexa('86683c'), hexa('4e3a20'), smooth(field, 0.45, 0.8))
-    alpha = stain * (0.22 + 0.14 * vnoise(w, h, 30, seed + 5, 3)) + tide * 0.4
+    rgb = lerp(hexa('6e5432'), hexa('3a2a16'), smooth(field, 0.45, 0.8))
+    alpha = stain * (0.34 + 0.2 * vnoise(w, h, 30, seed + 5, 3)) + tide * 0.5
     rgb = lerp(rgb, hexa('3e2c18'), np.clip(tide, 0, 1))
     # black mold: colonies of tiny dots, denser + darker toward the source
     dens = np.zeros((h, w), np.float32)
-    for k in range(110):
-        cu = abs(rng.normal(0.0, 0.32))
-        cv = abs(rng.normal(0.0, 0.42))
+    for k in range(170):
+        cu = abs(rng.normal(0.0, 0.4))
+        cv = abs(rng.normal(0.0, 0.48))
         if field[int(min(h - 1, cv * h)), int(min(w - 1, cu * w))] < 0.38:
             continue
         r = rng.uniform(0.02, 0.09) * w

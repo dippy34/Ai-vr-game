@@ -8,12 +8,13 @@
  *  - Different MODELS whose materials differ only in their textures (same MeshStandardMaterial
  *    settings, same texture sizes/formats: e.g. all furniture, all set dressing) merge too. Their
  *    textures are stacked into texture arrays (one layer per source material) and a per-vertex
- *    `texLayer` attribute picks the layer in the shader, so a chunk's furniture is ONE draw call
+ *    `texLayer` attribute picks the layer in the shader, so a cluster's furniture is ONE draw call
  *    instead of one per furniture model. GPU memory is unchanged: the per-model textures are never
  *    uploaded, the arrays hold the same texels (KTX2 data is copied as-is, still compressed).
  *
- * Copies are split into spatial chunks (a key per placement, or a grid) so that a far-away part of
- * the house can be frustum / fog culled.
+ * Merged meshes are kept spatially compact so the parts of the house behind the viewer (or lost in
+ * the fog) are culled: each batch is split into clusters no wider than `cell` (k-d splits at the
+ * widest empty gap between copies, which is usually a wall, so clusters tend to follow rooms).
  */
 
 import * as THREE from 'three';
@@ -22,7 +23,19 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 const _inv = new THREE.Matrix4();
 const _rel = new THREE.Matrix4();
 const _full = new THREE.Matrix4();
-const _c = new THREE.Vector3();
+
+/**
+ * Hard cap on a merged mesh's extent (m), whatever the caller asks for. Measured on the house
+ * (dev/render/house.cjs): smaller clusters cull better but cost more draw calls.
+ */
+const MAX_CLUSTER = 5;
+/**
+ * A draw call costs about as much as a few thousand triangles of vertex work on a Quest, so
+ * clusters lighter than this aren't split, and no split leaves a part lighter than MIN_PART_TRIS
+ * (tuned with dev/render/house.cjs: busiest view 66 calls instead of 96 at the same triangles).
+ */
+const MIN_SPLIT_TRIS = 2500;
+const MIN_PART_TRIS = 600;
 
 interface Entry {
   geo: THREE.BufferGeometry;
@@ -30,35 +43,31 @@ interface Entry {
   chunk: string;
   name: string;
   renderOrder: number;
+  /** World-space bounds (the geometry's own boundingBox). */
+  box: THREE.Box3;
+  tris: number;
 }
 
 export class StaticBatcher {
   private readonly entries: Entry[] = [];
   private tris = 0;
-
-  private readonly grid: { x0: number; z0: number; sx: number; sz: number; nx: number; nz: number } | null;
+  /** Max XZ extent of one merged mesh (0 = no spatial split). */
+  private readonly cell: number;
 
   /**
-   * With `area` (XZ bounds) and `cell` (target size, m), merged meshes are split into a grid of
-   * roughly cell-sized chunks aligned to the area (by where each copy's center lands), so chunks
-   * outside the view are culled: a few more draw calls, far fewer triangles per view. Without
-   * them, one merged mesh per material for the whole level.
+   * With `area` (the level's XZ bounds) and `cell` (m), merged meshes are split into spatial
+   * clusters at most ~cell wide (capped at MAX_CLUSTER), so the ones outside the view are culled:
+   * a few more draw calls, far fewer triangles per view. Without them, one merged mesh per
+   * material for the whole level.
    */
   constructor(area?: { min: { x: number; z: number }; max: { x: number; z: number } }, cell = 0) {
-    const ov = (globalThis as unknown as { __muteBatchCell?: number }).__muteBatchCell; // EXPERIMENT
-    if (ov) cell = ov; // EXPERIMENT
-    if (area && cell > 0) {
-      const w = area.max.x - area.min.x, d = area.max.z - area.min.z;
-      const nx = Math.max(1, Math.round(w / cell)), nz = Math.max(1, Math.round(d / cell));
-      this.grid = { x0: area.min.x, z0: area.min.z, sx: w / nx, sz: d / nz, nx, nz };
-    } else {
-      this.grid = null;
-    }
+    this.cell = area && cell > 0 ? Math.min(cell, MAX_CLUSTER) : 0;
   }
 
   /**
    * Queue every visible mesh under `root` (taken in root's own frame, i.e. root's transform is
-   * ignored) transformed by `place`. `filter` can skip meshes (e.g. animated parts).
+   * ignored) transformed by `place`. `filter` can skip meshes (e.g. animated parts). Copies with
+   * different `chunk` keys never merge.
    */
   add(root: THREE.Object3D, place: THREE.Matrix4, chunk = '', filter?: (mesh: THREE.Mesh) => boolean): void {
     root.updateMatrixWorld(true);
@@ -79,16 +88,10 @@ export class StaticBatcher {
     g.applyMatrix4(world);
     // A mirrored copy would flip its winding (back faces out); placements never mirror, but be safe.
     if (world.determinant() < 0) flipWinding(g);
-    const grid = this.grid;
-    if (!chunk && grid) {
-      g.computeBoundingBox();
-      g.boundingBox!.getCenter(_c);
-      const i = Math.min(grid.nx - 1, Math.max(0, Math.floor((_c.x - grid.x0) / grid.sx)));
-      const k = Math.min(grid.nz - 1, Math.max(0, Math.floor((_c.z - grid.z0) / grid.sz)));
-      chunk = `${i},${k}`;
-    }
-    this.entries.push({ geo: g, material: mesh.material, chunk, name: mesh.name, renderOrder: mesh.renderOrder });
-    this.tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+    g.computeBoundingBox();
+    const tris = (g.index ? g.index.count : g.attributes.position.count) / 3;
+    this.entries.push({ geo: g, material: mesh.material, chunk, name: mesh.name, renderOrder: mesh.renderOrder, box: g.boundingBox!, tris });
+    this.tris += tris;
   }
 
   /** Triangles queued so far. */
@@ -99,7 +102,7 @@ export class StaticBatcher {
   /** Merge everything queued into static meshes added to `group`. */
   build(group: THREE.Group): void {
     const plan = planMaterials(this.entries);
-    const buckets = new Map<string, { material: THREE.Material | THREE.Material[]; geos: THREE.BufferGeometry[]; names: Set<string>; renderOrder: number }>();
+    const buckets = new Map<string, { material: THREE.Material | THREE.Material[]; entries: Entry[] }>();
     for (const e of this.entries) {
       let material = e.material;
       const p = Array.isArray(material) ? undefined : plan.get(material);
@@ -115,30 +118,83 @@ export class StaticBatcher {
         ? `multi|${e.geo.uuid}`
         : `${material.uuid}|${attributeSignature(e.geo)}|${e.chunk}|${e.renderOrder}`;
       let b = buckets.get(key);
-      if (!b) {
-        b = { material, geos: [], names: new Set(), renderOrder: e.renderOrder };
-        buckets.set(key, b);
-      }
-      b.geos.push(e.geo);
-      b.names.add(e.name);
+      if (!b) buckets.set(key, (b = { material, entries: [] }));
+      b.entries.push(e);
     }
     for (const b of buckets.values()) {
-      const merged = b.geos.length === 1 ? b.geos[0] : mergeGeometries(b.geos, false);
-      if (b.geos.length > 1) for (const g of b.geos) g.dispose();
-      if (!merged) continue;
-      merged.userData = {};
-      merged.computeBoundingSphere();
-      merged.computeBoundingBox();
-      const mesh = new THREE.Mesh(merged, b.material);
-      const names = [...b.names];
-      mesh.name = `batch:${names.slice(0, 4).join('+')}${names.length > 4 ? `+${names.length - 4}` : ''}`;
-      mesh.renderOrder = b.renderOrder;
-      mesh.matrixAutoUpdate = false;
-      group.add(mesh);
+      const clusters: Entry[][] = [];
+      if (this.cell > 0) splitClusters(b.entries, this.cell, clusters);
+      else clusters.push(b.entries);
+      for (const list of clusters) {
+        const geos = list.map((e) => e.geo);
+        const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+        if (geos.length > 1) for (const g of geos) g.dispose();
+        if (!merged) continue;
+        merged.userData = {};
+        merged.computeBoundingSphere();
+        merged.computeBoundingBox();
+        const mesh = new THREE.Mesh(merged, b.material);
+        const names = [...new Set(list.map((e) => e.name))];
+        mesh.name = `batch:${names.slice(0, 4).join('+')}${names.length > 4 ? `+${names.length - 4}` : ''}`;
+        mesh.renderOrder = list[0].renderOrder;
+        mesh.matrixAutoUpdate = false;
+        group.add(mesh);
+      }
     }
     this.entries.length = 0;
     this.tris = 0;
   }
+}
+
+const _bb = new THREE.Box3();
+
+/**
+ * Split `list` into clusters at most `maxExtent` wide (XZ): recursively cut along the longer axis
+ * at the widest empty gap between copies (walls / open floor), or at the median if they overlap.
+ */
+function splitClusters(list: Entry[], maxExtent: number, out: Entry[][]): void {
+  _bb.makeEmpty();
+  let tris = 0;
+  for (const e of list) {
+    _bb.union(e.box);
+    tris += e.tris;
+  }
+  const ex = _bb.max.x - _bb.min.x, ez = _bb.max.z - _bb.min.z;
+  if (list.length < 2 || Math.max(ex, ez) <= maxExtent || tris < MIN_SPLIT_TRIS) {
+    out.push(list);
+    return;
+  }
+  const axis = ex >= ez ? 'x' : 'z';
+  const sorted = list.slice().sort((a, b) => (a.box.min[axis] + a.box.max[axis]) - (b.box.min[axis] + b.box.max[axis]));
+  // Widest empty gap with enough triangles on both sides; else the most even triangle split.
+  let cut = -1;
+  let bestGap = 0.05;
+  let reach = -Infinity;
+  let before = 0;
+  let even = -1;
+  let evenErr = Infinity;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    before += sorted[i].tris;
+    reach = Math.max(reach, sorted[i].box.max[axis]);
+    if (before < MIN_PART_TRIS || tris - before < MIN_PART_TRIS) continue;
+    const gap = sorted[i + 1].box.min[axis] - reach;
+    if (gap > bestGap) {
+      bestGap = gap;
+      cut = i + 1;
+    }
+    const err = Math.abs(before - tris / 2);
+    if (err < evenErr) {
+      evenErr = err;
+      even = i + 1;
+    }
+  }
+  if (cut < 0) cut = even;
+  if (cut < 0) {
+    out.push(list);
+    return;
+  }
+  splitClusters(sorted.slice(0, cut), maxExtent, out);
+  splitClusters(sorted.slice(cut), maxExtent, out);
 }
 
 /** Geometries merge only with the same attribute layout (and indexing). */
@@ -215,7 +271,6 @@ function placeholderTexture(): THREE.DataTexture {
 
 /** Decide which source materials get replaced by a shared texture-array material. */
 function planMaterials(entries: readonly Entry[]): Map<THREE.Material, Plan> {
-  if ((globalThis as unknown as { __muteNoArrays?: boolean }).__muteNoArrays) return new Map(); // EXPERIMENT
   const groups = new Map<string, THREE.MeshStandardMaterial[]>();
   const seen = new Set<THREE.Material>();
   for (const e of entries) {

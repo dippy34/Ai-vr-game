@@ -77,14 +77,14 @@ describe('StaticBatcher', () => {
     expect(meshes(g).map((m) => m.material).sort()).toEqual([m1, m2].sort());
   });
 
-  it('splits by grid chunk', () => {
+  it('splits far-apart copies into spatial clusters (at the gap between them)', () => {
     const b = new StaticBatcher({ min: { x: 0, z: 0 }, max: { x: 10, z: 10 } }, 5);
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), material(4, 10));
-    b.add(mesh, new THREE.Matrix4().makeTranslation(1, 0, 1));
-    b.add(mesh, new THREE.Matrix4().makeTranslation(2, 0, 2));
-    b.add(mesh, new THREE.Matrix4().makeTranslation(8, 0, 8));
+    // ~2k triangles per copy, so clusters are worth splitting.
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.25, 32, 32), material(4, 10));
+    for (const x of [1, 1.6, 2.2, 8, 8.6]) b.add(mesh, new THREE.Matrix4().makeTranslation(x, 0, 1));
     const g = new THREE.Group();
     b.build(g);
-    expect(meshes(g)).toHaveLength(2);
+    const sizes = meshes(g).map((m) => m.geometry.getAttribute('position').count / mesh.geometry.getAttribute('position').count).sort();
+    expect(sizes).toEqual([2, 3]);
   });
 });

@@ -42,10 +42,14 @@ function modelsManifest(): Plugin {
   };
 }
 
-/** Serves (dev) / emits (build) basis/basis_transcoder.{js,wasm}, which KTX2Loader loads at runtime. */
+/**
+ * Dev server: serves /basis/basis_transcoder.{js,wasm}, which KTX2Loader loads at runtime (builds
+ * don't need this: Vite emits them as hashed assets from KTX2Loader's own `new URL(...)`).
+ */
 function basisTranscoder(): Plugin {
   return {
     name: 'mute-basis-transcoder',
+    apply: 'serve',
     configureServer(server) {
       server.middlewares.use('/basis', (req, res, next) => {
         const file = (req.url ?? '').split('?')[0].replace(/^\//, '');
@@ -53,9 +57,6 @@ function basisTranscoder(): Plugin {
         res.setHeader('Content-Type', file.endsWith('.wasm') ? 'application/wasm' : 'text/javascript');
         res.end(readFileSync(join(BASIS_DIR, file)));
       });
-    },
-    generateBundle() {
-      for (const f of BASIS_FILES) this.emitFile({ type: 'asset', fileName: `basis/${f}`, source: readFileSync(join(BASIS_DIR, f)) });
     },
   };
 }

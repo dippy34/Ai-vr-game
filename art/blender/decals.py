@@ -35,12 +35,12 @@ REPO = os.path.abspath(os.path.join(HERE, '..', '..'))
 DECAL_SPECS = {
     'handprints': dict(size=(0.6, 1.2), placement='wall'),
     'scratches': dict(size=(0.55, 1.1), placement='door'),
-    'drag': dict(size=(0.6, 2.4), placement='floor'),
+    'drag': dict(size=(0.72, 2.4), placement='floor'),
     'mold': dict(size=(0.9, 1.5), placement='wall'),
     'writing_hears': dict(size=(1.7, 0.64), placement='wall'),
     'writing_shh': dict(size=(1.2, 0.9), placement='wall'),
     'writing_dont': dict(size=(1.4, 0.77), placement='wall'),
-    'drawing': dict(size=(0.3, 0.4), placement='wall'),
+    'drawing': dict(size=(0.36, 0.48), placement='wall'),
 }
 DECAL_TEX = (512, 1024)
 DECAL_ROUGHNESS = 0.72

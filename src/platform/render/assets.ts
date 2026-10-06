@@ -24,8 +24,13 @@ export interface ModelAsset {
 }
 
 const MODEL_BASE = `${import.meta.env.BASE_URL}models/`;
-/** Basis Universal transcoder (three's examples/jsm/libs/basis, served + emitted by vite.config.ts). */
-const BASIS_PATH = `${import.meta.env.BASE_URL}basis/`;
+/**
+ * Basis Universal transcoder (three's examples/jsm/libs/basis). Builds use KTX2Loader's own URL,
+ * which Vite emits as a content-hashed asset (so the service worker's cache can never pair a stale
+ * transcoder with a newer three); the dev server serves it at /basis/ (vite.config.ts) because
+ * pre-bundled dependencies break that relative URL.
+ */
+const BASIS_PATH = import.meta.env.DEV ? `${import.meta.env.BASE_URL}basis/` : '';
 /** scripts/optimize-assets.mjs stamps a content hash on texture names: same hash = same texels. */
 const CONTENT_HASH = /#([0-9a-f]{12})$/;
 
@@ -37,7 +42,9 @@ const CONTENT_HASH = /#([0-9a-f]{12})$/;
 export function createKTX2Loader(renderer: THREE.WebGLRenderer): KTX2Loader | null {
   if (typeof WebAssembly === 'undefined' || typeof Worker === 'undefined') return null;
   try {
-    return new KTX2Loader().setTranscoderPath(BASIS_PATH).detectSupport(renderer);
+    const loader = new KTX2Loader();
+    if (BASIS_PATH) loader.setTranscoderPath(BASIS_PATH);
+    return loader.detectSupport(renderer);
   } catch (err) {
     console.warn('[models] KTX2 textures unavailable, using WebP', err);
     return null;

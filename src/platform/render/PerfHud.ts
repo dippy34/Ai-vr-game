@@ -9,7 +9,9 @@
 import * as THREE from 'three';
 
 const W = 512;
-const H = 64;
+const H = 96;
+/** Panel width (m) and where it hangs in front of the eyes (camera space). */
+const PANEL_W = 0.3;
 const REFRESH_MS = 500;
 const LOG_MS = 5000;
 const MEMORY_MS = 2000;
@@ -45,13 +47,13 @@ export class PerfHud {
     this.tex = new THREE.CanvasTexture(this.canvas);
     this.tex.colorSpace = THREE.SRGBColorSpace;
     this.mat = new THREE.MeshBasicMaterial({ map: this.tex, transparent: true, depthTest: false, depthWrite: false, fog: false, toneMapped: false });
-    // Head-locked, low in the view, 0.5 m away (child of the camera).
-    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.2, (0.2 * H) / W), this.mat);
-    this.mesh.position.set(0, -0.13, -0.5);
+    // Head-locked, low in the view, 0.6 m away (child of the camera).
+    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(PANEL_W, (PANEL_W * H) / W), this.mat);
+    this.mesh.position.set(0, -0.17, -0.6);
     this.mesh.name = 'perfHud';
     this.mesh.renderOrder = 9999;
     this.mesh.frustumCulled = false;
-    this.draw('perf: waiting for frames');
+    this.draw('perf', 'waiting for frames');
   }
 
   /** Call once per rendered frame, right after renderer.render(). */
@@ -69,36 +71,30 @@ export class PerfHud {
     const fps = (this.frames * 1000) / elapsed;
     const info = renderer.info;
     const xr = renderer.xr.isPresenting ? ' (2 eyes)' : '';
-    const line = `${fps.toFixed(0)} fps (worst ${this.worstMs.toFixed(0)} ms)  ${info.render.calls} calls${xr}  `
-      + `${(info.render.triangles / 1000).toFixed(0)}k tris  ${info.memory.textures} tex ~${this.textureMB.toFixed(0)} MB`;
-    this.draw(line);
+    const a = `${fps.toFixed(0)} fps  worst ${this.worstMs.toFixed(0)} ms`;
+    const b = `${info.render.calls} calls${xr}  ${(info.render.triangles / 1000).toFixed(0)}k tris  `
+      + `${info.memory.textures} tex ~${this.textureMB.toFixed(0)} MB`;
+    this.draw(a, b);
     if (now - this.lastLog >= LOG_MS) {
       this.lastLog = now;
-      console.info(`[perf] ${line}  geometries=${info.memory.geometries} programs=${info.programs?.length ?? 0}`);
+      console.info(`[perf] ${a}  ${b}  geometries=${info.memory.geometries} programs=${info.programs?.length ?? 0}`);
     }
     this.frames = 0;
     this.worstMs = 0;
     this.windowStart = now;
   }
 
-  private draw(text: string): void {
+  private draw(a: string, b: string): void {
     const g = this.g;
     g.clearRect(0, 0, W, H);
     g.fillStyle = 'rgba(0,0,0,0.6)';
     g.fillRect(0, 0, W, H);
     g.fillStyle = '#9cff9c';
-    g.font = '600 20px ui-monospace, Menlo, Consolas, monospace';
     g.textBaseline = 'middle';
-    // Two lines if it doesn't fit.
-    const words = text.split('  ');
-    let a = '', b = '';
-    for (const w of words) {
-      const test = a ? `${a}  ${w}` : w;
-      if (!b && g.measureText(test).width < W - 16) a = test;
-      else b = b ? `${b}  ${w}` : w;
-    }
-    g.fillText(a, 8, b ? H * 0.3 : H / 2);
-    if (b) g.fillText(b, 8, H * 0.72);
+    g.font = '700 34px ui-monospace, Menlo, Consolas, monospace';
+    g.fillText(a, 10, H * 0.3, W - 20);
+    g.font = '600 25px ui-monospace, Menlo, Consolas, monospace';
+    g.fillText(b, 10, H * 0.74, W - 20);
     this.tex.needsUpdate = true;
   }
 

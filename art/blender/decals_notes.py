@@ -40,7 +40,7 @@ NOTES = {
         folds=[('h', 0.5, 1)], curl=0.006, stains=['thumb', 'ring'], seed=11),
     'tom': dict(
         text='It found Tom\nwhen he screamed.',
-        paper='scrap', size=(0.17, 0.12), placement='floor', ink='3a3a3e', pen=('pencil', 6.5),
+        paper='scrap', size=(0.17, 0.12), placement='floor', ink='2c2c30', pen=('pencil', 6.5),
         hand=dict(slant=0.1, messy=0.75, tremor=0.9, seed=32), xh=52, top=0.36, line=2.5, left=0.07, right=0.98,
         folds=[('v', 0.5, -1)], curl=0.004, crumple=1.0, stains=['dirt'], seed=12),
     'whisper': dict(
@@ -55,13 +55,13 @@ NOTES = {
         folds=[], curl=0.01, stains=['ring', 'dirt'], header='OCT 30', seed=14),
     'dad': dict(
         text="Dad hid the fuses\nso we couldnt leave.\nIm sorry.\n- Ellie",
-        paper='school', size=(0.22, 0.17), placement='floor', ink='48484e', pen=('pencil', 7.5),
+        paper='school', size=(0.22, 0.17), placement='floor', ink='38383e', pen=('pencil', 7.5),
         hand=dict(slant=-0.04, messy=1.0, size_jitter=0.12, rot_jitter=6.0, baseline=0.22, spacing=1.12, seed=35),
         xh=43, rule=(1, 2), left=0.14, right=0.995, folds=[('v', 0.5, 1), ('h', 0.5, -1)], curl=0.005,
         crumple=0.5, stains=['dirt'], seed=15),
     'kitchen': dict(
         text='It keeps coming back\nto the kitchen.\nWe were *loud* there.',
-        paper='card', size=(0.15, 0.1), placement='surface', ink='28282e', pen=('pencil', 6.0),
+        paper='card', size=(0.15, 0.1), placement='surface', ink='202026', pen=('pencil', 6.0),
         hand=dict(slant=0.14, messy=0.45, seed=36), xh=38, rule=(1, 2), left=0.06, right=0.99,
         folds=[], curl=0.003, stains=['grease', 'ring'], header_print='RECIPE', seed=16),
 }
@@ -300,13 +300,13 @@ def note_image(name):
     if kind == 'pencil':
         tooth = vnoise(TEX, TEX, 1.3, seed + 3, 1)
         cov = cov * (0.6 + 0.4 * smooth(tooth, 0.2, 0.7))
-        rgb = lerp(rgb, ink, np.clip(cov * 0.88, 0, 1))
+        rgb = lerp(rgb, ink, np.clip(cov * 0.95, 0, 1))
     elif kind == 'fountain':
         bleed = blur(cov, 1.2) * 0.25
         rgb = lerp(rgb, ink * 1.3, np.clip(bleed, 0, 1))
-        rgb = lerp(rgb, ink, np.clip(cov * 0.95, 0, 1))
+        rgb = lerp(rgb, ink, np.clip(cov * 1.05, 0, 1))
     else:
-        rgb = lerp(rgb, ink, np.clip(cov * 0.92, 0, 1))
+        rgb = lerp(rgb, ink, np.clip(cov * 1.08, 0, 1))
     rgb = stains(rgb, spec.get('stains', []), seed, aspect, cov)
     # creases: dirt collects in the folds (a darker line + a light catch beside it)
     xx, yy = grid(TEX, TEX)

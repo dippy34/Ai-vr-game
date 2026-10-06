@@ -104,6 +104,8 @@ const HT = WALL_THICKNESS / 2;
 /** Wall pieces float this far off the wall (plus polygonOffset). */
 const WALL_OFFSET = 0.003;
 const FLOOR_Y = 0.0025;
+/** Notes' self-light (emissive x their own texture): readable at arm's length in the dark. */
+const NOTE_GLOW = 0.035;
 
 /** Tangent coordinate along a wall with outward normal (nx, nz) (same as the dressing's). */
 const along = (nx: number, nz: number, x: number, z: number): number => -nz * x + nx * z;
@@ -741,6 +743,14 @@ function prepareMaterials(root: THREE.Object3D, kind: 'decal' | 'note'): void {
       } else {
         m.polygonOffsetFactor = -1;
         m.polygonOffsetUnits = -2;
+        // Pale paper is the first thing dark-adapted eyes make out: a whisper of self-light (the
+        // page's own texture, so the ink stays dark) keeps a note readable up close in the dark.
+        // Same texture as the map, so the batcher can still stack every note into one array.
+        const sm = m as THREE.MeshStandardMaterial;
+        if (sm.isMeshStandardMaterial && sm.map) {
+          sm.emissiveMap = sm.map;
+          sm.emissive.setScalar(NOTE_GLOW);
+        }
       }
       m.needsUpdate = true;
     }
