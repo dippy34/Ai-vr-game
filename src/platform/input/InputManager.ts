@@ -39,6 +39,8 @@ import {
   XR_AXIS,
   XR_BUTTON,
   type HandJointPositions,
+  PINCH_WALK_DELAY,
+  pinchWalkMove,
 } from './handMath';
 import { desktopHandTarget, REST_CURLS, SIGN_MIN_SECONDS, signForCode, type SignPreset } from './signs';
 
@@ -177,6 +179,8 @@ export class InputManager implements IInputManager {
 
   // --- XR ---
   private readonly slots: XRSlot[] = [];
+  /** How long the left hand has been pinching (hand-tracking walk). */
+  private pinchWalkTime = 0;
   private readonly sides: Record<Handedness, XRSideState> = {
     left: { source: null, grip: false, trigger: false, menu: false, stickClick: false, curls: restCurls(), pose: untrackedPose() },
     right: { source: null, grip: false, trigger: false, menu: false, stickClick: false, curls: restCurls(), pose: untrackedPose() },
@@ -523,6 +527,15 @@ export class InputManager implements IInputManager {
         const w = wristFromGrip(v3(_p), q4(_q), side);
         st.pose = { tracked: true, position: w.position, rotation: w.rotation, curls: [...st.curls] as FingerCurls };
       }
+    }
+
+    // ---- 5. hand-tracking locomotion: hold a left-hand pinch and point where to go ----
+    const lh = this.sides.left;
+    if (!moving && lh.source?.hand && lh.trigger && lh.pose.tracked) {
+      this.pinchWalkTime += dt;
+      if (this.pinchWalkTime >= PINCH_WALK_DELAY) move = pinchWalkMove(lh.pose.rotation, head.rotation);
+    } else {
+      this.pinchWalkTime = 0;
     }
 
     // Keep ctx.camera current for anyone reading it before render() (render updates it again).

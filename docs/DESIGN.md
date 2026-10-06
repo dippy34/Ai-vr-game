@@ -61,7 +61,7 @@ fists, open palm "stop", thumbs up/down, counting 1–5, "come here" waves and s
 
 | Action | VR | Desktop |
 |---|---|---|
-| Move | Left stick (smooth) | WASD |
+| Move | Left stick (smooth). Hand tracking: hold a left pinch + point | WASD |
 | Turn | Right stick (snap 30°) or real body | Mouse (click to lock pointer) |
 | Sneak (quiet) | Crouch in real life | Hold C (crouch) or Ctrl |
 | Sprint (loud) | Click left stick | Shift |

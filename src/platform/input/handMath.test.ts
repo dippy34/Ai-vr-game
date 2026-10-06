@@ -16,6 +16,7 @@ import {
   mirrorQuatX,
   quatFromAxisAngle,
   quatMul,
+  pinchWalkMove,
   radialDeadzone,
   wristFromGrip,
   type ButtonLike,
@@ -266,5 +267,24 @@ describe('helpers', () => {
     // degenerate input still returns a unit quaternion
     const d = frameFromFingersBack({ x: 0, y: 1, z: 0 }, { x: 0, y: 1, z: 0 });
     expect(Math.hypot(d.x, d.y, d.z, d.w)).toBeCloseTo(1);
+  });
+});
+
+describe('pinchWalkMove', () => {
+  const yaw = (a: number): Quat => ({ x: 0, y: Math.sin(a / 2), z: 0, w: Math.cos(a / 2) });
+  it('walks forward when the hand points where the head looks', () => {
+    const m = pinchWalkMove(yaw(0.7), yaw(0.7), 1);
+    expect(m.y).toBeCloseTo(1, 5);
+    expect(m.x).toBeCloseTo(0, 5);
+  });
+  it('strafes right when the hand points to the right of the view', () => {
+    // turning -90 deg (clockwise seen from above) faces the head's right
+    const m = pinchWalkMove(yaw(-Math.PI / 2), yaw(0), 1);
+    expect(m.x).toBeCloseTo(1, 5);
+    expect(m.y).toBeCloseTo(0, 5);
+  });
+  it('ignores a hand pointing straight up', () => {
+    const up: Quat = { x: Math.sin(Math.PI / 4), y: 0, z: 0, w: Math.cos(Math.PI / 4) }; // -Z -> +Y
+    expect(pinchWalkMove(up, yaw(0))).toEqual({ x: 0, y: 0 });
   });
 });

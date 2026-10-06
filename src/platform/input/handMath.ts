@@ -430,3 +430,30 @@ export function wristFromGrip(gripPos: Vec3, gripRot: Quat, handedness: Handedne
   const position = add3(gripPos, rotate3(rotation, gripToWristOffset(handedness)));
   return { position, rotation };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Hand-tracking locomotion ("pinch and point")
+// ---------------------------------------------------------------------------------------------
+
+/** Seconds a left-hand pinch must be held before it starts walking (a quick pinch stays a click). */
+export const PINCH_WALK_DELAY = 0.3;
+/** Walking speed while pinch-walking, as a fraction of full stick. */
+export const PINCH_WALK_STRENGTH = 0.8;
+
+/**
+ * Hand-tracking players have no thumbstick: holding a pinch walks toward where the hand points.
+ * Returns an InputFrame.move vector (x = strafe right, y = forward, relative to the head's yaw)
+ * from the hand's finger direction (-Z of the canonical hand frame) projected on the floor.
+ */
+export function pinchWalkMove(hand: Quat, head: Quat, strength = PINCH_WALK_STRENGTH): { x: number; y: number } {
+  const d = rotate3(hand, { x: 0, y: 0, z: -1 });
+  const f = rotate3(head, { x: 0, y: 0, z: -1 });
+  const dl = Math.hypot(d.x, d.z);
+  const fl = Math.hypot(f.x, f.z);
+  // Pointing (almost) straight up or down gives no usable direction.
+  if (dl < 0.25 || fl < 1e-6) return { x: 0, y: 0 };
+  const dx = d.x / dl, dz = d.z / dl;
+  const fx = f.x / fl, fz = f.z / fl;
+  // right = (-f.z, f.x) on the floor plane
+  return { x: (dx * -fz + dz * fx) * strength, y: (dx * fx + dz * fz) * strength };
+}

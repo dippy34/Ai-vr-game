@@ -27,6 +27,9 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design and
 
 The host starts a round with the trigger (VR) or a click (desktop).
 
+**Hand tracking (no controllers):** pinch your left thumb and index finger and *hold* to walk where
+your left hand points. Make a fist near something to grab it, and pinch to flash the camera.
+
 ## Run it locally
 
 ```bash
