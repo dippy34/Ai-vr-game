@@ -37,6 +37,12 @@ LAB = {n: i for i, n in enumerate(LABEL_NAMES)}
 
 FINGERS = ('thumb', 'index', 'middle', 'ring', 'pinky')
 
+# face features shared by the sculpt, texture masks and jaw weights
+MOUTH_SLIT = (v3(0, 0.352, 2.044), v3(0.0042, 0.022, 0.048))
+MOUTH_CAV = (v3(0, 0.322, 2.044), v3(0.0140, 0.024, 0.042))
+SOCKETS = [(v3(0.030 * s, 0.350, 2.138), v3(0.022, 0.019, 0.018)) for s in (1, -1)]
+NOSTRILS = [(v3(0.0055 * s, 0.350, 2.096), v3(0.0080 * s, 0.344, 2.113)) for s in (1, -1)]
+
 
 def bend(d, toward, ang):
     d = normalize(d)
@@ -161,9 +167,9 @@ def skeleton() -> dict:
     J['L'] = _mirror(Rt)
     # ears: base, direction (along ear), normal (concave side), length, half-width
     for side, s in (('R', 1.0), ('L', -1.0)):
-        base = v3(0.060 * s, 0.226, 2.170)
-        u = normalize(v3(0.70 * s, -0.44, 0.58))
-        nrm = v3(0.40 * s, 0.90, 0.06)
+        base = v3(0.061 * s, 0.212, 2.168)
+        u = normalize(v3(0.50 * s, -0.52, 0.70))
+        nrm = v3(0.55 * s, 0.82, -0.05)
         nrm = normalize(nrm - u * np.dot(nrm, u))
         J[side]['ear'] = (base, u, nrm)
     return J
@@ -187,7 +193,7 @@ def spine_curve(J, n=64):
 # sculpt
 # ---------------------------------------------------------------------------------------------
 
-def _ear_prim(base, u, nrm, side_s, L=0.205, Wmax=0.080, seed=0.0, notches=(), holes=()):
+def _ear_prim(base, u, nrm, side_s, L=0.225, Wmax=0.060, seed=0.0, notches=(), holes=()):
     """Big ragged bat-like ear membrane (cupped, thick cartilage rim, bites and tears).
     Returns (Func prim, axes, ridge point lists)."""
     e_u = normalize(u)
@@ -199,10 +205,10 @@ def _ear_prim(base, u, nrm, side_s, L=0.205, Wmax=0.080, seed=0.0, notches=(), h
 
     def prof(t):
         t = np.clip(t, 0, 1)
-        return (0.5 + 0.5 * smoothstep(0.0, 0.32, t)) * np.power(1 - t, 0.8) / 0.75
+        return (0.55 + 0.45 * smoothstep(0.0, 0.25, t)) * np.power(1 - t, 0.9) / 0.772
 
     def vc(t):
-        return -0.018 * np.clip(t, 0, 1) ** 2 + 0.008 * np.sin(np.pi * np.clip(t, 0, 1))
+        return 0.022 * np.clip(t, 0, 1) ** 2 + 0.006 * np.sin(np.pi * np.clip(t, 0, 1))
 
     def w0(t, rel):
         return 0.022 * rel * rel * np.clip(t * 3, 0, 1) * (1 - 0.45 * t) - 0.008 * t * t
@@ -216,11 +222,11 @@ def _ear_prim(base, u, nrm, side_s, L=0.205, Wmax=0.080, seed=0.0, notches=(), h
         W = Wmax * prof(t)
         c = vc(t)
         d_edge = (np.abs(qv - c) - W) * 0.8
-        d_edge = np.maximum(d_edge, -qu)
+        d_edge = np.maximum(d_edge, np.maximum(-qu, qu - L))
         ragged = smoothstep(0.12, 0.4, t)
         nz = S.fbm(np.stack([qu * 22, qv * 22, np.full_like(qu, seed)], 1), 2, seed=seed)
         nz2 = S.perlin(np.stack([qu * 70, qv * 70, np.full_like(qu, seed + 5)], 1))
-        d_edge = d_edge + (0.0030 * nz + 0.0012 * nz2) * ragged
+        d_edge = d_edge + (0.0030 * nz + 0.0005 * nz2) * ragged
         for (nt, nside, ra, rb) in notches:   # bites / tears out of the rim (ellipses, rb deep)
             cu = nt * L
             cv = float(vc(np.array([nt]))[0]) + nside * Wmax * float(prof(np.array([nt]))[0])
@@ -284,7 +290,7 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
     core.union(Ellipsoid(rc_c, rc_r, Rrc))
     core.union(Ellipsoid(v3(0, 0.002, 1.752), v3(0.160, 0.078, 0.066)), k=0.04)            # shoulder girdle
     core.union(Ellipsoid(v3(0, -0.024, 1.338), v3(0.098, 0.064, 0.125)), k=0.05)            # sunken abdomen
-    core.union(Ellipsoid(v3(0, -0.030, 1.138), v3(0.120, 0.080, 0.086)), k=0.05, label=LAB['pelvis'])
+    core.union(Ellipsoid(v3(0, -0.030, 1.150), v3(0.118, 0.078, 0.078)), k=0.05, label=LAB['pelvis'])
     for s_ in (1, -1):
         core.union(Ellipsoid(v3(0.058 * s_, -0.080, 1.050), v3(0.056, 0.042, 0.066)), k=0.035, label=LAB['pelvis'])
         # erector columns (wasted) along the lower back
@@ -292,7 +298,9 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
         core.union(S.tube(pts, [0.017] * len(pts), k=0.01), k=0.03)
     # neck
     n0, n1 = v3(0, 0.030, 1.795), J['atlas'] + v3(0, 0.012, -0.004)
-    core.union(RoundCone(n0, n1, 0.050, 0.039), k=0.045, label=LAB['neck'])
+    core.union(RoundCone(n0, n1, 0.052, 0.039), k=0.045, label=LAB['neck'])
+    for s_ in (1, -1):   # trapezius: the neck flares into the shoulders
+        core.union(RoundCone(v3(0.012 * s_, 0.035, 1.905), v3(0.160 * s_, 0.010, 1.790), 0.024, 0.026), k=0.045, label=LAB['neck'])
     # shoulder caps (deltoids, wasted)
     for side in ('R', 'L'):
         Rs = J[side]
@@ -360,9 +368,10 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
         if back[1] > 0:
             back = -back
         hump = math.exp(-((t - 0.70) / 0.12) ** 2)
-        r = 0.0085 + 0.0050 * hump
+        necky = smoothstep(0.76, 0.86, t)
+        r = (0.0085 + 0.0050 * hump) * (1 - 0.25 * necky)
         surf, nrm = S.raycast(core, p, back, 0.2)
-        c = surf - back * r * (0.45 - 0.2 * hump)
+        c = surf - back * r * (0.45 - 0.2 * hump + 0.35 * necky)
         feat.union(Ellipsoid(c, v3(r * 1.25, r * 0.95, r * 1.35), frame_from(tan, back)), k=0.005)
     # scapulae (winged), clavicles
     for side, s_ in (('R', 1), ('L', -1)):
@@ -413,6 +422,7 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
     C, _ = on(core, [v3(0, 0.200, 1.915)], 0.013, 0.008)
     feat.union(Sphere(C[0], 0.013), k=0.008, label=LAB['neck'])        # larynx
     B.union(feat, k=0.0)
+    B.sub(Ellipsoid(v3(0, -0.005, 0.975), v3(0.028, 0.11, 0.075)), k=0.03)   # crotch arch between thighs
     # hollows (after features)
     for s_ in (1, -1):
         B.sub(Ellipsoid(v3(0.072 * s_, 0.092, 1.818), v3(0.030, 0.016, 0.014)), k=0.016)  # supraclavicular
@@ -421,44 +431,46 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
     # ======================= HEAD ============================================================
     hd = Group(LAB['head'])
     Rhead = rot((1, 0, 0), math.radians(-16))
-    hd.union(Ellipsoid(v3(0, 0.232, 2.178), v3(0.069, 0.112, 0.097), Rhead))
-    hd.union(Ellipsoid(v3(0, 0.166, 2.205), v3(0.060, 0.072, 0.072), Rhead), k=0.03)    # stretched occiput
-    hd.union(Ellipsoid(v3(0, 0.310, 2.118), v3(0.054, 0.052, 0.062)), k=0.03)          # midface
-    hd.union(Ellipsoid(v3(0, 0.320, 2.045), v3(0.035, 0.041, 0.058), rot((1, 0, 0), math.radians(-8))), k=0.028)
-    hd.union(Sphere(v3(0, 0.328, 1.994), 0.017), k=0.022)                              # chin
+    hd.union(Ellipsoid(v3(0, 0.226, 2.182), v3(0.070, 0.112, 0.098), Rhead))
+    hd.union(Ellipsoid(v3(0, 0.168, 2.204), v3(0.058, 0.070, 0.068), Rhead), k=0.06)    # stretched occiput
+    hd.union(Ellipsoid(v3(0, 0.298, 2.098), v3(0.053, 0.046, 0.100)), k=0.03)          # long face
+    hd.union(Ellipsoid(v3(0, 0.304, 2.030), v3(0.034, 0.040, 0.048)), k=0.022)         # lower face
+    hd.union(Sphere(v3(0, 0.322, 1.992), 0.0155), k=0.022)                             # pointed chin
     for s_ in (1, -1):
-        hd.union(Ellipsoid(v3(0.040 * s_, 0.268, 2.060), v3(0.016, 0.052, 0.028),
+        hd.union(Ellipsoid(v3(0.040 * s_, 0.262, 2.058), v3(0.016, 0.050, 0.028),
                            rot((1, 0, 0), math.radians(35))), k=0.03)                   # jaw sides
     hfeat = Group(LAB['head'])
+    C, _ = on(hd, [v3(0, 0.40, 2.150), v3(0, 0.40, 2.128), v3(0, 0.40, 2.108)], 0.006, 0.0035)
+    hfeat.union(S.tube(C, [0.0065, 0.0058, 0.0055]), k=0.006)                          # nasal bridge
     for s_ in (1, -1):
-        br = [v3(0.0, 0.40, 2.166), v3(0.028 * s_, 0.40, 2.172), v3(0.052 * s_, 0.38, 2.178)]
+        br = [v3(0.0, 0.40, 2.163), v3(0.026 * s_, 0.40, 2.170), v3(0.050 * s_, 0.38, 2.172)]
         C, _ = on(hd, br, 0.0095, 0.0055)
         hfeat.union(S.tube(C, [0.0085, 0.0095, 0.0085]), k=0.006)                      # brow ridge
-        C, _ = on(hd, [v3(0.052 * s_, 0.36, 2.113)], 0.014, 0.0055)
+        C, _ = on(hd, [v3(0.050 * s_, 0.36, 2.108)], 0.014, 0.0060)
         hfeat.union(Ellipsoid(C[0], v3(0.014, 0.022, 0.010)), k=0.012)                 # cheekbone
-        za = [v3(0.058 * s_, 0.33, 2.115), v3(0.067 * s_, 0.29, 2.122), v3(0.069 * s_, 0.255, 2.128)]
-        C, _ = on(hd, za, 0.0065, 0.004)
-        hfeat.union(S.tube(C, [0.0065, 0.006, 0.0055]), k=0.006)                      # zygomatic arch
-        jl = [v3(0.050 * s_, 0.24, 2.075), v3(0.044 * s_, 0.28, 2.035), v3(0.030 * s_, 0.315, 2.0), v3(0.012 * s_, 0.33, 1.988)]
+        za = [v3(0.057 * s_, 0.32, 2.110), v3(0.066 * s_, 0.285, 2.118), v3(0.069 * s_, 0.250, 2.124)]
+        C, _ = on(hd, za, 0.0065, 0.0022)
+        hfeat.union(S.tube(C, [0.0065, 0.006, 0.0050]), k=0.010)                      # zygomatic arch
+        jl = [v3(0.050 * s_, 0.235, 2.075), v3(0.044 * s_, 0.272, 2.035), v3(0.030 * s_, 0.305, 2.000), v3(0.010 * s_, 0.322, 1.986)]
         C, _ = on(hd, jl, 0.008, 0.0035)
         hfeat.union(S.tube(C, [0.008, 0.0085, 0.008, 0.007]), k=0.008)               # jaw edge
-        C, _ = on(hd, [v3(0.050 * s_, 0.205, 2.105)], 0.012, 0.006)
+        C, _ = on(hd, [v3(0.050 * s_, 0.200, 2.105)], 0.012, 0.006)
         hfeat.union(Sphere(C[0], 0.012), k=0.01)                                      # mastoid
-        gr = [v3(0.0098 * s_, 0.40, z) for z in np.linspace(1.998, 2.092, 5)]
+        gr = [v3(0.0098 * s_, 0.0, z) for z in np.linspace(1.998, 2.090, 5)]
         P = []
         for g_ in gr:
-            sp_, n_ = S.raycast(hd, g_ * v3(1, 0, 1) + v3(0, 0.30, 0), v3(0, 1, 0), 0.12)
+            sp_, n_ = S.raycast(hd, g_ + v3(0, 0.28, 0), v3(0, 1, 0), 0.12)
             P.append(sp_ - n_ * (0.0048 - 0.003))
         hfeat.union(S.tube(P, [0.0042, 0.0050, 0.0052, 0.0050, 0.0042]), k=0.005)    # gum ridges
     hd.union(hfeat, k=0.0)
     for s_ in (1, -1):
-        hd.sub(Ellipsoid(v3(0.030 * s_, 0.364, 2.140), v3(0.024, 0.020, 0.019)), k=0.013)   # sockets
-        hd.sub(Ellipsoid(v3(0.049 * s_, 0.330, 2.072), v3(0.017, 0.030, 0.022)), k=0.016)   # hollow cheeks
-        hd.sub(Ellipsoid(v3(0.072 * s_, 0.292, 2.172), v3(0.011, 0.032, 0.030)), k=0.018)   # temples
-        hd.sub(RoundCone(v3(0.0055 * s_, 0.366, 2.098), v3(0.0085 * s_, 0.360, 2.116), 0.0030, 0.0026), k=0.002)  # nostril slits
-    hd.sub(Ellipsoid(v3(0, 0.366, 2.045), v3(0.0042, 0.024, 0.050)), k=0.0015)     # mouth slit
-    hd.sub(Ellipsoid(v3(0, 0.336, 2.045), v3(0.0140, 0.024, 0.044)), k=0.005)      # mouth cavity
-    info['mouth'] = (v3(0, 0.36, 2.045), 0.050)
+        hd.sub(Ellipsoid(v3(0.030 * s_, 0.350, 2.138), v3(0.022, 0.019, 0.018)), k=0.013)   # sockets
+        hd.sub(Ellipsoid(v3(0.047 * s_, 0.316, 2.068), v3(0.016, 0.028, 0.024)), k=0.016)   # hollow cheeks
+        hd.sub(Ellipsoid(v3(0.072 * s_, 0.285, 2.172), v3(0.011, 0.032, 0.030)), k=0.018)   # temples
+        hd.sub(RoundCone(v3(0.0055 * s_, 0.350, 2.096), v3(0.0080 * s_, 0.344, 2.113), 0.0030, 0.0026), k=0.002)  # nostril slits
+    hd.sub(Ellipsoid(MOUTH_SLIT[0], MOUTH_SLIT[1]), k=0.0015)     # mouth slit
+    hd.sub(Ellipsoid(MOUTH_CAV[0], MOUTH_CAV[1]), k=0.005)        # mouth cavity
+    info['mouth'] = (MOUTH_SLIT[0], MOUTH_SLIT[1][2])
     # skull ear-holes: craters projected onto the real skull surface
     rng = np.random.RandomState(11)
     cand = []
@@ -481,19 +493,19 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
         r = 0.0030 + 0.0028 * rng.rand()
         cand.append((pp, nn[0], r))
     for p, nrm, r in cand:
-        hd.union(Sphere(p - nrm * r * 0.6, r * 1.75), k=0.005)
+        hd.union(Sphere(p - nrm * r * 1.25, r * 1.65), k=0.004)       # low swollen rim
     for p, nrm, r in cand:
-        hd.sub(Sphere(p + nrm * r * 0.25, r), k=0.0012)
+        hd.sub(Sphere(p + nrm * r * 0.05, r * 0.95), k=0.0012)        # the hole
     info['holes'] = cand
     B.union(hd, k=0.022)
 
     # ======================= EARS ============================================================
     ear_info = {}
     for side, s_, seed, notches, eholes in (
-        ('R', 1.0, 0.0, ((0.50, 1.0, 0.014, 0.016), (0.74, -1.0, 0.005, 0.022), (0.30, -1.0, 0.009, 0.009),
-                          (0.88, 1.0, 0.006, 0.007)), ((0.58, 0.15, 0.0060),)),
-        ('L', -1.0, 3.7, ((0.40, -1.0, 0.016, 0.018), (0.62, 1.0, 0.005, 0.026), (0.83, -1.0, 0.008, 0.008)),
-         ((0.36, -0.30, 0.0045), (0.70, 0.25, 0.004))),
+        ('R', 1.0, 0.0, ((0.46, 1.0, 0.011, 0.012), (0.70, -1.0, 0.004, 0.018), (0.28, -1.0, 0.008, 0.008),
+                          (0.86, 1.0, 0.005, 0.006)), ((0.55, 0.10, 0.0050),)),
+        ('L', -1.0, 3.7, ((0.38, -1.0, 0.012, 0.014), (0.60, 1.0, 0.004, 0.020), (0.80, -1.0, 0.006, 0.006)),
+         ((0.34, -0.25, 0.0040), (0.66, 0.20, 0.0035))),
     ):
         base, u, nrm = J[side]['ear']
         prim, axes, ridges = _ear_prim(base, u, nrm, s_, seed=seed, notches=notches, holes=eholes)
@@ -503,7 +515,7 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
             eg.union(S.tube(rp, list(np.linspace(0.0032, 0.0016, len(rp)))), k=0.003)
         B.union(eg, k=0.014)
         ear_info[side] = (base, axes)
-        B.sub(Sphere(base + v3(0.008 * s_, 0.010, -0.010), 0.0085), k=0.004)   # ear canal
+        B.sub(Sphere(base + v3(0.010 * s_, 0.012, -0.012), 0.0085), k=0.004)   # ear canal
     info['ears'] = ear_info
 
     # ======================= ARMS + HANDS ====================================================
@@ -626,4 +638,4 @@ def body(J, detail: bool = True) -> tuple[Group, dict]:
 
 
 def bounds(J):
-    return v3(-1.25, -0.40, -0.01), v3(1.25, 0.55, 2.36)
+    return v3(-1.25, -0.40, -0.01), v3(1.25, 0.55, 2.50)

@@ -35,7 +35,7 @@ def gauss(d, sigma):
     return np.exp(-(d / sigma) ** 2)
 
 
-def evaluate(P: np.ndarray, N: np.ndarray, region: np.ndarray, sk: hg.Skeleton, seed: int = 3):
+def evaluate(P: np.ndarray, N: np.ndarray, region: np.ndarray, sk: hg.Skeleton, life_line=None, seed: int = 3):
     """P, N: (n, 3) object space (right hand). region: (n, 3) R = cuff, G = cuff inside.
     Returns H (n,), albedo (n, 3) linear, roughness (n,)."""
     n = P.shape[0]
@@ -72,13 +72,13 @@ def evaluate(P: np.ndarray, N: np.ndarray, region: np.ndarray, sk: hg.Skeleton, 
     palm = skin & (seg_k < 0) | (skin & (seg_chain == 'thumb') & (seg_k == 0))
 
     # ------------------------------------------------------------------ base colours
-    c_back = srgb_to_lin([0.690, 0.560, 0.498])
-    c_palm = srgb_to_lin([0.775, 0.640, 0.575])
+    c_back = srgb_to_lin([0.655, 0.535, 0.478])
+    c_palm = srgb_to_lin([0.745, 0.615, 0.555])
     c_knuckle = srgb_to_lin([0.640, 0.475, 0.430])
     c_tip = srgb_to_lin([0.760, 0.565, 0.505])
-    c_nail = srgb_to_lin([0.770, 0.655, 0.615])
-    c_lunula = srgb_to_lin([0.835, 0.760, 0.720])
-    c_free = srgb_to_lin([0.860, 0.820, 0.730])
+    c_nail = srgb_to_lin([0.720, 0.585, 0.545])
+    c_lunula = srgb_to_lin([0.760, 0.650, 0.610])
+    c_free = srgb_to_lin([0.800, 0.745, 0.660])
     c_dirt = srgb_to_lin([0.230, 0.185, 0.150])
     c_vein = srgb_to_lin([0.560, 0.540, 0.570])
     c_scab = srgb_to_lin([0.420, 0.230, 0.190])
@@ -214,17 +214,17 @@ def evaluate(P: np.ndarray, N: np.ndarray, region: np.ndarray, sk: hg.Skeleton, 
         hn = 0.22 * MM * inside
         hn += 0.03 * MM * inside * (1 - (lx / np.maximum(wn, 1e-4)) ** 2)  # slight convexity
         groove = gauss(sdf - 0.25 * MM, 0.22 * MM) * top * on_tip
-        hn -= 0.16 * MM * groove
+        hn -= 0.11 * MM * groove
         fold = gauss(dd - (n0 - 0.9 * MM), 0.6 * MM) * smoothstep(1.0, 0.6, np.abs(lx) / np.maximum(wn, 1e-4)) * top * on_tip
         hn += 0.08 * MM * fold
         # faint longitudinal ridges on the plate
         hn += 0.012 * MM * inside * np.sin(lx / (0.55 * MM) * math.pi)
         hh += hn
-        cr -= 0.16 * MM * groove
+        cr -= 0.08 * MM * groove
         nail_w[idx] = inside
         lun = smoothstep(0.2, -0.2, ((dd - n0) / (0.26 * (n1 - n0))) ** 2 + (lx / (0.75 * wn)) ** 2 - 1)
         lunula_w[idx] = lun * inside
-        free_w[idx] = smoothstep(n1 - 1.5 * MM, n1 - 0.4 * MM, dd) * inside
+        free_w[idx] = smoothstep(n1 - 1.0 * MM, n1 - 0.2 * MM, dd) * inside * 0.85
         # grime: under the free edge, in the nail folds, in the knuckle wrinkles
         d_edge = smoothstep(n1 - 0.6 * MM, n1 + 0.2 * MM, dd) * top * on_tip * smoothstep(1.15, 0.8, np.abs(lx) / np.maximum(wn, 1e-4))
         dirt[idx] = np.maximum(dirt[idx], 0.75 * d_edge + 0.5 * groove)
@@ -242,9 +242,9 @@ def evaluate(P: np.ndarray, N: np.ndarray, region: np.ndarray, sk: hg.Skeleton, 
     cp = np.zeros(pidx.size)
     lines = [
         # (points, depth, sigma)
-        ([(0.043, 0.059), (0.032, 0.063), (0.020, 0.067), (0.008, 0.072), (-0.002, 0.077), (-0.010, 0.082), (-0.016, 0.088)], 0.42 * MM, 0.36 * MM),   # heart
-        ([(-0.041, 0.061), (-0.031, 0.058), (-0.019, 0.054), (-0.006, 0.050), (0.007, 0.045), (0.018, 0.040), (0.027, 0.035)], 0.40 * MM, 0.34 * MM),  # head
-        ([(-0.040, 0.062), (-0.031, 0.054), (-0.023, 0.045), (-0.017, 0.035), (-0.0125, 0.024), (-0.0095, 0.013), (-0.0085, 0.003)], 0.48 * MM, 0.38 * MM),  # life
+        ([(0.043, 0.059), (0.032, 0.063), (0.020, 0.067), (0.008, 0.072), (-0.002, 0.077), (-0.010, 0.082), (-0.016, 0.088)], 0.36 * MM, 0.42 * MM),   # heart
+        ([(-0.041, 0.061), (-0.031, 0.058), (-0.019, 0.054), (-0.006, 0.050), (0.007, 0.045), (0.018, 0.040), (0.027, 0.035)], 0.34 * MM, 0.40 * MM),  # head
+        (life_line or [(-0.040, 0.062), (-0.031, 0.054), (-0.023, 0.045), (-0.017, 0.035), (-0.0125, 0.024), (-0.0095, 0.013), (-0.0085, 0.003)], 0.30 * MM, 0.50 * MM),  # life
         ([(0.003, 0.010), (0.001, 0.025), (-0.001, 0.040), (-0.002, 0.050)], 0.14 * MM, 0.28 * MM),  # fate (faint)
         ([(0.030, 0.052), (0.020, 0.056), (0.012, 0.059)], 0.12 * MM, 0.25 * MM),  # small
         ([(-0.027, 0.0005), (-0.012, 0.0022), (0.000, 0.0026), (0.012, 0.0022), (0.028, 0.0005)], 0.30 * MM, 0.30 * MM),  # wrist 1
@@ -256,7 +256,7 @@ def evaluate(P: np.ndarray, N: np.ndarray, region: np.ndarray, sk: hg.Skeleton, 
         var = 0.7 + 0.3 * vnoise(np.c_[P[pidx] * 150.0] + 3 * li)
         g = -depth * gauss(d, sig) * taper * var * pal
         hp += g
-        cp += g
+        cp += 0.6 * g
     # fine palm lines (many small creases) + dorsal skin cells
     rid = ridged(P[pidx] / (1.6 * MM), 2)
     fine = -0.035 * MM * smoothstep(0.80, 0.97, rid) * pal
@@ -283,8 +283,8 @@ def evaluate(P: np.ndarray, N: np.ndarray, region: np.ndarray, sk: hg.Skeleton, 
     for vi, pts in enumerate(veins):
         d, arc = seg_dist2d(px + 0.0007 * vnoise(np.c_[P[pidx] * 160.0] + 20 + vi), py, pts)
         fade = smoothstep(0.0, 0.1, arc) * smoothstep(1.0, 0.9, arc) * (0.75 if vi >= 2 else 1.0)
-        g = gauss(d, 1.15 * MM) * fade * dor
-        hp += 0.34 * MM * g
+        g = gauss(d, 1.35 * MM) * fade * dor
+        hp += 0.22 * MM * g
         vein_w[pidx] = np.maximum(vein_w[pidx], g)
     # scratches (weathered): thin scabbed lines on the back of the hand
     scr = [
@@ -317,7 +317,7 @@ def evaluate(P: np.ndarray, N: np.ndarray, region: np.ndarray, sk: hg.Skeleton, 
     base = base * (1 + np.array([0.03, -0.01, -0.03]) * fbm(P / (14 * MM) + 9.1, 2)[:, None])
     base = base * (1 - redness[:, None] * 0.55) + c_knuckle * redness[:, None] * 0.55
     base = base * (1 - tipness[:, None] * 0.5) + c_tip * tipness[:, None] * 0.5
-    base = base * (1 - vein_w[:, None] * 0.35) + c_vein * vein_w[:, None] * 0.35
+    base = base * (1 - vein_w[:, None] * 0.22) + c_vein * vein_w[:, None] * 0.22
     # nails
     nw = nail_w[:, None]
     ncol = c_nail * (1 - lunula_w[:, None]) + c_lunula * lunula_w[:, None]
@@ -326,7 +326,7 @@ def evaluate(P: np.ndarray, N: np.ndarray, region: np.ndarray, sk: hg.Skeleton, 
     base = base * (1 - nw) + ncol * nw
     # cavity darkening from creases
     cav = smoothstep(0.0, -0.32 * MM, crease)[:, None]
-    base = base * (1 - 0.30 * cav)
+    base = base * (1 - 0.22 * cav)
     # grime: in deep creases on the back / knuckles, plus random smudges
     smudge = smoothstep(0.35, 0.75, fbm(P / (6 * MM) + 13.0, 3)) * (1 - palmness) * 0.35
     dirt_t = np.clip(dirt + cav[:, 0] * 0.5 * (1 - palmness * 0.5) + smudge * 0.4, 0, 1)
@@ -334,7 +334,7 @@ def evaluate(P: np.ndarray, N: np.ndarray, region: np.ndarray, sk: hg.Skeleton, 
     base = base * (1 - scab_w[:, None]) + c_scab * scab_w[:, None]
     # slight overall desaturation (reads under moonlight and a white flash)
     lum = (base @ np.array([0.2126, 0.7152, 0.0722]))[:, None]
-    base = lum + (base - lum) * 0.86
+    base = lum + (base - lum) * 0.82
     col[skin] = base[skin]
     rough = rough + 0.10 * dirt_t + 0.05 * cav[:, 0] - 0.04 * palmness + 0.035 * fbm(P / (1.5 * MM) + 2.0, 2)
 

@@ -237,8 +237,8 @@ def unwrap(ob: bpy.types.Object, hm: hg.HandMesh) -> None:
     common.activate(ob)
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.mesh.select_all(action='SELECT')
-    bpy.ops.uv.unwrap(method='CONFORMAL', margin=0.004)
-    bpy.ops.uv.pack_islands(rotate=True, margin=0.004)
+    bpy.ops.uv.unwrap(method='ANGLE_BASED', margin=0.003)
+    bpy.ops.uv.pack_islands(rotate=True, margin=0.003)
     bpy.ops.object.mode_set(mode='OBJECT')
 
 
@@ -256,7 +256,7 @@ def make_textures(ob: bpy.types.Object, hm: hg.HandMesh, sk: hg.Skeleton, size: 
     m = td['mask']
     print(f'[hands] texel coverage {m.mean() * 100:.1f}%')
     H, C, R = hands_detail.evaluate(td['P'][m].astype(np.float64), td['N'][m].astype(np.float64),
-                                    td['region'][m], sk)
+                                    td['region'][m], sk, life_line=hm.meta.get('life_line'))
     Hf = np.zeros(m.shape)
     Hf[m] = H
     Cf = np.zeros(m.shape + (3,))
@@ -265,6 +265,15 @@ def make_textures(ob: bpy.types.Object, hm: hg.HandMesh, sk: hg.Skeleton, size: 
     Rf[m] = R
     objn = ht.height_to_object_normal(Hf, td['P'].astype(np.float64), td['N'].astype(np.float64), m,
                                       max_step=0.0025 * 1024 / size)
+    if os.environ.get('HANDS_DEBUG_TEX'):
+        dots = np.sum(objn * td['N'], -1)
+        bad = m & (dots < 0.75)
+        print(f'[hands] steep normal texels: {bad.sum()}')
+        if bad.any():
+            Pb = td['P'][bad]
+            Hb = Hf[bad]
+            for i in np.linspace(0, len(Pb) - 1, min(30, len(Pb))).astype(int):
+                print('[hands]   ', np.round(Pb[i], 4), round(float(Hb[i]) * 1000, 3), 'mm', round(float(dots[bad][i]), 2))
     objn = ht.dilate(objn, m, 16)
     objn /= np.maximum(np.linalg.norm(objn, axis=-1, keepdims=True), 1e-6)
     Cf = ht.dilate(Cf, m, 16)
@@ -277,7 +286,11 @@ def make_textures(ob: bpy.types.Object, hm: hg.HandMesh, sk: hg.Skeleton, size: 
     if os.environ.get('HANDS_DEBUG_TEX'):
         for img in (color, rough, normal):
             hu.save_png(img.copy(), os.path.join(SCRATCH, f'tex_{img.name}.png'))
+    for nm in ('cover', 'region'):
+        if nm in ob.data.color_attributes:
+            ob.data.color_attributes.remove(ob.data.color_attributes[nm])
     mat = hu.image_material('hand_skin', color, rough, normal)
+    mat.use_backface_culling = True
     common.assign(ob, mat)
     return mat
 
@@ -308,9 +321,16 @@ def tex_review(ob, arm):
         'palm': (c + Vector((0.0, -0.06, -0.30)), Vector((0, 1, 0))),
         'vr': (c + Vector((0.12, -0.24, 0.20)), Vector((0, 0, 1))),
         'tipcu': (Vector((-0.010, 0.15, 0.006)) + Vector((0.05, 0.10, 0.10)), Vector((0, 0, 1))),
+        'thenar': (Vector((-0.014, 0.014, -0.016)) + Vector((0.01, -0.035, -0.085)), Vector((0, 1, 0))),
     }.items():
-        tgt = Vector((-0.010, 0.15, 0.006)) if k == 'tipcu' else c
+        tgt = {'tipcu': Vector((-0.010, 0.15, 0.006)), 'thenar': Vector((-0.014, 0.014, -0.016))}.get(k, c)
         hu.render_view(os.path.join(SCRATCH, f'tex_{k}.png'), tgt, pos, up=up, lens=60, size=480, samples=16)
+    if os.environ.get('HANDS_WIRE'):
+        w = wire_overlay(ob)
+        w.modifiers.remove(w.modifiers['rig']) if 'rig' in w.modifiers else None
+        tgt = Vector((-0.014, 0.014, -0.016))
+        hu.render_view(os.path.join(SCRATCH, 'tex_thenar_wire.png'), tgt, tgt + Vector((0.01, -0.035, -0.085)),
+                       up=Vector((0, 1, 0)), lens=60, size=480, samples=8)
 
 
 def renders(arm, ob, arm_l, ob_l):
@@ -337,7 +357,7 @@ def renders(arm, ob, arm_l, ob_l):
 def build() -> None:
     common.reset()
     hm, sk = hg.build_hand()
-    ob = make_mesh(hm, 'hand_right')
+    ob = make_mesh(hm, 'hand_right_mesh')
     print(f'[hands] low-poly: {len(hm.verts)} verts, {common.tri_count([ob])} tris')
     if STAGE == 'shape':
         if os.environ.get('HANDS_WIRE'):
@@ -370,4 +390,5 @@ def build() -> None:
         apply_curls(o, [0] * 5)
     common.export_glb('hand_right', [arm])
     common.export_glb('hand_left', [arm_l])
-    renders(arm, ob, arm_l, ob_l)
+    if STAGE != 'export':
+        renders(arm, ob, arm_l, ob_l)

@@ -189,7 +189,7 @@ THUMB_PROFILE = {
            (2.0, 0.0080), (2.25, 0.0091), (2.6, 0.0095), (2.86, 0.0080), (2.97, 0.0046)],
 }
 
-FINGER_STATIONS = [0.45, 0.85, 1.0, 1.2, 1.75, 2.0, 2.25, 2.6, 2.86, 2.965]
+FINGER_STATIONS = [0.64, 0.86, 1.0, 1.2, 1.75, 2.0, 2.25, 2.6, 2.86, 2.965]
 THUMB_STATIONS = [0.86, 1.0, 1.2, 1.6, 1.88, 2.0, 2.25, 2.6, 2.86, 2.965]
 
 
@@ -218,6 +218,7 @@ class HandMesh:
     seams: set[tuple[int, int]] = field(default_factory=set)
     # per vertex: (chain name or 'palm', station s) for detail generation
     station: list[tuple[str, float]] = field(default_factory=list)
+    meta: dict = field(default_factory=dict)
 
     def add(self, p: Vector, w: dict[str, float], region='skin', station=('palm', 0.0)) -> int:
         self.verts.append(p.copy())
@@ -272,10 +273,9 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
             cu = math.cos(a)
             # offset along the finger (m): dorsal centre +6 mm, palmar centre +21 mm, sides ~+17 mm
             if sv > 0:
-                off = lerp(0.017, 0.0065, abs(sv) ** 1.5)
+                s = lerp(0.37, 0.15, abs(sv) ** 1.5)
             else:
-                off = lerp(0.018, 0.0205, abs(sv) ** 1.2)
-            s = off / c.length(0)
+                s = lerp(0.40, 0.44, abs(sv) ** 1.2)
             p, d, u, v = c.frame(s)
             hw = interp(FINGER_PROFILE['hw'], s) * c.scale * 1.04
             hd = interp(FINGER_PROFILE['hd'], s) * c.scale * 1.05
@@ -330,12 +330,12 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
         j = 4 * f
         T10[j] = T10[j] + v3(0, 0.0012, -0.0016)
         B10[j] = B10[j] + v3(0, 0.0004, 0.0012)
-        T9[j] = T9[j] + v3(0, 0.0, -0.0022)
+        T9[j] = T9[j] + v3(0, 0.0, -0.0012)
 
     # ---------------- palm rings r0..r8 (analytic) -----------------
     NT = 4 * K + 1  # 17
     # proximal -> distal ring y (at the middle finger), and blend weight toward the knuckle arc
-    ring_y = [-0.040, -0.026, -0.012, 0.004, 0.0205, 0.0355, 0.0490, 0.0610, 0.0718]
+    ring_y = [-0.040, -0.026, -0.011, 0.007, 0.0230, 0.0380, 0.0525, 0.0635, 0.0725]
     arc_w = [0.0, 0.0, 0.0, 0.05, 0.15, 0.32, 0.55, 0.78, 0.92]
 
     mcp_x = [c.joints[0].x for c in fingers]
@@ -361,11 +361,11 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
     z_bot_c = [-0.0185, -0.0178, -0.0168, -0.0150, -0.0128, -0.0112, -0.0106, -0.0108, -0.0115]
     z_bot_u = [-0.0185, -0.0178, -0.0168, -0.0166, -0.0160, -0.0152, -0.0140, -0.0128, -0.0124]
     # thumb hole: rings 3..7, explicit radial dorsal edge (T0) and thenar crease (B0)
-    HOLE = (3, 7)
-    T0_hole = {3: v3(-0.0300, 0.0040, 0.0118), 4: v3(-0.0336, 0.0200, 0.0103), 5: v3(-0.0368, 0.0350, 0.0088),
-               6: v3(-0.0396, 0.0486, 0.0071), 7: v3(-0.0420, 0.0604, 0.0052)}
-    B0_hole = {3: v3(-0.0080, 0.0050, -0.0168), 4: v3(-0.0118, 0.0215, -0.0150), 5: v3(-0.0175, 0.0360, -0.0134),
-               6: v3(-0.0262, 0.0490, -0.0122), 7: v3(-0.0372, 0.0602, -0.0098)}
+    HOLE = (2, 6)
+    T0_hole = {2: v3(-0.0288, -0.0110, 0.0136), 3: v3(-0.0318, 0.0070, 0.0119), 4: v3(-0.0350, 0.0230, 0.0101),
+               5: v3(-0.0384, 0.0380, 0.0083), 6: v3(-0.0414, 0.0540, 0.0060)}
+    B0_hole = {2: v3(-0.0085, -0.0110, -0.0180), 3: v3(-0.0095, 0.0070, -0.0166), 4: v3(-0.0128, 0.0230, -0.0149),
+               5: v3(-0.0198, 0.0380, -0.0133), 6: v3(-0.0322, 0.0530, -0.0110)}
 
     def palm_ring(r: int) -> tuple[list[Vector], list[Vector]]:
         yb = ring_y[r]
@@ -389,7 +389,12 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
         if HOLE[0] <= r <= HOLE[1]:
             T[0] = T0_hole[r]
         B = []
-        xb0 = B0_hole[r].x if HOLE[0] <= r <= HOLE[1] else xr + (0.0016 if r < 3 else -0.0005)
+        if HOLE[0] <= r <= HOLE[1]:
+            xb0 = B0_hole[r].x
+        elif r < HOLE[0]:
+            xb0 = lerp(xr, B0_hole[HOLE[0]].x, 0.42 + 0.06 * r)   # thenar crease starts mid-wrist
+        else:
+            xb0 = xr - 0.0005
         xb1 = xu + 0.0008
         for j in range(NT):
             g = lerp(j / (NT - 1), gB[j], blend)
@@ -403,9 +408,9 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
                 z = lerp(z, z_bot_u[r] * 0.92, 1 - smoothstep(0.0, 0.25, q))
             edge_u = max(0.0, q - 0.86) / 0.14
             z += 0.0052 * edge_u ** 1.5
-            if not (HOLE[0] <= r <= HOLE[1]):
+            if r > HOLE[1]:
                 edge_r = max(0.0, 0.12 - q) / 0.12
-                z += (0.0062 if r < 3 else 0.0040) * edge_r ** 1.5
+                z += 0.0040 * edge_r ** 1.5
             y = yb + w * arc_dy(x) + 0.0015 * w
             B.append(v3(x, y, z))
         if HOLE[0] <= r <= HOLE[1]:
@@ -417,8 +422,11 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
     rows.append((T10, B10))
     # r8 (just proximal to the knuckles): radial edge = first web space
     T8, B8 = rows[8]
-    T8[0] = v3(-0.0436, 0.0716, 0.0040)
-    B8[0] = v3(-0.0430, 0.0712, -0.0060)
+    T8[0] = v3(-0.0436, 0.0728, 0.0042)
+    B8[0] = v3(-0.0430, 0.0724, -0.0058)
+    T7, B7 = rows[7]
+    T7[0] = v3(-0.0432, 0.0638, 0.0046)
+    B7[0] = v3(-0.0412, 0.0632, -0.0078)
 
     NPR = len(rows)  # 11 palm rings
 
@@ -477,8 +485,7 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
     # seams along the dorsal edges (T0, T16), except where the thumb grows out
     for r in range(NPR - 1):
         a, b = palm_ids[r][0], palm_ids[r + 1][0]
-        if not (HOLE[0] <= r < HOLE[1]):
-            hm.seam(a[0], b[0])
+        hm.seam(a[0], b[0])
         hm.seam(a[-1], b[-1])
 
     # ---------------- fingers -----------------
@@ -490,7 +497,7 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
         # tissue sits slightly palmar of the bone axis
         return ring_points(p, u, v, hw, hd, hp, n=n_exp, center_off=-0.0006 * c.scale)
 
-    def tube(c: Chain, ring0: list[int], stations: list[float], profile, n_exp: float, pre=None):
+    def tube(c: Chain, ring0: list[int], stations: list[float], profile, n_exp: float, pre=None, seam_line=None):
         prev = ring0
         rings = [ring0]
         for pts, w, st in (pre or []):
@@ -517,12 +524,14 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
         for i in range(2):
             for jj in range(3):
                 hm.faces.append((G[(i, jj)], G[(i + 1, jj)], G[(i + 1, jj + 1)], G[(i, jj + 1)]))
-        # seams: along the T0 and T4 lines, and around the tip between top faces and the cap
+        # UV seams: base ring + one longitudinal line (each digit unwraps as its own compact strip;
+        # detail is evaluated in 3D, so seams don't show)
+        line = seam_line if seam_line is not None else K
+        r0 = rings[0]
+        for i in range(NR):
+            hm.seam(r0[i], r0[(i + 1) % NR])
         for ra, rb in zip(rings, rings[1:]):
-            hm.seam(ra[0], rb[0])
-            hm.seam(ra[K], rb[K])
-        for a, b in ((T0, T1), (T1, T2), (T2, T3), (T3, T4)):
-            hm.seam(a, b)
+            hm.seam(ra[line], rb[line])
         return rings
 
     for fi, c in enumerate(fingers):
@@ -539,17 +548,18 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
     mcp_ring = station_ring(th, THUMB_STATIONS[0], THUMB_PROFILE, 2.3)
     n_h = v3(-0.74, -0.05, -0.67).normalized()
     pre = []
-    for t, bulge, wt in ((0.36, 0.0072, 0.62), (0.70, 0.0042, 0.90)):
+    for t, bulge, wt in ((0.33, 0.0070, 0.62), (0.62, 0.0036, 0.90)):
         pts = []
         for i in range(NR):
             a_ = hm.verts[hole[i]]
             b_ = mcp_ring[i]
             q = a_.lerp(b_, t)
             sv = math.sin(math.radians(RING_PHI[i]))
-            q = q + n_h * (bulge * (1.0 if sv < 0 else 0.6))
+            web_side = 0.35 if i in (K - 1, K, K + 1, K + 2) else 1.0   # toward the index: thin web
+            q = q + n_h * (bulge * (1.0 if sv < 0 else 0.6) * web_side)
             pts.append(q)
         pre.append((pts, {'thumb_1': wt, 'wrist': 1 - wt}, t * THUMB_STATIONS[0]))
-    rings_th = tube(th, hole, THUMB_STATIONS, THUMB_PROFILE, 2.3, pre=pre)
+    rings_th = tube(th, hole, THUMB_STATIONS, THUMB_PROFILE, 2.3, pre=pre, seam_line=K + 1)
 
     # ---------------- relax -----------------
     # even out the palm / thenar quads without changing the shape (tangential), then soften the
@@ -569,6 +579,10 @@ def build_hand(sk: Skeleton | None = None) -> tuple[HandMesh, Skeleton]:
         web.add(vid)
     relax(hm, palm_set | thenar_set, iters=6, factor=0.45, tangential=True)
     relax(hm, web, iters=3, factor=0.35, tangential=False)
+
+    # the thenar crease ("life line") runs exactly along the palm / thumb junction
+    life = [hm.verts[palm_ids[r][1][0]] for r in range(HOLE[1] + 1, HOLE[0] - 1, -1)]
+    hm.meta['life_line'] = [(p.x, p.y) for p in life]
 
     # ---------------- cuff (knit sleeve end) -----------------
     build_cuff(hm, rows[2])
@@ -654,9 +668,11 @@ def build_cuff(hm: HandMesh, wrist_rows) -> None:
     ci = hm.add(c + v3(0, 0.004, 0), {'wrist': 1.0}, region='cuff', station=('cuff', len(profile)))
     for i in range(N):
         hm.faces.append((last[i], last[(i + 1) % N], ci))
-    # one seam line along the underside so the cuff unwraps as a strip
+    # one seam line along the underside so the cuff unwraps as a strip; the hidden cap is its own island
     for a, b in zip(rings, rings[1:]):
         hm.seam(a[N * 3 // 4], b[N * 3 // 4])
+    for i in range(N):
+        hm.seam(last[i], last[(i + 1) % N])
 
 
 def build() -> None:

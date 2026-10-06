@@ -22,6 +22,7 @@ from __future__ import annotations
 import math
 import os
 import random
+import time
 
 import bpy  # noqa: I001 (bpy must be imported before bmesh/mathutils)
 import bmesh
@@ -352,13 +353,30 @@ DUST = hexc('8a847a')
 GRIME = hexc('120e0a')
 
 
+# Hard-surface materials read AO / small AO / edge from a per-piece mask texture (baked once by
+# Piece.finish) instead of ray-tracing them in every pass. Soft (high->low) materials stay inline.
+MASK_AO, MASK_AO_SMALL, MASK_BEVEL = 0.12, 0.03, 0.006
+
+
 class Masks:
     """Geometry-driven masks every material uses (cached per graph)."""
 
-    def __init__(self, g: G, bevel_r=0.006, ao_dist=0.12):
+    def __init__(self, g: G, bevel_r=0.006, ao_dist=0.12, inline=False):
         self.g = g
         self.bevel_r = bevel_r
         self.ao_dist = ao_dist
+        self.inline = inline
+        g.mat['inline_masks'] = bool(inline)
+
+    def _ch(self, i):
+        g = self.g
+        if 'maskimg' not in g._cache:
+            uvn = g.node('ShaderNodeUVMap')
+            n = g.node('ShaderNodeTexImage', {'Vector': uvn.outputs['UV']}, interpolation='Linear', extension='EXTEND')
+            n.name = '__maskimg__'
+            sp = g.node('ShaderNodeSeparateColor', {'Color': n.outputs['Color']})
+            g._cache['maskimg'] = sp
+        return g._cache['maskimg'].outputs[i]
 
     @property
     def nrm(self):
@@ -376,12 +394,18 @@ class Masks:
     def edge(self):
         g = self.g
         if 'edge' not in g._cache:
-            d = g.v('DOT_PRODUCT', g.bevel(self.bevel_r), g.geo('True Normal'))
-            g._cache['edge'] = g.rng(d, 0.985, 0.80, smooth=True)
+            if self.inline:
+                d = g.v('DOT_PRODUCT', g.bevel(self.bevel_r), g.geo('True Normal'))
+                g._cache['edge'] = g.rng(d, 0.985, 0.80, smooth=True)
+            else:
+                g._cache['edge'] = self._ch(2)
         return g._cache['edge']
 
     def ao(self):
-        return self.g.ao(self.ao_dist)
+        return self.g.ao(self.ao_dist) if self.inline else self._ch(0)
+
+    def ao_small(self):
+        return self.g.ao(MASK_AO_SMALL) if self.inline else self._ch(1)
 
     def cavity(self, lo=0.45, hi=0.98):
         return self.g.rng(self.ao(), hi, lo)
@@ -390,7 +414,7 @@ class Masks:
         """Edge mask restricted to outside (convex) edges."""
         g = self.g
         if 'convex' not in g._cache:
-            g._cache['convex'] = g.mul(self.edge(), g.rng(g.ao(0.03), 0.75, 0.95))
+            g._cache['convex'] = g.mul(self.edge(), g.rng(self.ao_small(), 0.75, 0.95))
         return g._cache['convex']
 
     def z(self):
@@ -611,7 +635,7 @@ def mat_fabric(name, base, alt=None, *, pattern='tweed', fade=0.4, stains=0.5, d
     """Upholstery / bedding. Reads optional 'tear' attribute (1 = hole showing foam)."""
     mat = new_material(name)
     g = G(mat)
-    mk = Masks(g, bevel_r, ao_dist)
+    mk = Masks(g, bevel_r, ao_dist, inline=True)
     pos = g.pos()
     alt = alt or tuple(c * 0.7 for c in base)
     off = (seed, seed * 2, 1.0)
@@ -824,11 +848,11 @@ def mat_glass(name, tint=(0.02, 0.025, 0.02), *, dust=0.8, grime=0.6, seed=0.0):
 
 
 def mat_plain(name, color, rough=0.8, *, dust=0.4, grime=0.8, noise_amt=0.2, seed=0.0, metal=0.0,
-              wear=0.0, period=None, bevel_r=0.005):
+              wear=0.0, period=None, bevel_r=0.005, inline=False):
     """Generic matte material (felt, rubber, paper, cardboard...) with the aging stack."""
     mat = new_material(name)
     g = G(mat, period)
-    mk = Masks(g, bevel_r, 0.1)
+    mk = Masks(g, bevel_r, 0.1, inline=inline)
     pos = g.pos()
     n = g.noise(pos, 12.0, 3, 0.6, offset=(seed, 0, 0))
     col = g.mix(g.mul(g.rng(n, 0.3, 0.7), noise_amt), color, tuple(c * 0.6 for c in color))
@@ -1342,16 +1366,12 @@ class Piece:
         return self.soft(low, high, ext)
 
     def decal_group(self, lows, decals, ext=0.004):
-        """Bake `lows` from (copies of themselves + decal meshes) so stencils/labels land in the texture."""
-        highs = []
+        """Bake `lows` from (copies of themselves + decal meshes) so stencils/labels land in the texture.
+        The copies are made after UV layout (so they can sample the mask texture)."""
         for lo in lows:
-            cp = lo.copy()
-            cp.data = lo.data.copy()
-            bpy.context.scene.collection.objects.link(cp)
-            highs.append(cp)
             if lo in self.hard:
                 self.hard.remove(lo)
-        self.groups.append({'low': list(lows), 'high': highs + list(decals), 'ext': ext, 'decal': True})
+        self.groups.append({'low': list(lows), 'high': list(decals), 'ext': ext, 'decal': True})
 
     # -- pipeline ---------------------------------------------------------------------------
     def finish(self, *, tex=1024, tileable=False, back_hidden=True, fit=None, extras=None, preview_yaw=35,
@@ -1370,7 +1390,8 @@ class Piece:
             if grp.get('decal'):
                 prep_hard_normals(lo)
             grp['L'] = lo
-            grp['Hi'] = join_all(grp['high'], f'{name}_Hi{gi}')
+            if not grp.get('decal'):
+                grp['Hi'] = join_all(grp['high'], f'{name}_Hi{gi}')
             lows.append(lo)
 
         parts = ([hard] if hard else []) + lows
@@ -1388,6 +1409,18 @@ class Piece:
         hard = pieces[0] if self.hard else None
         for gi, grp in enumerate(self.groups):
             grp['L'] = pieces[gi + (1 if self.hard else 0)]
+            if grp.get('decal'):
+                cp = grp['L'].copy()
+                cp.data = grp['L'].data.copy()
+                bpy.context.scene.collection.objects.link(cp)
+                grp['Hi'] = join_all([cp] + grp['high'], f'{name}_Hi{gi}')
+
+        # --- shared AO/edge mask texture for hard-surface materials --------------------------------
+        mask_objs = ([hard] if hard is not None else []) + [g_['L'] for g_ in self.groups if g_.get('decal')]
+        t0 = time.time()
+        if mask_objs:
+            bake_masks(mask_objs, size, samples)
+        print(f'[{self.name}] masks baked in {time.time() - t0:.1f}s', flush=True)
 
         # --- bake ----------------------------------------------------------------------------
         all_mats = set()
@@ -1407,10 +1440,13 @@ class Piece:
                 tmp = bpy.data.images.new(f'{name}_{key}_tmp', size, size, alpha=True, float_buffer=key == 'normal')
                 if key != 'color':
                     tmp.colorspace_settings.name = 'Non-Color'
+                t0 = time.time()
                 _bake_pass(key, tmp, lo_, hi_, ext_, 0, clear=True)
+                t1 = time.time()
                 px = np.empty(size * size * 4, dtype=np.float32)
                 tmp.pixels.foreach_get(px)
                 a = uv_mask(lo_, size).ravel() & ~cover
+                print(f'   bake {key} {lo_.name}: {t1 - t0:.1f}s, mask {time.time() - t1:.1f}s', flush=True)
                 idx = np.repeat(a, 4)
                 acc[idx] = px[idx]
                 cover |= a
@@ -1735,10 +1771,86 @@ def _target(mats, img):
         nt.nodes.active = node
 
 
+def mask_material():
+    """Emission = (AO 12 cm, AO 3 cm, bevel-edge mask): baked once, sampled by hard materials."""
+    mat = new_material('__mask_mat__')
+    g = G(mat)
+    d = g.v('DOT_PRODUCT', g.bevel(MASK_BEVEL), g.geo('True Normal'))
+    edge = g.rng(d, 0.985, 0.80, smooth=True)
+    col = g.comb(g.ao(MASK_AO), g.ao(MASK_AO_SMALL), edge)
+    em = g.node('ShaderNodeEmission', {'Color': col, 'Strength': 1.0})
+    g.nt.links.new(em.outputs[0], g.out.inputs['Surface'])
+    return mat
+
+
+def bake_masks(objs, size, samples):
+    """Bake the shared mask texture for the given (hard-surface) objects."""
+    img = bpy.data.images.new('__masks__', size, size, alpha=False)
+    img.colorspace_settings.name = 'Non-Color'
+    acc = np.zeros(size * size * 4, dtype=np.float32)
+    cover = np.zeros(size * size, dtype=bool)
+    mm = mask_material()
+    sc = bpy.context.scene
+    old_samples = sc.cycles.samples
+    sc.cycles.samples = samples
+    for o in objs:
+        saved = list(o.data.materials)
+        idx = np.zeros(len(o.data.polygons), dtype=np.int32)
+        o.data.polygons.foreach_get('material_index', idx)
+        o.data.materials.clear()
+        o.data.materials.append(mm)
+        o.data.polygons.foreach_set('material_index', np.zeros_like(idx))
+        tmp = bpy.data.images.new('__masks_tmp__', size, size, alpha=True)
+        tmp.colorspace_settings.name = 'Non-Color'
+        _target([mm], tmp)
+        activate(o)
+        bpy.ops.object.bake(type='EMIT', margin=0, use_clear=True, target='IMAGE_TEXTURES', use_selected_to_active=False)
+        px = np.empty(size * size * 4, dtype=np.float32)
+        tmp.pixels.foreach_get(px)
+        a = uv_mask(o, size).ravel() & ~cover
+        ii = np.repeat(a, 4)
+        acc[ii] = px[ii]
+        cover |= a
+        bpy.data.images.remove(tmp)
+        o.data.materials.clear()
+        for m in saved:
+            o.data.materials.append(m)
+        o.data.polygons.foreach_set('material_index', idx)
+    sc.cycles.samples = old_samples
+    acc = dilate(acc.reshape(size, size, 4), cover.reshape(size, size), 6).ravel()
+    acc[3::4] = 1.0
+    img.pixels.foreach_set(acc)
+    img.pack()
+    for m in bpy.data.materials:
+        if m.node_tree:
+            n = m.node_tree.nodes.get('__maskimg__')
+            if n is not None:
+                n.image = img
+    return img
+
+
+def _isolate(mats, key):
+    """Unlink the BSDF inputs a pass doesn't need, so Cycles only evaluates the relevant subtree."""
+    keep = {'color': 'Base Color', 'rough': 'Roughness', 'normal': 'Normal'}.get(key)
+    saved = []
+    for mat in mats:
+        nt = mat.node_tree
+        b = next((n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+        if b is None:
+            continue
+        for sock_name in ('Base Color', 'Roughness', 'Normal'):
+            sock = b.inputs[sock_name]
+            if sock_name != keep and sock.is_linked:
+                saved.append((nt, sock, sock.links[0].from_socket))
+                nt.links.remove(sock.links[0])
+    return saved
+
+
 def _bake_pass(key, img, low, high, ext, margin, clear):
     mats = list(low.data.materials) + (list(high.data.materials) if high else [])
     _target(set(mats), img)
     restore = []
+    isolated = _isolate(set(mats), key)
     if key == 'metal':
         for mat in set(mats):
             nt = mat.node_tree
@@ -1766,6 +1878,8 @@ def _bake_pass(key, img, low, high, ext, margin, clear):
         if old is not None:
             nt.links.new(old, out.inputs['Surface'])
         nt.nodes.remove(em)
+    for nt, sock, src in isolated:
+        nt.links.new(src, sock)
 
 
 def build_final_material(name, imgs, size):

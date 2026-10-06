@@ -1,0 +1,111 @@
+/**
+ * Blender-made GLB models (public/models/*.glb, built by art/build.py).
+ *
+ * Models are optional at runtime: anything that fails to load falls back to the procedural
+ * geometry built in code, so the game always runs (and tests don't need the files).
+ */
+
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { ensureIndexed } from './util';
+
+export interface ModelAsset {
+  name: string;
+  scene: THREE.Group;
+  animations: THREE.AnimationClip[];
+  /** glTF extras of the root node(s), merged (e.g. size, tileable, walkSpeed, curlAxis). */
+  extras: Record<string, unknown>;
+}
+
+const MODEL_BASE = `${import.meta.env.BASE_URL}models/`;
+
+export class ModelLibrary {
+  private readonly models = new Map<string, ModelAsset>();
+  private readonly loader = new GLTFLoader();
+
+  /** Load the given models in parallel. Missing/broken files are skipped with a warning. */
+  async load(names: readonly string[]): Promise<void> {
+    await Promise.all(
+      names.map(async (name) => {
+        if (this.models.has(name)) return;
+        try {
+          const gltf = await this.loader.loadAsync(`${MODEL_BASE}${name}.glb`);
+          const extras: Record<string, unknown> = {};
+          gltf.scene.traverse((o) => Object.assign(extras, o.userData));
+          this.models.set(name, { name, scene: gltf.scene, animations: gltf.animations, extras });
+        } catch (err) {
+          console.warn(`[models] ${name}.glb not loaded, using the built-in fallback`, err);
+        }
+      }),
+    );
+  }
+
+  has(name: string): boolean {
+    return this.models.has(name);
+  }
+
+  get(name: string): ModelAsset | undefined {
+    return this.models.get(name);
+  }
+
+  /** A fresh, independent copy (skinned meshes get their own skeleton). Shares geometry/materials. */
+  instance(name: string): THREE.Object3D | null {
+    const asset = this.models.get(name);
+    return asset ? cloneSkinned(asset.scene) : null;
+  }
+
+  names(): string[] {
+    return [...this.models.keys()];
+  }
+}
+
+const _v = new THREE.Vector3();
+
+/**
+ * Append world-space, position+normal-only copies of every visible mesh under `root` in its
+ * CURRENT pose (skinning applied on the CPU). Used to freeze a model into a flash afterimage.
+ * `offset` pushes vertices out along their normals (meters), for the glow halo.
+ */
+export function bakeObject(root: THREE.Object3D, out: THREE.BufferGeometry[], offset = 0): void {
+  root.updateMatrixWorld(true);
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh || !isVisible(mesh)) return;
+    const src = mesh.geometry;
+    const pos = src.getAttribute('position');
+    if (!pos) return;
+    const arr = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      mesh.getVertexPosition(i, _v); // applies skinning + morphs for SkinnedMesh
+      _v.applyMatrix4(mesh.matrixWorld);
+      arr[i * 3] = _v.x;
+      arr[i * 3 + 1] = _v.y;
+      arr[i * 3 + 2] = _v.z;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+    if (src.index) g.setIndex(src.index.clone());
+    g.computeVertexNormals();
+    if (offset !== 0) {
+      const n = g.getAttribute('normal');
+      for (let i = 0; i < pos.count; i++) {
+        arr[i * 3] += n.getX(i) * offset;
+        arr[i * 3 + 1] += n.getY(i) * offset;
+        arr[i * 3 + 2] += n.getZ(i) * offset;
+      }
+    }
+    // Afterimage merging needs every part to share attributes (position+normal) and indexing.
+    out.push(ensureIndexed(g));
+  });
+}
+
+function isVisible(o: THREE.Object3D): boolean {
+  for (let p: THREE.Object3D | null = o; p; p = p.parent) if (!p.visible) return false;
+  return true;
+}
+
+/** Find a node by exact name anywhere under `root`. */
+export function findNode<T extends THREE.Object3D = THREE.Object3D>(root: THREE.Object3D, name: string): T | null {
+  return (root.getObjectByName(name) as T | undefined) ?? null;
+}

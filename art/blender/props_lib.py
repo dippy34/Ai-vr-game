@@ -93,12 +93,90 @@ def box(name: str, size, loc=(0, 0, 0), rot=(0, 0, 0)) -> bpy.types.Object:
     return xform(o, loc, rot)
 
 
+def rounded_box(name: str, size, loc=(0, 0, 0), r_vert: float = 0.0, r_edge: float = 0.0, segs_vert: int = 3,
+                segs_edge: int = 1, axis: str = 'Z', rot=(0, 0, 0)) -> bpy.types.Object:
+    """Box with a bigger radius on the 4 edges parallel to `axis` and a small bevel elsewhere."""
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1.0)
+    for v in bm.verts:
+        v.co = Vector((v.co.x * size[0], v.co.y * size[1], v.co.z * size[2]))
+    ax = Vector({'X': (1, 0, 0), 'Y': (0, 1, 0), 'Z': (0, 0, 1)}[axis])
+    if r_vert > 0:
+        es = [e for e in bm.edges if abs((e.verts[1].co - e.verts[0].co).normalized().dot(ax)) > 0.99]
+        bmesh.ops.bevel(bm, geom=es, offset=r_vert, segments=segs_vert, profile=0.5, affect='EDGES',
+                        clamp_overlap=True)
+    if r_edge > 0:
+        es = [e for e in bm.edges if len(e.link_faces) == 2 and e.calc_face_angle(0) > math.radians(40)]
+        bmesh.ops.bevel(bm, geom=es, offset=r_edge, segments=segs_edge, profile=0.5, affect='EDGES',
+                        clamp_overlap=True)
+    o = from_bmesh(name, bm)
+    xform(o, loc, rot)
+    smooth_by_angle(o, 50)
+    return o
+
+
+def frame(name: str, outer, inner, depth: float, loc=(0, 0, 0), rot=(0, 0, 0), bevel_w: float = 0.0,
+          bevel_segs: int = 1, back: bool = True) -> bpy.types.Object:
+    """Rectangular ring (bezel) in the XY plane, extruded along +Z (from 0 to depth), then
+    transformed. outer/inner = (w, h)."""
+    bm = bmesh.new()
+    ow, oh = outer[0] / 2, outer[1] / 2
+    iw, ih = inner[0] / 2, inner[1] / 2
+    oc = [(-ow, -oh), (ow, -oh), (ow, oh), (-ow, oh)]
+    ic = [(-iw, -ih), (iw, -ih), (iw, ih), (-iw, ih)]
+    of = [bm.verts.new((x, y, depth)) for x, y in oc]
+    inf = [bm.verts.new((x, y, depth)) for x, y in ic]
+    ob = [bm.verts.new((x, y, 0)) for x, y in oc]
+    ib = [bm.verts.new((x, y, 0)) for x, y in ic]
+    for i in range(4):
+        j = (i + 1) % 4
+        bm.faces.new((of[i], of[j], inf[j], inf[i]))
+        bm.faces.new((ob[j], of[j], of[i], ob[i]))
+        bm.faces.new((inf[i], inf[j], ib[j], ib[i]))
+        if back:
+            bm.faces.new((ib[i], ib[j], ob[j], ob[i]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    if bevel_w > 0:
+        es = [e for e in bm.edges if len(e.link_faces) == 2 and e.calc_face_angle(0) > math.radians(40)
+              and not (back is False and any(v.co.z < 1e-6 for v in e.verts))]
+        es = [e for e in es if not all(v.co.z < 1e-6 for v in e.verts)]
+        bmesh.ops.bevel(bm, geom=es, offset=bevel_w, segments=bevel_segs, profile=0.5, affect='EDGES',
+                        clamp_overlap=True)
+    o = from_bmesh(name, bm)
+    xform(o, loc, rot)
+    smooth_by_angle(o, 50)
+    return o
+
+
+def triangulate(obj: bpy.types.Object) -> bpy.types.Object:
+    """Triangulate (keeping custom normals) so the bake's tangent space matches the export."""
+    m = obj.modifiers.new('tri', 'TRIANGULATE')
+    m.quad_method = 'BEAUTY'
+    m.ngon_method = 'BEAUTY'
+    m.keep_custom_normals = True
+    m.min_vertices = 4
+    common.apply_modifiers(obj)
+    return obj
+
+
+def weighted_normals(obj: bpy.types.Object, weight: int = 50) -> bpy.types.Object:
+    """Face-area weighted custom normals: flat faces stay flat, bevels carry the shading."""
+    for p in obj.data.polygons:
+        p.use_smooth = True
+    m = obj.modifiers.new('wn', 'WEIGHTED_NORMAL')
+    m.mode = 'FACE_AREA'
+    m.weight = weight
+    m.keep_sharp = True
+    common.apply_modifiers(obj)
+    return obj
+
+
 def lathe(name: str, profile: Sequence[tuple[float, float]], segs: int, loc=(0, 0, 0), rot=(0, 0, 0),
           angle: float = 360.0, start: float = 0.0, smooth_deg: float | None = 35.0) -> bpy.types.Object:
     """
     Revolve a (radius, z) profile around Z. Points with radius 0 collapse to a single vertex
-    (closed caps). Profile order matters for normals: walk the outline with the solid on your
-    right when looking from +X with Z up (i.e. bottom-center -> out -> up -> back to the axis).
+    (closed caps). Profile order sets the normals: they point to the right of the walking
+    direction in the (r ->, z ^) half-plane, so walk a solid bottom-center -> out -> up -> axis.
     """
     bm = bmesh.new()
     full = abs(angle - 360.0) < 1e-6
@@ -120,13 +198,14 @@ def lathe(name: str, profile: Sequence[tuple[float, float]], segs: int, loc=(0, 
             i2 = (i + 1) % n if full else i + 1
             if len(a) == 1 and len(b) == 1:
                 continue
+            # Winding gives normal = tangent x profile-direction: on the right of the walking
+            # direction in the (r ->, z ^) half-plane (outward for a solid walked bottom-up).
             if len(a) == 1:
-                bm.faces.new((a[0], b[i], b[i2]))
+                bm.faces.new((a[0], b[i2], b[i]))
             elif len(b) == 1:
-                bm.faces.new((a[i], b[0], a[i2]))
+                bm.faces.new((a[i], a[i2], b[0]))
             else:
-                bm.faces.new((a[i], b[i], b[i2], a[i2]))
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+                bm.faces.new((a[i], a[i2], b[i2], b[i]))
     o = from_bmesh(name, bm)
     xform(o, loc, rot)
     if smooth_deg is not None:
@@ -641,16 +720,16 @@ class Kit:
         return n
 
     # -- masks
-    def ao(self, dist=0.01, inside=False, samples=12, only_local=False) -> Sock:
+    def ao(self, dist=0.01, inside=False, samples=6, only_local=False) -> Sock:
         n = self.node('ShaderNodeAmbientOcclusion', inside=inside, only_local=only_local, samples=samples)
         n.inputs['Distance'].default_value = dist
         return n.outputs['AO']
 
-    def edges(self, dist=0.003, samples=12, lo=0.55, hi=0.95) -> Sock:
+    def edges(self, dist=0.003, samples=6, lo=0.55, hi=0.95) -> Sock:
         """Convex-edge mask (1 on edges) from inside-AO."""
         return self.ramp_f(self.ao(dist, inside=True, samples=samples, only_local=True), hi, lo)
 
-    def cavity(self, dist=0.01, samples=12, lo=0.3, hi=0.95) -> Sock:
+    def cavity(self, dist=0.01, samples=6, lo=0.3, hi=0.95) -> Sock:
         """Crevice mask (1 in crevices) from regular AO."""
         return self.ramp_f(self.ao(dist, inside=False, samples=samples), hi, lo)
 
@@ -1169,9 +1248,18 @@ def save_images(mat: bpy.types.Material, prefix: str) -> None:
 # Previews
 # ---------------------------------------------------------------------------------------------
 
-def previews(name: str, objs: Sequence[bpy.types.Object], views: Sequence[tuple[str, dict]], final: bool = False):
+def previews(name: str, objs: Sequence[bpy.types.Object], views: Sequence[tuple[str, dict]], final: bool = False,
+             frame=None):
+    """Studio/flash renders via common.preview. frame=(lo, hi) frames that box instead of the
+    meshes' bounds (through an invisible proxy), e.g. to skip a long conduit."""
     s = 56 if final else 24
     meshes = [o for o in objs if o.type == 'MESH']
+    proxy = None
+    if frame:
+        lo, hi = Vector(frame[0]), Vector(frame[1])
+        proxy = box('__frame_proxy', tuple(hi - lo), tuple((lo + hi) / 2))
+        proxy.hide_render = True
+        meshes = [proxy]
     for suffix, kw in views:
         kw = dict(kw)
         kw.setdefault('samples', s)
@@ -1179,3 +1267,5 @@ def previews(name: str, objs: Sequence[bpy.types.Object], views: Sequence[tuple[
             if a in kw:
                 kw[b] = kw.pop(a)
         common.preview(f'{name}_{suffix}', meshes, **kw)
+    if proxy:
+        delete(proxy)
