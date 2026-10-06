@@ -189,6 +189,32 @@ def assign(obj: bpy.types.Object, mat: bpy.types.Material) -> None:
 # Baking (procedural / high-poly detail -> image textures that glTF can carry)
 # ---------------------------------------------------------------------------------------------
 
+def _zero_metallic(obj: bpy.types.Object):
+    """Set every Principled 'Metallic' on obj's materials to 0 (unlinking textures); returns undo."""
+    saved = []
+    for mat in obj.data.materials:
+        if not mat or not mat.node_tree:
+            continue
+        nt = mat.node_tree
+        for n in nt.nodes:
+            if n.type != 'BSDF_PRINCIPLED':
+                continue
+            sock = n.inputs['Metallic']
+            links = [(l.from_socket, l.to_socket) for l in sock.links]
+            for l in list(sock.links):
+                nt.links.remove(l)
+            saved.append((nt, sock, sock.default_value, links))
+            sock.default_value = 0.0
+
+    def undo() -> None:
+        for nt, sock, value, links in saved:
+            sock.default_value = value
+            for a, b in links:
+                nt.links.new(a, b)
+
+    return undo
+
+
 def bake(
     low: bpy.types.Object,
     name: str,
@@ -243,7 +269,14 @@ def bake(
     color = new_image('color', False)
     target(color)
     activate(low, sel)
-    bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, **common)
+    # Cycles' diffuse-color pass is black on metallic surfaces, so bake color with metalness
+    # temporarily at 0 (and unlinked), then restore it.
+    source = high if high else low
+    restore = _zero_metallic(source)
+    try:
+        bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, **common)
+    finally:
+        restore()
     passes.append(('color', color))
 
     if roughness:

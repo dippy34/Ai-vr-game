@@ -24,7 +24,7 @@ with `node dev/models/shoot.cjs out.png "model=monster&anim=Walk&t=0.4"`.
 - **Front faces Blender +Y.** It becomes three.js −Z, which is yaw 0 in the game.
 - **Origin** at the floor contact point (bottom center) unless noted below.
 - **Images only.** glTF can't carry procedural Blender nodes, so bake them
-  (`common.bake`). Textures are WebP, max 1024² (2048² allowed for the monster only).
+  (`common.bake`). Keep metallic ≤ 0.8: the game has no environment map, so pure metals render black. Textures are WebP, max 1024² (2048² allowed for the monster only).
 - **One script per asset (or asset family)**, exposing `build()`. Helpers live in
   `art/blender/common.py`.
 - **Named nodes** listed below must exist with exactly these names (the game looks them up).
@@ -42,11 +42,11 @@ with `node dev/models/shoot.cjs out.png "model=monster&anim=Walk&t=0.4"`.
 | `hand_left.glb`, `hand_right.glb` | `hands.py` | ≤ 3k each | Rigged hand. Origin = wrist. Canonical frame: fingers along −Z (three.js), back of hand +Y, thumb on −X (right) / +X (left). Bones: `wrist`, `thumb_1..3`, `index_1..3`, `middle_1..3`, `ring_1..3`, `pinky_1..3`. Curl = rotate each finger bone about its local X. |
 | `avatar_head.glb` | `avatar.py` | ≤ 3k | Player head (origin = eye center, faces −Z). A survivor in a knit hood/beanie with a cloth mask over the mouth. Node `tint` = the mesh whose material gets the player color. |
 | `avatar_body.glb` | `avatar.py` | ≤ 4k | Torso + shoulders, no arms (origin = neck base), worn jacket. Node `tint` as above. |
-| `camera.glb` | `props.py` | ≤ 3k | Vintage flash camera, origin = grip center, lens faces −Z. Nodes: `lens`, `flash_reflector`, `film_screen` (a plane on the back for a live film counter, UVs 0..1). |
+| `camera.glb` | `props.py` | ≤ 3k | Vintage flash camera, origin = right-hand grip (+X end), lens faces −Z. Nodes: `lens`, `flash_reflector`, `film_screen` (a plane on the back for a live film counter, UVs 0..1). |
 | `fuse.glb` | `props.py` | ≤ 600 | Glass cartridge fuse, ~12 cm, origin = center. Node `glass`. |
 | `film.glb` | `props.py` | ≤ 600 | Film canister, origin = bottom center. |
-| `fusebox.glb` | `props.py` | ≤ 2k | Wall-mounted, back flat on the wall plane (origin at center of the back face), faces −Z. Nodes `lamp_0`, `lamp_1`, `lamp_2` (indicator bulbs) and `slot_0..2` (where fuses sit). |
-| `door.glb` | `props.py` | ≤ 2k | Front door. Node `door_leaf` with its origin ON THE HINGE edge (so rotating it opens the door), plus frame. Fits a 1.1 m × 2.2 m opening. |
+| `fusebox.glb` | `props.py` | ≤ 2k | Wall-mounted, back flat on the wall plane (origin at center of the back face), faces −Z. A conduit runs 1.4 m up the wall, so don't place it by its bounding box. Nodes `lamp_0`, `lamp_1`, `lamp_2` (indicator bulbs) and `slot_0..2` (where fuses sit). |
+| `door.glb` | `props.py` | ≤ 2k | Front door. Node `door_leaf` with its origin ON THE HINGE edge (so rotating it opens the door), plus frame. Fits the level's 1.2 m × 2.4 m × 0.2 m opening. |
 | `furniture_<style>.glb` | `furniture.py` | ≤ 2.5k each | One per `PropStyle`: table, shelf, bed, couch, crate, counter, cabinet, piano. Modeled at a typical real size (write it into the glTF extras: `extras.size = [w, h, d]`). The game scales it to fit its box. |
 | `dressing_<name>.glb` | `dressing.py` | ≤ 1.5k each | Clutter that sells "abandoned": picture frames, chair, books pile, bottles, candle stubs, broken plate, rug, wall clock, coat rack, hanging bare bulb. |
 
