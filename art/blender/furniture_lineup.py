@@ -166,6 +166,53 @@ def closeup(name: str, eye, target, mood='flash', samples=24, size=640, lens=30,
     return path
 
 
+def tiletest(names, eye, target, mood='studio', samples=24, out='furniture_tiling') -> str:
+    """Repeat tileable modules side by side along X (names = sequence) to check the seams."""
+    C.reset()
+    sc = bpy.context.scene
+    sc.render.threads_mode = 'FIXED'
+    sc.render.threads = int(os.environ.get('FURN_THREADS', '3'))
+    x = 0.0
+    placed = []
+    for n in names:
+        objs = _import(n)
+        lo, hi = C._bounds(objs)
+        for o in objs:
+            o.location.x += x - lo.x
+        x += hi.x - lo.x
+        placed += objs
+    for o in placed:
+        o.location.x -= x / 2
+    _floor(12)
+    cam_d = bpy.data.cameras.new('cam')
+    cam_d.lens = 30
+    cam = bpy.data.objects.new('cam', cam_d)
+    sc.collection.objects.link(cam)
+    cam.location = Vector(eye)
+    cam.rotation_euler = (Vector(target) - Vector(eye)).to_track_quat('-Z', 'Y').to_euler()
+    sc.camera = cam
+    world = bpy.data.worlds.new('w')
+    sc.world = world
+    bg = world.node_tree.nodes.get('Background')
+    bg.inputs['Color'].default_value = (0.18, 0.18, 0.19, 1)
+    bg.inputs['Strength'].default_value = 0.8
+    ld = bpy.data.lights.new('key', 'AREA')
+    ld.energy = 400
+    ld.size = 3
+    lo_ = bpy.data.objects.new('key', ld)
+    lo_.location = Vector(eye) + Vector((1.5, 0.5, 2.0))
+    lo_.rotation_euler = (Vector(target) - lo_.location).to_track_quat('-Z', 'Y').to_euler()
+    sc.collection.objects.link(lo_)
+    sc.cycles.samples = samples
+    sc.render.resolution_x = 960
+    sc.render.resolution_y = 540
+    path = os.path.join(C.PREVIEW_DIR, f'{out}.png')
+    sc.render.filepath = path
+    bpy.ops.render.render(write_still=True)
+    print(f'[tiletest] {path}')
+    return path
+
+
 if __name__ == '__main__':
     # .blender-venv/bin/python art/blender/furniture_lineup.py couch ex ey ez tx ty tz [mood]
     a = sys.argv[1:]

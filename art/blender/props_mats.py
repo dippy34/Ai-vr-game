@@ -493,11 +493,9 @@ def _grain(k: Kit, axis: str, s: float, rot: float = 0.0, scale: float = 1.0):
     """Wood grain value (0..1): long streaks along `axis` (object space), optional rotation about Y."""
     stretch = {'Z': (1.0, 1.0, 0.035), 'X': (0.035, 1.0, 1.0)}[axis]
     v = k.mapping(rot=(0, rot, 0), scale=stretch)
-    d = 'Y' if axis == 'Z' else 'Y'
     rings = k.wave(scale=38 * scale / s, vec=v, kind='BANDS', direction='X' if axis == 'Z' else 'Z', distortion=7.0,
                    detail=4, detail_scale=1.5)
     fine = k.noise(scale=900 / s, detail=3, vec=v)
-    _ = d
     return k.add(k.mul(rings, 0.75), k.mul(fine, 0.25))
 
 

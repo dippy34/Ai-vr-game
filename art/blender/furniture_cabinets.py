@@ -229,4 +229,4 @@ def build_nightstand():
           bevel=0.0, name='back')
     J.drawer(P, 0, D / 2 - 0.02, H - t - 0.085, W - 2 * t, 0.15, wood, inside=inner, kind='knob', hw=brass,
              open_=0.04, depth=0.42)
-    P.finish(tex=1024, max_tris=2500, fit=(W, H, D), preview_yaw=35, preview_pitch=18)
+    P.finish(tex=512, max_tris=2500, fit=(W, H, D), preview_yaw=35, preview_pitch=18)

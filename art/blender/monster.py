@@ -369,7 +369,7 @@ def skin_material() -> bpy.types.Material:
     col = nb.mix(nb.math('MULTIPLY', infl, 0.7), col, (0.30, 0.09, 0.09))
     col = nb.mix(nb.math('MULTIPLY', ext, 0.85), col, nb.mix(0.5, (0.15, 0.13, 0.12), (0.10, 0.08, 0.08)))
     col = nb.mix(dark, col, (0.030, 0.006, 0.007))
-    ao = nb.n('ShaderNodeAmbientOcclusion', only_local=True, samples=12)
+    ao = nb.n('ShaderNodeAmbientOcclusion', only_local=True, samples=8)
     ao.inputs['Distance'].default_value = 0.06
     col = nb.mix(nb.mixf(ao.outputs['AO'], 0.28, 1.0), (0, 0, 0), col, 'MIX')
     # fix: mix(fac, black, col) == col*fac
@@ -787,7 +787,7 @@ def build():
     low, llab = build_low(high, B, Jw)
     log('uv')
     common.bake(low, 'monster_skin', size=TEX, high=high, normal=True, roughness=True,
-                cage_extrusion=0.012, margin=12, samples=4 if FAST else 8)
+                cage_extrusion=0.012, margin=12, samples=4 if FAST else 5)
     log('baked')
     dump = os.environ.get('MONSTER_DUMP')
     if dump:

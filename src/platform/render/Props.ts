@@ -1,13 +1,18 @@
 /**
  * Item props: fuse, film canister and the vintage flash camera (with a film counter screen).
- * Each prop is a small Group whose origin is its "hold point"; `placeInHand` / `placeInWorld`
- * position it either in a hand (canonical hand frame) or lying in the world.
+ * `placeInHand` / `placeInWorld` position a prop either in a hand (canonical hand frame) or
+ * resting in the world.
+ *
+ * Each prop uses its Blender model (camera.glb, fuse.glb, film.glb) when the ModelLibrary has it,
+ * else a procedural stand-in. Model holds and resting poses are derived from the model's bounding
+ * box (not hard-coded vertex numbers), so re-exported models keep sitting right.
  */
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Handedness } from '../../core/types';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { findNode, localBounds, meshesOf, type ModelLibrary } from './assets';
 import { ensureIndexed, paint } from './util';
 
 const _m = new THREE.Matrix4();
@@ -123,22 +128,97 @@ function res(): NonNullable<typeof shared> {
 // Placement helpers
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * Where the palm is in the canonical hand frame (wrist origin, fingers -Z, back of hand +Y):
+ * the palm surface is ~2.4 cm below the wrist axis, the knuckles ~9 cm forward.
+ */
+const PALM_Y = -0.024;
+
+/**
+ * Hold `obj` so that its own point `objPoint` lands on `handPoint` (right-hand numbers; x is
+ * mirrored for the left hand), with the object rotated by `rot` relative to the hand.
+ */
+function placeHeld(
+  obj: THREE.Object3D, hand: Handedness, wristPos: THREE.Vector3, wristQuat: THREE.Quaternion,
+  rot: THREE.Quaternion, objPoint: THREE.Vector3, handPoint: readonly [number, number, number],
+): void {
+  const mx = hand === 'left' ? -1 : 1;
+  _v.copy(objPoint).applyQuaternion(rot).negate().add(_v2.set(handPoint[0] * mx, handPoint[1], handPoint[2]));
+  _m.compose(wristPos, wristQuat, _s);
+  _m2.compose(_v, rot, _s);
+  _m.multiply(_m2);
+  _m.decompose(obj.position, obj.quaternion, obj.scale);
+}
+
 /** Place `obj` at `offset` (hand frame, right-hand numbers; mirrored for the left) with `rot`. */
 function placeHand(
   obj: THREE.Object3D, hand: Handedness, wristPos: THREE.Vector3, wristQuat: THREE.Quaternion,
   offset: [number, number, number], rot: THREE.Quaternion,
 ): void {
-  const mx = hand === 'left' ? -1 : 1;
-  _m.compose(wristPos, wristQuat, _s);
-  _m2.compose(_v.set(offset[0] * mx, offset[1], offset[2]), rot, _s);
-  _m.multiply(_m2);
-  _m.decompose(obj.position, obj.quaternion, obj.scale);
+  placeHeld(obj, hand, wristPos, wristQuat, rot, ZERO, offset);
 }
 
 function placeWorld(obj: THREE.Object3D, x: number, y: number, z: number, yaw: number, lift: number): void {
   obj.position.set(x, y + lift, z);
   obj.quaternion.setFromAxisAngle(_v.set(0, 1, 0), yaw);
   obj.scale.set(1, 1, 1);
+}
+
+/**
+ * Rest `obj` on a surface: rotated by `rest` (e.g. a fuse lying on its side), then turned by `yaw`,
+ * with the bottom of its rotated bounds at `y` and `pivot` (rotated-bounds point) above (x, z).
+ */
+function placeResting(obj: THREE.Object3D, x: number, y: number, z: number, yaw: number, rest: THREE.Quaternion, pivot: THREE.Vector3): void {
+  _q.setFromAxisAngle(_v.set(0, 1, 0), yaw);
+  obj.quaternion.copy(_q).multiply(rest);
+  obj.position.copy(pivot).negate().applyQuaternion(_q).add(_v2.set(x, y, z));
+  obj.scale.set(1, 1, 1);
+}
+
+/** Bounds of a model rotated by `rest`: returns the bottom-center pivot and the bounds. */
+function restPivot(bounds: THREE.Box3, rest: THREE.Quaternion, center: 'bounds' | 'origin'): THREE.Vector3 {
+  const b = bounds.clone().applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(rest));
+  const c = b.getCenter(new THREE.Vector3());
+  return center === 'bounds' ? new THREE.Vector3(c.x, b.min.y, c.z) : new THREE.Vector3(0, b.min.y, 0);
+}
+
+/** Per-prop copy of a GLB material with a warm "glint" emission driven by the base color map. */
+function glintMaterial(src: THREE.Material, warm: number): THREE.MeshStandardMaterial | null {
+  if (!(src instanceof THREE.MeshStandardMaterial)) return null;
+  const m = src.clone();
+  m.userData = {};
+  m.emissive.set(warm);
+  // Bright parts (brass, the label) catch the glint, dark parts barely do.
+  m.emissiveMap = src.map;
+  m.emissiveIntensity = 0;
+  return m;
+}
+
+/** GLB part of a prop: the instance plus the materials it owns. */
+class ModelBody {
+  readonly root: THREE.Object3D;
+  readonly bounds: THREE.Box3;
+  private readonly owned: THREE.Material[] = [];
+
+  constructor(lib: ModelLibrary, name: string) {
+    this.root = lib.instance(name)!;
+    this.bounds = localBounds(this.root);
+    for (const m of meshesOf(this.root)) {
+      m.castShadow = m.receiveShadow = false;
+    }
+  }
+
+  /** Give `mesh` its own material (tracked for dispose). */
+  own<T extends THREE.Material>(mesh: THREE.Mesh, mat: T): T {
+    mesh.material = mat;
+    this.owned.push(mat);
+    return mat;
+  }
+
+  dispose(): void {
+    for (const m of this.owned) m.dispose();
+    this.root.removeFromParent();
+  }
 }
 
 export interface Prop {
@@ -151,12 +231,21 @@ export interface Prop {
 }
 
 const IDENT = new THREE.Quaternion();
+const ZERO = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const AXIS_Z = new THREE.Vector3(0, 0, 1);
+const rotZ = (a: number): THREE.Quaternion => new THREE.Quaternion().setFromAxisAngle(AXIS_Z, a);
 /** Camera held by its end: top toward the thumb (right hand: thumb on -X => +90 deg about Z). */
 const CAM_HOLD: Record<Handedness, THREE.Quaternion> = {
-  right: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2),
-  left: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -Math.PI / 2),
+  right: rotZ(Math.PI / 2),
+  left: rotZ(-Math.PI / 2),
 };
-const ROT_Z_NEG90 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -Math.PI / 2);
+const ROT_Z_NEG90 = rotZ(-Math.PI / 2);
+/** Long axis (model +Y) across the palm, toward the little finger (+X for the right hand). */
+const ACROSS_PALM: Record<Handedness, THREE.Quaternion> = { right: rotZ(-Math.PI / 2), left: rotZ(Math.PI / 2) };
+/** Model +Y lying along world -X (on its side). */
+const ON_SIDE = rotZ(Math.PI / 2);
 
 // ---------------------------------------------------------------------------------------------
 // Fuse
@@ -164,30 +253,60 @@ const ROT_Z_NEG90 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,
 
 export class FuseProp implements Prop {
   readonly group = new THREE.Group();
-  private readonly coreMat = new THREE.MeshLambertMaterial({ color: 0x6a5030, emissive: 0xffa040, emissiveIntensity: 0 });
+  private readonly coreMat: THREE.MeshLambertMaterial | null = null;
+  private readonly model: ModelBody | null = null;
+  private readonly glint: THREE.MeshStandardMaterial[] = [];
+  private readonly rest: THREE.Vector3 | null = null;
+  private readonly radius: number = 0.0138;
 
-  constructor() {
+  constructor(lib: ModelLibrary | null = null) {
+    this.group.name = 'fuse';
+    if (lib?.has('fuse')) {
+      // fuse.glb: long axis = model Y, origin = center; node `glass` stays transparent.
+      const body = (this.model = new ModelBody(lib, 'fuse'));
+      for (const m of meshesOf(body.root)) {
+        if (m.name === 'glass' || m.parent?.name === 'glass' || (m.material as THREE.Material).transparent) {
+          m.renderOrder = 3;
+          continue;
+        }
+        const g = glintMaterial(m.material as THREE.Material, 0xffa040);
+        if (g) this.glint.push(body.own(m, g));
+      }
+      this.group.add(body.root);
+      this.rest = restPivot(body.bounds, ON_SIDE, 'origin');
+      this.radius = Math.max(0.005, (body.bounds.max.x - body.bounds.min.x) / 2);
+      return;
+    }
     const r = res();
+    this.coreMat = new THREE.MeshLambertMaterial({ color: 0x6a5030, emissive: 0xffa040, emissiveIntensity: 0 });
     const glass = new THREE.Mesh(r.fuseGlass, r.glassMat);
     glass.renderOrder = 3;
     this.group.add(new THREE.Mesh(r.fuseMetal, r.metalMat), new THREE.Mesh(r.fuseCore, this.coreMat), glass);
-    this.group.name = 'fuse';
   }
 
   setGlint(distance: number): void {
-    this.coreMat.emissiveIntensity = 0.9 * glintFactor(distance);
+    const k = glintFactor(distance);
+    if (this.coreMat) this.coreMat.emissiveIntensity = 0.9 * k;
+    for (const m of this.glint) m.emissiveIntensity = 0.55 * k;
   }
 
   placeInHand(hand: Handedness, p: THREE.Vector3, q: THREE.Quaternion): void {
+    if (this.model) {
+      // Lying across the palm, the fingers closing around it.
+      placeHeld(this.group, hand, p, q, ACROSS_PALM[hand], ZERO, [0.004, PALM_Y - this.radius - 0.002, -0.06]);
+      return;
+    }
     placeHand(this.group, hand, p, q, [0.002, -0.03, -0.058], IDENT);
   }
 
   placeInWorld(x: number, y: number, z: number, yaw: number): void {
-    placeWorld(this.group, x, y, z, yaw, 0.0138);
+    if (this.rest) placeResting(this.group, x, y, z, yaw, ON_SIDE, this.rest);
+    else placeWorld(this.group, x, y, z, yaw, 0.0138);
   }
 
   dispose(): void {
-    this.coreMat.dispose();
+    this.coreMat?.dispose();
+    this.model?.dispose();
   }
 }
 
@@ -197,28 +316,57 @@ export class FuseProp implements Prop {
 
 export class FilmProp implements Prop {
   readonly group = new THREE.Group();
-  private readonly labelMat = new THREE.MeshLambertMaterial({ color: 0xc8902a, emissive: 0xffb050, emissiveIntensity: 0 });
+  private readonly labelMat: THREE.MeshLambertMaterial | null = null;
+  private readonly model: ModelBody | null = null;
+  private readonly glint: THREE.MeshStandardMaterial[] = [];
+  private readonly rest: THREE.Vector3 | null = null;
+  private readonly hold = new THREE.Vector3();
+  private radius = 0.016;
 
-  constructor() {
-    const r = res();
-    this.group.add(new THREE.Mesh(r.filmBody, r.metalMat), new THREE.Mesh(r.filmLabel, this.labelMat));
+  constructor(lib: ModelLibrary | null = null) {
     this.group.name = 'film';
+    if (lib?.has('film')) {
+      // film.glb: standing canister, origin = bottom center (the film leader sticks out to +X).
+      const body = (this.model = new ModelBody(lib, 'film'));
+      for (const m of meshesOf(body.root)) {
+        const g = glintMaterial(m.material as THREE.Material, 0xffb050);
+        if (g) this.glint.push(body.own(m, g));
+      }
+      this.group.add(body.root);
+      this.rest = restPivot(body.bounds, IDENT, 'origin');
+      const b = body.bounds;
+      this.radius = Math.max(0.008, (b.max.z - b.min.z) / 2);
+      // Hold point: middle of the canister's axis.
+      this.hold.set(0, (b.min.y + b.max.y) / 2, (b.min.z + b.max.z) / 2);
+      return;
+    }
+    const r = res();
+    this.labelMat = new THREE.MeshLambertMaterial({ color: 0xc8902a, emissive: 0xffb050, emissiveIntensity: 0 });
+    this.group.add(new THREE.Mesh(r.filmBody, r.metalMat), new THREE.Mesh(r.filmLabel, this.labelMat));
   }
 
   setGlint(distance: number): void {
-    this.labelMat.emissiveIntensity = 0.35 * glintFactor(distance);
+    const k = glintFactor(distance);
+    if (this.labelMat) this.labelMat.emissiveIntensity = 0.35 * k;
+    for (const m of this.glint) m.emissiveIntensity = 0.3 * k;
   }
 
   placeInHand(hand: Handedness, p: THREE.Vector3, q: THREE.Quaternion): void {
+    if (this.model) {
+      placeHeld(this.group, hand, p, q, ACROSS_PALM[hand], this.hold, [0.004, PALM_Y - this.radius - 0.002, -0.06]);
+      return;
+    }
     placeHand(this.group, hand, p, q, [-0.025, -0.032, -0.058], ROT_Z_NEG90);
   }
 
   placeInWorld(x: number, y: number, z: number, yaw: number): void {
-    placeWorld(this.group, x, y, z, yaw, 0);
+    if (this.rest) placeResting(this.group, x, y, z, yaw, IDENT, this.rest);
+    else placeWorld(this.group, x, y, z, yaw, 0);
   }
 
   dispose(): void {
-    this.labelMat.dispose();
+    this.labelMat?.dispose();
+    this.model?.dispose();
   }
 }
 
@@ -226,38 +374,96 @@ export class FilmProp implements Prop {
 // Camera
 // ---------------------------------------------------------------------------------------------
 
+/** How far forward of the wrist the camera's front face sits when held (fingers wrap it). */
+const CAM_FRONT_Z = -0.088;
+
 export class CameraProp implements Prop {
   readonly group = new THREE.Group();
-  private readonly reflectorMat = new THREE.MeshBasicMaterial({ color: 0x1a1c22 });
+  private readonly reflectorMat: THREE.MeshBasicMaterial | THREE.MeshStandardMaterial;
   private readonly screenMat: THREE.MeshBasicMaterial;
   private readonly screenTex: THREE.CanvasTexture;
   private readonly canvas: HTMLCanvasElement;
   private film = -1;
   private flashTime = -1e9;
-  private readonly lens = new THREE.Object3D();
+  private readonly lens: THREE.Object3D;
+  private readonly model: ModelBody | null = null;
+  private readonly rest: THREE.Vector3 | null = null;
+  /** Model points that rest in the palm, per hand (the end of the body on that hand's side). */
+  private readonly grip: Record<Handedness, THREE.Vector3> | null = null;
+  private readonly ownGeo: THREE.BufferGeometry[] = [];
 
-  constructor() {
-    const r = res();
+  constructor(lib: ModelLibrary | null = null) {
     this.group.name = 'camera';
-    this.group.add(new THREE.Mesh(r.camBody, r.camMat));
-    // Flash reflector (glows during a flash).
-    const refl = new THREE.Mesh(new THREE.PlaneGeometry(0.048, 0.03), this.reflectorMat);
-    refl.position.set(-0.032, 0.066, -0.0225);
-    refl.rotation.y = Math.PI;
-    this.group.add(refl);
-    // Back screen with the film count.
+    // Film counter screen texture (both versions).
     this.canvas = document.createElement('canvas');
     this.canvas.width = 256;
     this.canvas.height = 128;
     this.screenTex = new THREE.CanvasTexture(this.canvas);
     this.screenTex.colorSpace = THREE.SRGBColorSpace;
     this.screenMat = new THREE.MeshBasicMaterial({ map: this.screenTex, fog: false });
-    const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 0.035), this.screenMat);
-    screen.position.set(0.012, -0.006, 0.0252);
-    this.group.add(screen);
-    this.lens.position.set(-0.012, -0.004, -0.065);
-    this.group.add(this.lens);
+
+    if (lib?.has('camera')) {
+      // camera.glb: origin = right-hand grip, lens faces -Z; nodes lens, flash_reflector, film_screen.
+      const body = (this.model = new ModelBody(lib, 'camera'));
+      const root = body.root;
+      this.group.add(root);
+      this.lens = findNode(root, 'lens') ?? this.makeLens(root, body.bounds);
+      // Flash reflector: its own copy of the material so it can blaze white during a flash.
+      let refl: THREE.MeshBasicMaterial | THREE.MeshStandardMaterial | null = null;
+      const reflNode = findNode(root, 'flash_reflector');
+      if (reflNode) {
+        for (const m of meshesOf(reflNode)) {
+          const src = m.material as THREE.Material;
+          const mat = src instanceof THREE.MeshStandardMaterial ? src.clone() : new THREE.MeshBasicMaterial({ color: 0x1a1c22 });
+          mat.userData = {};
+          refl = body.own(m, mat);
+        }
+      }
+      this.reflectorMat = refl ?? new THREE.MeshBasicMaterial({ color: 0x1a1c22 });
+      // Film counter on the back: unlit canvas texture.
+      const screen = findNode(root, 'film_screen');
+      if (screen) {
+        for (const m of meshesOf(screen)) {
+          m.material = this.screenMat;
+          orientScreenTexture(m, this.screenTex);
+        }
+      }
+      const b = body.bounds;
+      this.rest = restPivot(b, IDENT, 'bounds');
+      // Palm against the end of the body on the holding hand's side, at grip height (model origin).
+      this.grip = {
+        right: new THREE.Vector3(b.max.x, 0, b.min.z),
+        left: new THREE.Vector3(b.min.x, 0, b.min.z),
+      };
+    } else {
+      const r = res();
+      this.group.add(new THREE.Mesh(r.camBody, r.camMat));
+      // Flash reflector (glows during a flash).
+      this.reflectorMat = new THREE.MeshBasicMaterial({ color: 0x1a1c22 });
+      const reflGeo = new THREE.PlaneGeometry(0.048, 0.03);
+      const refl = new THREE.Mesh(reflGeo, this.reflectorMat);
+      refl.position.set(-0.032, 0.066, -0.0225);
+      refl.rotation.y = Math.PI;
+      this.group.add(refl);
+      // Back screen with the film count.
+      const screenGeo = new THREE.PlaneGeometry(0.07, 0.035);
+      const screen = new THREE.Mesh(screenGeo, this.screenMat);
+      screen.position.set(0.012, -0.006, 0.0252);
+      this.group.add(screen);
+      this.ownGeo.push(reflGeo, screenGeo);
+      this.lens = new THREE.Object3D();
+      this.lens.position.set(-0.012, -0.004, -0.065);
+      this.group.add(this.lens);
+    }
     this.setFilm(0);
+  }
+
+  /** Fallback lens marker at the front center of the bounds (model without a `lens` node). */
+  private makeLens(root: THREE.Object3D, b: THREE.Box3): THREE.Object3D {
+    const o = new THREE.Object3D();
+    o.position.set((b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2, b.min.z);
+    root.add(o);
+    return o;
   }
 
   /** Where the flash comes from (world), for the caller's convenience. */
@@ -269,7 +475,8 @@ export class CameraProp implements Prop {
   setFilm(film: number): void {
     if (film === this.film) return;
     this.film = film;
-    const g = this.canvas.getContext('2d')!;
+    const g = this.canvas.getContext('2d');
+    if (!g) return;
     const W = this.canvas.width, H = this.canvas.height;
     g.fillStyle = '#050b07';
     g.fillRect(0, 0, W, H);
@@ -309,7 +516,9 @@ export class CameraProp implements Prop {
   update(time: number, glintDistance: number): void {
     const a = time - this.flashTime;
     const k = a >= 0 && a < 0.25 ? Math.pow(1 - a / 0.25, 2) : 0;
-    this.reflectorMat.color.setRGB(0.012 + k, 0.013 + k, 0.016 + k);
+    const m = this.reflectorMat;
+    if (m instanceof THREE.MeshStandardMaterial) m.emissive.setRGB(k, k, k);
+    else m.color.setRGB(0.012 + k, 0.013 + k, 0.016 + k);
     // The screen is a dim self-lit LCD: brighter when it is close to the viewer (in hand).
     const near = 1 - Math.min(1, Math.max(0, (glintDistance - 0.8) / 4));
     this.screenMat.color.setScalar(0.25 + 0.75 * near);
@@ -321,20 +530,61 @@ export class CameraProp implements Prop {
 
   placeInHand(hand: Handedness, p: THREE.Vector3, q: THREE.Quaternion): void {
     // Held by its right/left end, lens along the fingers (-Z), top toward the thumb.
+    if (this.grip) {
+      placeHeld(this.group, hand, p, q, CAM_HOLD[hand], this.grip[hand], [0, PALM_Y, CAM_FRONT_Z]);
+      return;
+    }
     placeHand(this.group, hand, p, q, [0.0, -0.07, -0.055], CAM_HOLD[hand]);
   }
 
   placeInWorld(x: number, y: number, z: number, yaw: number): void {
-    placeWorld(this.group, x, y, z, yaw, 0.04);
+    if (this.rest) placeResting(this.group, x, y, z, yaw, IDENT, this.rest);
+    else placeWorld(this.group, x, y, z, yaw, 0.04);
   }
 
   dispose(): void {
     this.reflectorMat.dispose();
     this.screenMat.dispose();
     this.screenTex.dispose();
-    for (const c of this.group.children) {
-      const m = c as THREE.Mesh;
-      if (m.geometry && !m.geometry.userData.shared) m.geometry.dispose();
-    }
+    for (const g of this.ownGeo) g.dispose();
+    this.model?.dispose();
   }
+}
+
+/**
+ * Make the counter texture read the right way round on the screen mesh, whatever its UV layout:
+ * u should grow to the viewer's right and v upward when looking at the screen's front.
+ */
+function orientScreenTexture(mesh: THREE.Mesh, tex: THREE.Texture): void {
+  const g = mesh.geometry;
+  const pos = g.getAttribute('position');
+  const uv = g.getAttribute('uv');
+  const nrm = g.getAttribute('normal');
+  if (!pos || !uv || !nrm || pos.count < 3) return;
+  const n = new THREE.Vector3(nrm.getX(0), nrm.getY(0), nrm.getZ(0)).normalize();
+  const up = Math.abs(n.y) > 0.9 ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, 1, 0);
+  const right = new THREE.Vector3().crossVectors(up, n).normalize();
+  up.crossVectors(n, right).normalize();
+  // Least-squares-ish: correlate u with "right" and v with "up" over the vertices.
+  let ur = 0, uu = 0, vr = 0, vu = 0;
+  const c = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) c.add(_v.set(pos.getX(i), pos.getY(i), pos.getZ(i)));
+  c.multiplyScalar(1 / pos.count);
+  for (let i = 0; i < pos.count; i++) {
+    _v.set(pos.getX(i), pos.getY(i), pos.getZ(i)).sub(c);
+    const r = _v.dot(right), u = _v.dot(up);
+    const du = uv.getX(i) - 0.5, dv = uv.getY(i) - 0.5;
+    ur += du * r; uu += du * u; vr += dv * r; vu += dv * u;
+  }
+  tex.center.set(0.5, 0.5);
+  if (Math.abs(ur) >= Math.abs(uu)) {
+    // u along right/left, v along up/down: flip as needed.
+    tex.repeat.set(ur >= 0 ? 1 : -1, vu >= 0 ? 1 : -1);
+    tex.rotation = 0;
+  } else {
+    // UVs are rotated a quarter turn.
+    tex.rotation = uu >= 0 ? -Math.PI / 2 : Math.PI / 2;
+    tex.repeat.set(1, vr >= 0 ? -1 : 1);
+  }
+  tex.needsUpdate = true;
 }

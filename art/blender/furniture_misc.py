@@ -36,11 +36,13 @@ def _crate(P: F.Piece, S: float, planks: int, lid_open: bool, stencils, broken=(
     straw = F.mat_plain('crate_straw', hexc('8a7440'), 0.95, dust=0.6, grime=1.0, noise_amt=0.5)
     t = 0.018           # board thickness
     bt = 0.022          # batten thickness
-    S = S - 2 * bt      # S = outer size including the battens
+    So = S
+    S = So - 2 * bt     # wall-to-wall width; So = outer size including the battens
     bw = 0.075 * S / 0.8  # batten width
     skid = 0.05
     gap = 0.007
-    H = S - skid        # body height above skids
+    Zt = So - t         # top of the walls (lid boards sit on it)
+    H = Zt - skid       # body height above skids
     ph = (H - gap * (planks - 1)) / planks
     faces = {}
 
@@ -94,7 +96,7 @@ def _crate(P: F.Piece, S: float, planks: int, lid_open: bool, stencils, broken=(
     for x in (-S * 0.36, S * 0.36):
         P.box((0.07, S + 2 * bt, skid), (x, 0, skid / 2), wood, bevel=0.005, grain='y', name='skid')
     # straw packing peeking out
-    P.box((S - 2 * t - 0.01, S - 2 * t - 0.01, 0.05), (0, 0, S - 0.12), straw, bevel=0.01, skip=('-z',),
+    P.box((S - 2 * t - 0.01, S - 2 * t - 0.01, 0.05), (0, 0, Zt - 0.12), straw, bevel=0.01, skip=('-z',),
           name='straw')
     # lid: boards across X with two cleats underneath
     lid = []
@@ -102,14 +104,14 @@ def _crate(P: F.Piece, S: float, planks: int, lid_open: bool, stencils, broken=(
     lw = (S + 2 * bt - gap * (lp - 1)) / lp
     for i in range(lp):
         y = -(S / 2 + bt) + lw / 2 + i * (lw + gap)
-        lid.append(P.box((S + 2 * bt, lw, t), (0, y, S + t / 2), wood, bevel=0.003, name='lid'))
+        lid.append(P.box((S + 2 * bt, lw, t), (0, y, Zt + t / 2), wood, bevel=0.003, name='lid'))
     for x in (-S / 2 + bw, S / 2 - bw):
-        lid.append(P.box((bw, S - 2 * t - 0.01, bt), (x, 0, S - bt / 2), wood, bevel=0.004, grain='y',
+        lid.append(P.box((bw, S - 2 * t - 0.01, bt), (x, 0, Zt - bt / 2), wood, bevel=0.004, grain='y',
                          name='cleat'))
     if lid_open:
         import bpy
         from furniture_lib import _xf
-        m = _xf((0.025, 0.02, 0.012), (0, 0, 4), pivot=(0, 0, S)) @ _xf((0, 0, 0), (-3.5, 0, 0), pivot=(0, S / 2, S))
+        m = _xf((0.025, 0.02, 0.012), (0, 0, 4), pivot=(0, 0, Zt)) @ _xf((0, 0, 0), (-3.5, 0, 0), pivot=(0, S / 2, Zt))
         for o in lid:
             o.data.transform(m)
     # stencils (decal bake on the boards they sit on)
@@ -149,4 +151,4 @@ def build_crate_small():
         ('y', 1, 'THIS SIDE UP', 0.04, 0.0, 0.22),
         ('x', -1, 'No 12', 0.07, 0.0, 0.38),
     ], broken=(('y', -1, 3),))
-    P.finish(tex=1024, max_tris=2500, fit=(S, S, S))
+    P.finish(tex=512, max_tris=2500, fit=(S, S, S))

@@ -418,19 +418,6 @@ def text(name: str, body: str, size: float, kind: str = 'sans_bold', extrude: fl
     return xform(mo, loc, rot)
 
 
-def bend_x_around_z(obj: bpy.types.Object, radius: float, axis_center=(0, 0)) -> bpy.types.Object:
-    """Wrap a mesh lying in the XZ plane at y = -radius... onto a cylinder of `radius` around Z.
-    x becomes arc length (counter-clockwise seen from +Z), y is the radial offset (+ = outward)."""
-    cx, cy = axis_center
-    for v in obj.data.vertices:
-        x, y, z = v.co
-        r = radius + y
-        a = x / radius
-        v.co = Vector((cx + r * math.sin(a), cy + r * math.cos(a), z))
-    obj.data.update()
-    return obj
-
-
 def tag(obj: bpy.types.Object, part: int) -> bpy.types.Object:
     """Integer face attribute 'part' (survives joins) used to split the baked atlas mesh again."""
     me = obj.data

@@ -8,9 +8,9 @@
  */
 
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Box, PropStyle } from '../../core/types';
-import type { ModelLibrary } from './assets';
+import { extrasSize, type ModelLibrary } from './assets';
+import { StaticBatcher } from './batch';
 
 /** Variants per level style, by GLB name (without the furniture_ prefix). */
 export const FURNITURE_VARIANTS: Record<PropStyle, string[]> = {
@@ -45,21 +45,30 @@ interface Variant {
   tileable: boolean;
 }
 
+/** One placed furniture model (for set dressing: what's on top of which box). */
+export interface PlacedFurniture {
+  /** Variant name without the furniture_ prefix (e.g. 'counter_sink'). */
+  name: string;
+  /** Bottom center. */
+  center: THREE.Vector3;
+  yaw: number;
+  /** Placed size in its own frame (width across the front, height, depth). */
+  w: number;
+  h: number;
+  d: number;
+  /** Model frame -> world. */
+  matrix: THREE.Matrix4;
+  /** The library's source scene (shared, never add it to the scene graph). */
+  scene: THREE.Object3D;
+}
+
 const _box = new THREE.Box3();
 const _m = new THREE.Matrix4();
-const _rel = new THREE.Matrix4();
-const _inv = new THREE.Matrix4();
 
 function variantInfo(lib: ModelLibrary, name: string): Variant | null {
   const asset = lib.get(`furniture_${name}`);
   if (!asset) return null;
-  const extra = asset.extras.size;
-  const size = new THREE.Vector3();
-  if (Array.isArray(extra) && extra.length === 3 && extra.every((v) => typeof v === 'number' && v > 0)) {
-    size.set(extra[0], extra[1], extra[2]);
-  } else {
-    _box.setFromObject(asset.scene).getSize(size);
-  }
+  const size = extrasSize(asset.extras) ?? _box.setFromObject(asset.scene).getSize(new THREE.Vector3());
   return { name, scene: asset.scene, size, tileable: asset.extras.tileable === true };
 }
 
@@ -67,10 +76,11 @@ const err = (want: number, have: number): number => Math.abs(Math.log(want / hav
 
 export class FurnitureSet {
   readonly group = new THREE.Group();
-  /** source mesh uuid -> transformed geometry copies + material */
-  private readonly batches = new Map<string, { material: THREE.Material | THREE.Material[]; geos: THREE.BufferGeometry[] }>();
+  /** Every model placed so far. */
+  readonly placed: PlacedFurniture[] = [];
 
-  constructor(private readonly lib: ModelLibrary) {
+  /** `batcher`: where placed copies go (shared with other static models so it all merges once). */
+  constructor(private readonly lib: ModelLibrary, private readonly batcher = new StaticBatcher()) {
     this.group.name = 'furniture-models';
   }
 
@@ -131,35 +141,16 @@ export class FurnitureSet {
       .multiply(_m.makeRotationY(frame.yaw))
       .multiply(new THREE.Matrix4().makeTranslation(offset, 0, 0))
       .multiply(new THREE.Matrix4().makeScale(sx, sy, sz));
-    v.scene.updateMatrixWorld(true);
-    _inv.copy(v.scene.matrixWorld).invert();
-    v.scene.traverse((o) => {
-      const mesh = o as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      _rel.multiplyMatrices(_inv, mesh.matrixWorld);
-      const g = mesh.geometry.clone();
-      g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(place, _rel));
-      let batch = this.batches.get(mesh.uuid);
-      if (!batch) {
-        batch = { material: mesh.material, geos: [] };
-        this.batches.set(mesh.uuid, batch);
-      }
-      batch.geos.push(g);
+    this.batcher.add(v.scene, place);
+    const c = new THREE.Vector3(offset, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), frame.yaw).add(frame.center);
+    this.placed.push({
+      name: v.name, center: c, yaw: frame.yaw, w: v.size.x * sx, h: v.size.y * sy, d: v.size.z * sz, matrix: place, scene: v.scene,
     });
   }
 
   /** Merge everything queued into static meshes. Call once after all place() calls. */
   build(): void {
-    for (const { material, geos } of this.batches.values()) {
-      const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
-      if (geos.length > 1) for (const g of geos) g.dispose();
-      if (!merged) continue;
-      merged.computeBoundingSphere();
-      const mesh = new THREE.Mesh(merged, material);
-      mesh.matrixAutoUpdate = false;
-      this.group.add(mesh);
-    }
-    this.batches.clear();
+    this.batcher.build(this.group);
   }
 
   dispose(): void {

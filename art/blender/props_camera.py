@@ -16,8 +16,6 @@ Frame: Blender +Y = front (three.js -Z), origin = center of the right-hand grip 
 
 from __future__ import annotations
 
-import math
-
 import bpy
 import bmesh
 from mathutils import Vector

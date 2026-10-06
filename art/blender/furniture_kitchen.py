@@ -27,7 +27,7 @@ def build() -> None:
 
 def _mats(seed=0.0):
     paint = F.mat_paint('kitchen_paint', hexc('c2b896'), hexc('6a5034'), gloss=0.5, chip=0.6, flake=0.8,
-                        layer2=hexc('8fa088'), dust=0.55, grime=1.0, tide=0.1, seed=seed, grease=0.7, edge_chip=0.45)
+                        layer2=hexc('8fa088'), dust=0.55, grime=1.0, tide=0.1, seed=seed, grease=0.35, edge_chip=0.45)
     inner = F.mat_paint('kitchen_inside', hexc('9a9078'), hexc('4a3a28'), gloss=0.3, chip=0.2, dust=0.5, grime=1.0,
                         seed=seed + 1)
     kick = F.mat_paint('kitchen_kick', hexc('2a2622'), hexc('4a3a28'), gloss=0.4, chip=0.4, dust=0.3, grime=1.0,
@@ -117,8 +117,10 @@ def build_counter_sink():
     _top(P, lam, trim, hole=(hx0, hx1, hy0, hy1))
     # enamel basin: rim + inside-out bowl + drain
     depth = 0.17
-    P.box((hx1 - hx0 + 0.04, hy1 - hy0 + 0.04, 0.012), (0, (hy0 + hy1) / 2, H + 0.004), enamel, bevel=0.005, segs=2,
-          name='rim', skip=('-z',))
+    rw = 0.022  # rim frame around the opening
+    for (cx, cy, sx_, sy_) in ((0, hy0 - rw / 2, hx1 - hx0 + 2 * rw, rw), (0, hy1 + rw / 2, hx1 - hx0 + 2 * rw, rw),
+                               (hx0 - rw / 2, (hy0 + hy1) / 2, rw, hy1 - hy0), (hx1 + rw / 2, (hy0 + hy1) / 2, rw, hy1 - hy0)):
+        P.box((sx_, sy_, 0.01), (cx, cy, H + 0.003), enamel, bevel=0.004, name='rim', skip=('-z',))
     bowl = P.box((hx1 - hx0, hy1 - hy0, depth), (0, (hy0 + hy1) / 2, H - depth / 2 + 0.008), enamel, bevel=0.03,
                  segs=2, name='bowl', skip=('+z',), flip=True)
     P.cyl(0.035, 0.003, (0, (hy0 + hy1) / 2 + 0.02, H - depth + 0.0085), chrome, segs=10, name='drain')
@@ -191,7 +193,7 @@ def build_counter_stove():
         for a in range(4):
             ang = math.radians(a * 90)
             P.box((0.012, 0.012, 0.03), (bx + 0.09 * math.cos(ang), byy + 0.09 * math.sin(ang), zt + 0.015), iron,
-                  bevel=0.002, name='gratefoot')
+                  bevel=0.0, name='gratefoot', skip=('-z',))
         verts, faces = [], []
         n = 12
         for i in range(n):
@@ -202,7 +204,6 @@ def build_counter_stove():
             j = (i + 1) % n
             faces.append((2 * i, 2 * j, 2 * j + 1, 2 * i + 1))
         rings.append((verts, faces))
-    top_obj = P.hard[-1]
     # control panel (front apron) with four knobs
     P.box((W - 0.03, 0.01, 0.07), (0, body_y1 + 0.003, zt - 0.06), chrome, bevel=0.003, name='panel')
     for k in range(4):

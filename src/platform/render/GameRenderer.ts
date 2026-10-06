@@ -19,9 +19,10 @@ import { SkinnedMonster } from './SkinnedMonster';
 import { FURNITURE_MODEL_NAMES } from './FurnitureModels';
 import { NoiseMeter } from './NoiseMeter';
 import { CameraProp, FilmProp, FuseProp, type Prop } from './Props';
-import { RemoteAvatar, headGhostGeometry } from './RemoteAvatar';
+import { AvatarKit, RemoteAvatar } from './RemoteAvatar';
+import { DRESSING_PREFIX } from './Dressing';
 import { setTextureAnisotropy } from './textures';
-import { paint, positionNormalOnly, segmentHitsAabb, setQ, setV } from './util';
+import { paint, segmentHitsAabb, setQ, setV } from './util';
 
 /**
  * three.js's physically based lights divide diffuse by PI, so a hemisphere light of intensity I lights
@@ -38,14 +39,19 @@ const NEAR_LIGHT = { intensity: 0.016, distance: 2.2, decay: 2 };
 const FOG_COLOR = 0x04060b;
 const AFTERIMAGE_MIN_DOT = 0.1;
 /** GLB models the renderer knows how to use (public/models/<name>.glb). */
-const MODEL_NAMES = ['monster', 'hand_left', 'hand_right', ...FURNITURE_MODEL_NAMES];
+const MODEL_NAMES = [
+  'monster', 'hand_left', 'hand_right', 'avatar_head', 'avatar_body',
+  'camera', 'fuse', 'film', 'fusebox', 'door', ...FURNITURE_MODEL_NAMES,
+];
+/** Every GLB in the manifest with one of these prefixes is loaded too (set dressing). */
+const MODEL_PREFIXES = [DRESSING_PREFIX];
+/** Models that are baked into the level, so the level is rebuilt when they arrive. */
+const isLevelModel = (n: string): boolean => n.startsWith('furniture_') || n.startsWith(DRESSING_PREFIX) || n === 'fusebox' || n === 'door' || n === 'fuse';
 
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _q = new THREE.Quaternion();
-const _m = new THREE.Matrix4();
-const _infl = new THREE.Vector3(1.03, 1.03, 1.03);
 
 /** three.js renderer for MUTE. */
 export class GameRenderer implements IGameRenderer {
@@ -60,6 +66,8 @@ export class GameRenderer implements IGameRenderer {
   private localRight: Hand;
   /** Makes GLB hands once loaded, procedural ones until then. */
   private readonly hands = new HandFactory();
+  /** Makes GLB avatar heads/bodies once loaded, procedural ones until then. */
+  private readonly avatarKit = new AvatarKit();
   private readonly ghostMat: THREE.MeshBasicMaterial;
   private readonly avatars = new Map<PlayerId, RemoteAvatar>();
   private readonly pendingPoses = new Map<PlayerId, PlayerPose>();
@@ -68,7 +76,7 @@ export class GameRenderer implements IGameRenderer {
   readonly models = new ModelLibrary();
   private readonly items = new Map<number, Prop>();
   private readonly seenItems = new Set<number>();
-  private readonly cameraProp: CameraProp;
+  private cameraProp: CameraProp;
   private readonly flashFx: FlashEffect;
   private readonly meter: NoiseMeter;
   private readonly message: MessagePanel;
@@ -142,7 +150,7 @@ export class GameRenderer implements IGameRenderer {
     this.resize();
     window.addEventListener('resize', this.onResize);
 
-    void this.models.load(MODEL_NAMES).then(() => this.applyModels());
+    void this.models.load(MODEL_NAMES, MODEL_PREFIXES).then(() => this.applyModels());
   }
 
   /** Swap procedural stand-ins for the Blender models that loaded. */
@@ -158,7 +166,9 @@ export class GameRenderer implements IGameRenderer {
       this.dynamic.add(next.object);
     }
     // Rigged hands: replace the local ones; remote avatars get rebuilt with them next frame.
+    let rebuildAvatars = this.avatarKit.use(this.models);
     if (this.hands.use(this.models)) {
+      rebuildAvatars = true;
       for (const side of ['left', 'right'] as const) {
         const old = side === 'left' ? this.localLeft : this.localRight;
         const next = this.hands.create(side, this.localHandMat);
@@ -169,14 +179,35 @@ export class GameRenderer implements IGameRenderer {
         if (side === 'left') this.localLeft = next;
         else this.localRight = next;
       }
+    }
+    if (rebuildAvatars) {
       for (const av of this.avatars.values()) {
         this.dynamic.remove(av.group);
         av.dispose();
       }
       this.avatars.clear();
     }
+    // Item props: the camera now, fuses/film get recreated by updateItems() next frame.
+    if (this.models.has('camera')) {
+      const old = this.cameraProp;
+      const next = new CameraProp(this.models);
+      next.group.visible = old.group.visible;
+      this.dynamic.remove(old.group);
+      old.dispose();
+      this.cameraProp = next;
+      this.dynamic.add(next.group);
+    }
+    if (this.models.has('fuse') || this.models.has('film')) this.clearItems();
     // A level built before the models arrived gets rebuilt with them.
-    if (this.levelData && this.models.names().some((n) => n.startsWith('furniture_'))) this.loadLevel(this.levelData);
+    if (this.levelData && this.models.names().some(isLevelModel)) this.loadLevel(this.levelData);
+  }
+
+  private clearItems(): void {
+    for (const p of this.items.values()) {
+      this.dynamic.remove(p.group);
+      p.dispose();
+    }
+    this.items.clear();
   }
 
   // -------------------------------------------------------------------------------------------
@@ -189,11 +220,7 @@ export class GameRenderer implements IGameRenderer {
       this.level.dispose();
       this.level = null;
     }
-    for (const p of this.items.values()) {
-      this.dynamic.remove(p.group);
-      p.dispose();
-    }
-    this.items.clear();
+    this.clearItems();
     this.flashFx.clearAfterimages();
     this.levelData = level;
     this.level = new LevelView(level, this.models);
@@ -256,7 +283,7 @@ export class GameRenderer implements IGameRenderer {
       const p = state.players[id];
       let av = this.avatars.get(id);
       if (!av) {
-        av = new RemoteAvatar(id, p.color, this.ghostMat, this.hands);
+        av = new RemoteAvatar(id, p.color, this.ghostMat, this.hands, this.avatarKit);
         this.avatars.set(id, av);
         this.dynamic.add(av.group);
         const pending = this.pendingPoses.get(id);
@@ -295,7 +322,7 @@ export class GameRenderer implements IGameRenderer {
       seen.add(it.id);
       let prop = this.items.get(it.id);
       if (!prop) {
-        prop = it.kind === 'fuse' ? new FuseProp() : new FilmProp();
+        prop = it.kind === 'fuse' ? new FuseProp(this.models) : new FilmProp(this.models);
         this.items.set(it.id, prop);
         this.dynamic.add(prop.group);
       }
@@ -375,7 +402,7 @@ export class GameRenderer implements IGameRenderer {
       if (k > 0) {
         setQ(_q, pose.head.rotation);
         const from = parts.length;
-        parts.push(positionNormalOnly(headGhostGeometry().clone()).applyMatrix4(_m.compose(_a, _q, _infl)));
+        this.avatarKit.bakeHead(_a, _q, parts);
         push(parts, from, k * 0.85);
       }
       // Hands with their exact finger curls right now.

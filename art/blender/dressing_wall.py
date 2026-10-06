@@ -122,15 +122,15 @@ def wire_and_nail(P, top_local, half_w, M, seed=1):
 # =============================================================================================
 
 def build_frame_portrait():
-    P = L.Piece('frame_portrait', 'wall', tex=512, glass_tex=256, max_tris=1500, ao=0.05, bevel=0.003,
+    P = L.Piece('frame_portrait', 'wall', tex=512, glass_tex=512, max_tris=1500, ao=0.05, bevel=0.003,
                 ao_small=0.006)
     rx, ry = 0.205, 0.255
-    N = 44
+    N = 40
     path = L.ellipse_pts(rx, ry, N)
     # profile (d = inward from the outer edge, h = height off the wall), outer back -> sight edge
     prof = [(0.0, 0.0), (0.0, 0.020), (0.003, 0.028), (0.009, 0.033), (0.015, 0.031), (0.019, 0.026),
-            (0.025, 0.027), (0.031, 0.035), (0.038, 0.039), (0.045, 0.036), (0.049, 0.030), (0.053, 0.028),
-            (0.057, 0.026), (0.059, 0.020), (0.0595, 0.010)]
+            (0.025, 0.027), (0.031, 0.035), (0.038, 0.039), (0.045, 0.036), (0.049, 0.030), (0.054, 0.027),
+            (0.059, 0.020), (0.0595, 0.010)]
     tilt = Matrix.Rotation(math.radians(2.5), 4, 'Z')  # hangs a touch crooked
     lean = Matrix.Rotation(math.radians(-3.0), 4, 'X')  # top leans off the wall (hung on a wire)
     M = WALL @ xf((0, 0, 0)) @ lean @ tilt
@@ -171,7 +171,7 @@ def build_frame_portrait():
     crack_rays = [angs[c] for c in cuts]
     gimg = L.np_image('portrait_cracks', I.crack_map_rays(256, 320, (imp.x + gx) / (2 * gx), (gy - imp.y) / (2 * gy),
                                                            [-a for a in crack_rays], seed=5))
-    glass = L.mat_glass('portrait_glass', tint=hexc('202420'), alpha=0.16, dust=0.7, grime=0.5, cracks=gimg)
+    glass = L.mat_glass('portrait_glass', tint=hexc('202420'), alpha=0.1, dust=0.6, grime=0.5, cracks=gimg)
     for si, idx in enumerate(shards):
         if covers(idx):
             continue

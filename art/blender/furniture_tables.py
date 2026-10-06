@@ -92,7 +92,7 @@ def build_table_small():
     P.box((2 * lx - leg, 0.02, 0.014), (0, fy + 0.01, H - t - ah + 0.007), paint, bevel=0.002, name='rail')
     J.drawer(P, 0, fy, H - t - ah / 2, dw, ah - 0.03, paint, inside=inner, kind='knob', hw=knob, open_=0.05,
              depth=0.5, t=0.02)
-    P.finish(tex=1024, max_tris=2500, fit=(W, H, D), preview_yaw=35, preview_pitch=22)
+    P.finish(tex=512, max_tris=2500, fit=(W, H, D), preview_yaw=35, preview_pitch=22)
 
 
 def build_table_coffee():

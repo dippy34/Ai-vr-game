@@ -1037,8 +1037,11 @@ def _pack(obj, size):
     bpy.ops.uv.select_all(action='SELECT')
     margin = 3.0 / size
     try:
-        bpy.ops.uv.pack_islands(udim_source='CLOSEST_UDIM', rotate=True, rotate_method='ANY', scale=True,
-                                merge_overlap=False, margin_method='FRACTION', margin=margin, shape_method='CONCAVE')
+        t0 = time.time()
+        bpy.ops.uv.pack_islands(udim_source='CLOSEST_UDIM', rotate=True, rotate_method='CARDINAL', scale=True,
+                                merge_overlap=False, margin_method='FRACTION', margin=margin,
+                                shape_method=os.environ.get('DRESS_PACK', 'CONVEX'))
+        print(f'   pack {time.time() - t0:.1f}s', flush=True)
     except Exception as e:  # pragma: no cover
         print('pack_islands fallback:', e)
         bpy.ops.uv.pack_islands(rotate=True, margin=margin)
@@ -1361,10 +1364,14 @@ class Piece:
         objs = [p['obj'] for p in self.parts]
         self._origin(objs, origin)
         for p in self.parts:
+            t1 = time.time()
             _unwrap_part(p['obj'], p['uv'], p['weight'], p['angle'])
+            if time.time() - t1 > 2:
+                print(f'   unwrap {p["obj"].name}: {time.time() - t1:.1f}s', flush=True)
         groups = []
         for grp in ('opaque', 'cutout', 'glass'):
-            ps = [p['obj'] for p in self.parts if p['group'] == grp]
+            pp = [p for p in self.parts if p['group'] == grp]
+            ps = [p['obj'] for p in pp]
             if not ps:
                 continue
             o = _join(ps, name if grp == 'opaque' else f'{name}_{grp}')
@@ -1372,7 +1379,15 @@ class Piece:
             gs = size if grp != 'glass' else gsize
             if grp == 'cutout' and self.cutout_tex:
                 gs = min(self.cutout_tex, 256) if DRAFT else self.cutout_tex
-            _pack(o, gs)
+            if all(p['uv'] == 'src' for p in pp):
+                # already laid out in 0..1 by the builder (e.g. a glass pane): keep it
+                src = o.data.uv_layers['src'].data
+                atl = o.data.uv_layers['atlas'].data
+                for i in range(len(atl)):
+                    atl[i].uv = src[i].uv
+                _use_atlas(o)
+            else:
+                _pack(o, gs)
             groups.append((o, grp, gs))
         tris = C.tri_count([g_[0] for g_ in groups])
         print(f'[{self.name}] {tris} tris, unwrap {time.time() - t0:.1f}s', flush=True)

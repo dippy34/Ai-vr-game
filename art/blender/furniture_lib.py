@@ -639,7 +639,7 @@ def mat_paint(name, color, under, *, gloss=0.5, chip=0.5, layer2=None, dust=0.5,
 
 def mat_fabric(name, base, alt=None, *, pattern='tweed', fade=0.4, stains=0.5, dust=0.45, grime=0.9,
                wear=0.5, bevel_r=0.01, seed=0.0, weave=1.0, stripe=None, sheen=0.0, ao_dist=0.15,
-               foam=None, mold=0.0, rust_spots=0.0, tide=0.0):
+               foam=None, mold=0.0, rust_spots=0.0, tide=0.0, use_col=None):
     """Upholstery / bedding. Reads optional 'tear' attribute (1 = hole showing foam)."""
     mat = new_material(name)
     g = G(mat)
@@ -709,17 +709,21 @@ def mat_fabric(name, base, alt=None, *, pattern='tweed', fade=0.4, stains=0.5, d
     use = g.attr('use', 'Fac')
     un = g.noise(pos, 4.0, 2, 0.5, offset=(seed, 6, 6))
     um = g.mul(g.clamp(g.mul(use, g.rng(un, 0.2, 0.8, 0.6, 1.2))), 0.75)
-    col = g.mix(um, col, g.mix(0.4, g.hsv(col, s=0.8, v=0.5), hexc('2e2618')))
+    col = g.mix(um, col, use_col or g.mix(0.4, g.hsv(col, s=0.8, v=0.5), hexc('2e2618')))
     rough = g.mixf(um, rough, 0.62)
     # tears: foam + dark cavity, frayed light threads at the rim
     tear = g.attr('tear', 'Fac')
-    foam_c = foam or hexc('b39a5e')
+    foam_c = foam or hexc('8c7a4c')
     fo = g.noise(pos, 90.0, 3, 0.7)
-    foam_col = g.mix(g.rng(fo, 0.3, 0.75), tuple(c * 0.45 for c in foam_c), foam_c)
+    crumbs = g.rng(g.noise(pos, 35.0, 3, 0.7), 0.55, 0.7)
+    foam_col = g.mix(g.rng(fo, 0.3, 0.75), tuple(c * 0.35 for c in foam_c), foam_c)
+    foam_col = g.mix(g.mul(crumbs, 0.8), foam_col, hexc('1a140c'))
     inner = g.rng(tear, 0.62, 0.8)
     rimm = g.mul(g.rng(tear, 0.15, 0.4), g.rng(tear, 0.7, 0.55))
-    col = g.mix(g.mul(rimm, g.rng(g.noise(pos, 300.0, 1, 0.5), 0.3, 0.7)), col, g.hsv(col, s=0.4, v=1.9))
+    cav = g.mul(g.rng(tear, 0.45, 0.62), g.rng(tear, 0.9, 0.75))
+    col = g.mix(g.mul(rimm, g.rng(g.noise(pos, 300.0, 1, 0.5), 0.3, 0.7)), col, g.hsv(col, s=0.4, v=1.7))
     col = g.mix(inner, col, foam_col)
+    col = g.mix(g.mul(cav, 0.85), col, hexc('0c0a08'))
     rough = g.mixf(inner, rough, 0.97)
     h = g.add(h, g.mul(inner, g.mul(fo, 1.5)))
     col, rough, h = age(g, mk, col, rough, h, dust=dust, grime=grime, wear=0.0, scratch=0.0, seed=seed,
@@ -1325,8 +1329,9 @@ class Piece:
                     ragged = tr * (1.0 + 0.35 * noise.noise(Vector((math.atan2(p.y - ty, p.x - tx) * 2.0, tx * 9, 0)) + nseed)
                                    + 0.15 * noise.noise(p * 60.0))
                     if rd < ragged:
-                        disp -= 0.012 + 0.006 * noise.noise(p * 50.0)
-                        tear = max(tear, 1.0)
+                        edge_in = min(1.0, (ragged - rd) / (ragged * 0.3))
+                        disp -= (0.022 + 0.008 * noise.noise(p * 50.0)) * edge_in
+                        tear = max(tear, 1.0 if edge_in > 0.5 else 0.55 + 0.45 * edge_in)
                     elif rd < ragged * 1.25:
                         f = (rd - ragged) / (ragged * 0.25)
                         disp += 0.003 * (1 - f)
@@ -1565,34 +1570,36 @@ class Piece:
         scene.cycles.samples = samples
         passes = ([(hard, None, 0.0)] if hard is not None else []) + [(g_['L'], g_['Hi'], g_['ext']) for g_ in self.groups]
         imgs = {}
+        mr_size = max(256, size // 2)   # roughness/metal are low-frequency: half resolution
         for key in keys:
-            acc = np.zeros(size * size * 4, dtype=np.float32)
-            cover = np.zeros(size * size, dtype=bool)
+            sz = mr_size if key in ('rough', 'metal') else size
+            acc = np.zeros(sz * sz * 4, dtype=np.float32)
+            cover = np.zeros(sz * sz, dtype=bool)
             for (lo_, hi_, ext_) in passes:
                 # byte images for color (bake does the sRGB encode), float for normals (precision)
-                tmp = bpy.data.images.new(f'{name}_{key}_tmp', size, size, alpha=True, float_buffer=key == 'normal')
+                tmp = bpy.data.images.new(f'{name}_{key}_tmp', sz, sz, alpha=True, float_buffer=key == 'normal')
                 if key != 'color':
                     tmp.colorspace_settings.name = 'Non-Color'
                 t0 = time.time()
                 _bake_pass(key, tmp, lo_, hi_, ext_, 0, clear=True)
                 t1 = time.time()
-                px = np.empty(size * size * 4, dtype=np.float32)
+                px = np.empty(sz * sz * 4, dtype=np.float32)
                 tmp.pixels.foreach_get(px)
-                a = uv_mask(lo_, size).ravel() & ~cover
+                a = uv_mask(lo_, sz).ravel() & ~cover
                 print(f'   bake {key} {lo_.name}: {t1 - t0:.1f}s, mask {time.time() - t1:.1f}s', flush=True)
                 idx = np.repeat(a, 4)
                 acc[idx] = px[idx]
                 cover |= a
                 bpy.data.images.remove(tmp)
-            acc = dilate(acc.reshape(size, size, 4), cover.reshape(size, size), max(4, size // 64)).ravel()
+            acc = dilate(acc.reshape(sz, sz, 4), cover.reshape(sz, sz), max(4, sz // 64)).ravel()
             acc[3::4] = 1.0
-            img = bpy.data.images.new(f'{name}_{key}', size, size, alpha=False, float_buffer=key == 'normal')
+            img = bpy.data.images.new(f'{name}_{key}', sz, sz, alpha=False, float_buffer=key == 'normal')
             if key != 'color':
                 img.colorspace_settings.name = 'Non-Color'
             img.pixels.foreach_set(acc)
             img.pack()
             imgs[key] = img
-            print(f'[{self.name}] baked {key}: coverage {cover.mean() * 100:.0f}%', flush=True)
+            print(f'[{self.name}] baked {key} {sz}px: coverage {cover.mean() * 100:.0f}%', flush=True)
 
         dump = os.environ.get('FURN_DUMP')
         if dump:
@@ -2028,7 +2035,7 @@ def _bake_pass(key, img, low, high, ext, margin, clear):
 
 def build_final_material(name, imgs, size):
     """Color + packed metallicRoughness (G=rough, B=metal) + normal, all as exporter-friendly nodes."""
-    w = h = size
+    w = h = imgs['rough'].size[0]
     rough = np.empty(w * h * 4, dtype=np.float32)
     imgs['rough'].pixels.foreach_get(rough)
     mr = np.ones_like(rough)
@@ -2045,6 +2052,7 @@ def build_final_material(name, imgs, size):
     mr_img.pixels.foreach_set(mr)
     mr_img.pack()
     # normal map: bake as float then store as 8-bit
+    w = h = imgs['normal'].size[0]
     nrm = np.empty(w * h * 4, dtype=np.float32)
     imgs['normal'].pixels.foreach_get(nrm)
     n_img = bpy.data.images.new(f'{name}_normal8', w, h, alpha=False)

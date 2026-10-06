@@ -36,14 +36,14 @@ def _mattress_top(x, y):
 
 def build_bed():
     P = F.Piece('bed', seed=3)
-    iron = F.mat_paint('bed_iron', hexc('aaa28c'), hexc('1e1a17'), gloss=0.55, chip=0.55, flake=0.8,
-                       layer2=hexc('4a5248'), rust=0.8, metal_under=0.5, dust=0.6, grime=0.9, bevel_r=0.004,
-                       brush=0.0, seed=2.0, edge_chip=0.12, chip_scale=14.0)
+    iron = F.mat_paint('bed_iron', hexc('a69e88'), hexc('1e1a17'), gloss=0.55, chip=0.8, flake=1.0,
+                       layer2=hexc('4a5248'), rust=1.0, metal_under=0.5, dust=0.6, grime=0.9, bevel_r=0.004,
+                       brush=0.0, seed=2.0, edge_chip=0.2, chip_scale=11.0)
     brass = F.mat_metal('bed_brass', hexc('94733a'), rough=0.38, metal=0.85, tarnish=0.75,
                         tarnish_col=hexc('2e2914'), pitting=0.4)
     ticking = F.mat_fabric('bed_mattress', hexc('968c74'), hexc('7a705a'), stripe=(hexc('3e4658'), 0.032, 0.18, 'X'),
-                           fade=0.1, stains=1.6, dust=0.5, grime=1.0, wear=0.3, mold=0.9, rust_spots=0.9, seed=3.0,
-                           foam=hexc('8c7a54'))
+                           fade=0.1, stains=2.0, dust=0.5, grime=1.0, wear=0.3, mold=0.9, rust_spots=1.0, seed=3.0,
+                           foam=hexc('7a6a48'), use_col=hexc('6a5224'))
     sheet_m = F.mat_fabric('bed_sheet', hexc('9a958a'), hexc('7f7a6e'), fade=0.1, stains=1.3, dust=0.6, grime=1.0,
                            wear=0.1, seed=6.0, weave=0.6, mold=0.4)
     pillow_m = F.mat_fabric('bed_pillow', hexc('a49a80'), hexc('8a7f66'), fade=0.1, stains=1.0, dust=0.5,

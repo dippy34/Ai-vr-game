@@ -1,15 +1,19 @@
 /**
- * Remote player avatar: rounded head with a VR-visor and a color band, a torso hanging below the
- * head (yaw follows the head), and two HandModels. Exponentially smoothed toward the latest pose.
+ * Remote player avatar: head + torso + two hands, exponentially smoothed toward the latest pose.
+ *
+ * Head and torso are the Blender models (avatar_head.glb: origin = eye center; avatar_body.glb:
+ * origin = neck base, both facing -Z) when loaded, tinted per player through the material of the
+ * node named `tint`. Until then (or if missing) a procedural head with a visor + color band and a
+ * procedural torso stand in. The torso hangs under the head and its yaw follows the head lazily.
  */
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { Handedness, PlayerPose, PlayerStatus } from '../../core/types';
+import { bakeObject, type ModelLibrary } from './assets';
 import type { Hand, HandFactory } from './hands';
 import { damp, ensureIndexed, paint, positionNormalOnly, setQ, setV } from './util';
-
 const HEAD_CENTER = new THREE.Vector3(0, 0.028, 0.07);
 
 function headParts(bandColor: number, withColor: boolean): THREE.BufferGeometry {
@@ -67,6 +71,137 @@ function torsoGeometry(color: number): THREE.BufferGeometry {
   return g;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Avatar parts: procedural mesh or GLB instance behind one small interface
+// ---------------------------------------------------------------------------------------------
+
+/** Neck base relative to the eye center, in the head's yaw frame (avatar GLB convention). */
+const HEAD_TO_NECK = new THREE.Vector3(0, -0.215, 0.063);
+
+interface AvatarPart {
+  readonly object: THREE.Object3D;
+  /** True for a Blender model (placed by its own origin convention). */
+  readonly model: boolean;
+  setColor(color: number): void;
+  /** Swap every material for `ghost` (caught player), or back (null). */
+  setGhost(ghost: THREE.Material | null): void;
+  dispose(): void;
+}
+
+class ProceduralPart implements AvatarPart {
+  readonly object: THREE.Mesh;
+  readonly model = false;
+  private readonly mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+
+  constructor(private readonly build: (color: number) => THREE.BufferGeometry, color: number) {
+    this.object = new THREE.Mesh(build(color), this.mat);
+  }
+
+  setColor(color: number): void {
+    this.object.geometry.dispose();
+    this.object.geometry = this.build(color);
+  }
+
+  setGhost(ghost: THREE.Material | null): void {
+    this.object.material = ghost ?? this.mat;
+    this.object.renderOrder = ghost ? 5 : 0;
+  }
+
+  dispose(): void {
+    this.object.geometry.dispose();
+    this.mat.dispose();
+  }
+}
+
+class ModelPart implements AvatarPart {
+  readonly model = true;
+  private readonly meshes: { mesh: THREE.Mesh; material: THREE.Material | THREE.Material[] }[] = [];
+  private readonly tints: THREE.Material[] = [];
+
+  constructor(readonly object: THREE.Object3D, color: number) {
+    // Per-player copy of the `tint` material(s); everything else stays shared with the library.
+    object.getObjectByName('tint')?.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const clone = (mat: THREE.Material): THREE.Material => {
+        const c = mat.clone();
+        c.userData = {};
+        this.tints.push(c);
+        return c;
+      };
+      m.material = Array.isArray(m.material) ? m.material.map(clone) : clone(m.material);
+    });
+    object.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) this.meshes.push({ mesh: m, material: m.material });
+    });
+    this.setColor(color);
+  }
+
+  setColor(color: number): void {
+    for (const t of this.tints) (t as THREE.MeshStandardMaterial).color?.set(color);
+  }
+
+  setGhost(ghost: THREE.Material | null): void {
+    for (const { mesh, material } of this.meshes) {
+      mesh.material = ghost ?? material;
+      mesh.renderOrder = ghost ? 5 : 0;
+    }
+  }
+
+  dispose(): void {
+    for (const t of this.tints) t.dispose();
+    this.object.removeFromParent();
+  }
+}
+
+/**
+ * Makes avatar heads/bodies: GLB ones after `use(lib)` finds them, procedural ones otherwise.
+ * Also bakes the head into flash afterimages (no live avatar needed, e.g. for the local player).
+ */
+export class AvatarKit {
+  private lib: ModelLibrary | null = null;
+  private scratchHead: THREE.Object3D | null = null;
+
+  /** Start using whichever avatar GLBs loaded. Returns true if any did. */
+  use(lib: ModelLibrary): boolean {
+    if (!lib.has('avatar_head') && !lib.has('avatar_body')) return false;
+    this.lib = lib;
+    this.scratchHead = null;
+    return true;
+  }
+
+  head(color: number): AvatarPart {
+    const inst = this.lib?.instance('avatar_head');
+    return inst ? new ModelPart(inst, color) : new ProceduralPart((c) => headParts(c, true), color);
+  }
+
+  body(color: number): AvatarPart {
+    const inst = this.lib?.instance('avatar_body');
+    return inst ? new ModelPart(inst, color) : new ProceduralPart(torsoGeometry, color);
+  }
+
+  /** World-space afterimage geometry (position + normal) of a head at this pose. */
+  bakeHead(position: THREE.Vector3, quaternion: THREE.Quaternion, out: THREE.BufferGeometry[]): void {
+    if (!this.scratchHead && this.lib) this.scratchHead = this.lib.instance('avatar_head');
+    const h = this.scratchHead;
+    if (!h) {
+      out.push(positionNormalOnly(headGhostGeometry().clone()).applyMatrix4(_bm.compose(position, quaternion, _infl)));
+      return;
+    }
+    h.position.copy(position);
+    h.quaternion.copy(quaternion);
+    bakeObject(h, out, 0.004);
+  }
+}
+
+const _bm = new THREE.Matrix4();
+const _infl = new THREE.Vector3(1.03, 1.03, 1.03);
+
+// ---------------------------------------------------------------------------------------------
+// RemoteAvatar
+// ---------------------------------------------------------------------------------------------
+
 interface SmoothHand {
   pos: THREE.Vector3;
   quat: THREE.Quaternion;
@@ -77,6 +212,7 @@ interface SmoothHand {
 const _tp = new THREE.Vector3();
 const _tq = new THREE.Quaternion();
 const _fwd = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
 
 export class RemoteAvatar {
   readonly group = new THREE.Group();
@@ -91,23 +227,24 @@ export class RemoteAvatar {
   private lastDirect = -1e9;
   private initialized = false;
   private torsoYaw = 0;
-  private readonly head: THREE.Mesh;
-  private readonly torso: THREE.Mesh;
-  private readonly headMat = new THREE.MeshLambertMaterial({ vertexColors: true });
-  private readonly torsoMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  private readonly head: AvatarPart;
+  private readonly torso: AvatarPart;
   private readonly handMat: THREE.MeshLambertMaterial;
   private color = -1;
 
-  constructor(readonly id: string, color: number, private readonly ghostMat: THREE.Material, hands: HandFactory) {
+  constructor(
+    readonly id: string, color: number, private readonly ghostMat: THREE.Material, hands: HandFactory,
+    kit: AvatarKit = new AvatarKit(),
+  ) {
     this.group.name = `avatar-${id}`;
-    this.head = new THREE.Mesh(headParts(color, true), this.headMat);
-    this.torso = new THREE.Mesh(torsoGeometry(color), this.torsoMat);
+    this.head = kit.head(color);
+    this.torso = kit.body(color);
     // Gloves tinted toward the player's color so you can tell who is signing in the flash.
     const glove = new THREE.Color(0x7d6e63).lerp(new THREE.Color(color), 0.3);
     this.handMat = new THREE.MeshLambertMaterial({ color: glove });
     this.left = hands.create('left', this.handMat);
     this.right = hands.create('right', this.handMat);
-    this.group.add(this.head, this.torso, this.left.mesh, this.right.mesh);
+    this.group.add(this.head.object, this.torso.object, this.left.mesh, this.right.mesh);
     const mk = (): SmoothHand => ({ pos: new THREE.Vector3(), quat: new THREE.Quaternion(), curls: [0, 0, 0, 0, 0], tracked: false });
     this.hands = { left: mk(), right: mk() };
     this.color = color;
@@ -116,10 +253,8 @@ export class RemoteAvatar {
   setColor(color: number): void {
     if (color === this.color) return;
     this.color = color;
-    this.head.geometry.dispose();
-    this.torso.geometry.dispose();
-    this.head.geometry = headParts(color, true);
-    this.torso.geometry = torsoGeometry(color);
+    this.head.setColor(color);
+    this.torso.setColor(color);
     this.handMat.color.set(0x7d6e63).lerp(new THREE.Color(color), 0.3);
   }
 
@@ -137,11 +272,10 @@ export class RemoteAvatar {
     if (status === this.status) return;
     this.status = status;
     const ghost = status === 'caught';
-    this.head.material = ghost ? this.ghostMat : this.headMat;
-    this.torso.material = ghost ? this.ghostMat : this.torsoMat;
+    this.head.setGhost(ghost ? this.ghostMat : null);
+    this.torso.setGhost(ghost ? this.ghostMat : null);
     this.left.setMaterial(ghost ? this.ghostMat : this.handMat);
     this.right.setMaterial(ghost ? this.ghostMat : this.handMat);
-    this.head.renderOrder = this.torso.renderOrder = ghost ? 5 : 0;
     this.group.visible = status !== 'escaped';
   }
 
@@ -159,8 +293,9 @@ export class RemoteAvatar {
     const kr = snap ? 1 : damp(14, dt);
     this.headPos.lerp(_tp, kp);
     this.headQuat.slerp(_tq, kr);
-    this.head.position.copy(this.headPos);
-    this.head.quaternion.copy(this.headQuat);
+    const head = this.head.object;
+    head.position.copy(this.headPos);
+    head.quaternion.copy(this.headQuat);
 
     // Torso: hangs under the head, yaw follows the head lazily.
     _fwd.set(0, 0, -1).applyQuaternion(this.headQuat);
@@ -168,10 +303,15 @@ export class RemoteAvatar {
     let dy = yaw - this.torsoYaw;
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
     this.torsoYaw += dy * (snap ? 1 : damp(5, dt));
-    this.torso.position.set(this.headPos.x, this.headPos.y - 0.08, this.headPos.z);
-    this.torso.position.x += Math.sin(this.torsoYaw) * 0.05;
-    this.torso.position.z += Math.cos(this.torsoYaw) * 0.05;
-    this.torso.rotation.set(0, this.torsoYaw, 0);
+    const torso = this.torso.object;
+    if (this.torso.model) {
+      torso.position.copy(HEAD_TO_NECK).applyAxisAngle(_up, this.torsoYaw).add(this.headPos);
+    } else {
+      torso.position.set(this.headPos.x, this.headPos.y - 0.08, this.headPos.z);
+      torso.position.x += Math.sin(this.torsoYaw) * 0.05;
+      torso.position.z += Math.cos(this.torsoYaw) * 0.05;
+    }
+    torso.rotation.set(0, this.torsoYaw, 0);
 
     for (const side of ['left', 'right'] as const) {
       const src = t[side];
@@ -197,10 +337,8 @@ export class RemoteAvatar {
   }
 
   dispose(): void {
-    this.head.geometry.dispose();
-    this.torso.geometry.dispose();
-    this.headMat.dispose();
-    this.torsoMat.dispose();
+    this.head.dispose();
+    this.torso.dispose();
     this.handMat.dispose();
     this.left.dispose();
     this.right.dispose();

@@ -127,8 +127,7 @@ def build_armchair():
     back_h = H - zs - 0.005
     # back frame leans back a little
     P.cushion((inner + 0.03, 0.17, back_h), (0, -D / 2 + 0.1, zs + back_h / 2), fab, rot=(6, 0, 0), radius=0.06,
-              bulge=(0.004, 0.016, 0.01), wrinkle=0.004, piping=0.004, lowres=(1, 0, 1), seed=6, name='backframe',
-              tufts=[(-0.14, 0.0), (0.14, 0.0)] if False else ())
+              bulge=(0.004, 0.016, 0.01), wrinkle=0.004, piping=0.004, lowres=(1, 0, 1), seed=6, name='backframe')
     sd = D - 0.19
     sh = 0.15
     P.cushion((inner - 0.006, sd, sh), (0, -D / 2 + 0.18 + sd / 2, zs + sh / 2 - 0.004), fab, radius=0.045,
@@ -138,7 +137,7 @@ def build_armchair():
     bh, bd = 0.45, 0.15
     P.cushion((inner - 0.02, bd, bh), (0, -D / 2 + 0.19 + bd / 2, zs + sh + bh / 2 - 0.04), fab, rot=(16, 0, 0),
               radius=0.05, bulge=(0.008, 0.03, 0.01), wrinkle=0.006, piping=0.0045, lowres=(1, 0, 1), seed=22,
-              name='backcushion', tufts=[(-0.13, 0.03), (0.13, 0.03), (0.0, -0.06)] if False else ())
+              name='backcushion', use=[(0.0, 0.05, 0.12)], twist=0.01)
     P.finish(tex=1024, max_tris=2500, fit=(W, H, D), preview_yaw=35)
 
 

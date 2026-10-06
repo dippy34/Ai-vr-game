@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import math
 
-import bpy
-
 import common
 import props_lib as L
 import props_mats as M

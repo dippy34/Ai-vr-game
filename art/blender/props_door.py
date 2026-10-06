@@ -21,7 +21,7 @@ import math
 
 import bpy
 import bmesh
-from mathutils import Matrix, Vector
+from mathutils import Matrix
 
 import common
 import props_lib as L
@@ -54,7 +54,6 @@ MAIL = (-0.16, 1.02)
 HINGES_Z = (0.26, 1.20, 2.14)
 CASE_W = 0.110
 BAKE_OFFSET = 10.0
-CASE_IN = OW / 2 - JAMB + 0.005 - 0.0                        # casing inner edge |x| = 0.57
 
 
 def _members(hi: bool):
@@ -116,8 +115,8 @@ def _casing_profile(hi: bool):
     return p
 
 
-def _casing_piece(name, length, hi, along: str, side: int, at):
-    """Profile extruded along Z (side casings) or X (head casing). side = +1 interior, -1 exterior."""
+def _casing_piece(name, length, hi):
+    """Casing profile extruded along its local w axis (placed by _place_casing)."""
     prof = _casing_profile(hi)
     bm = bmesh.new()
     lo, hi_ = [], []
@@ -159,7 +158,7 @@ def _casings(hi: bool, side: int):
     flipy = Matrix.Diagonal((1, side, 1, 1))
     zc0, zc1 = 0.20, OH - 0.005
     for sx in (-1, 1):
-        o = _casing_piece('casing', zc1 - zc0, hi, 'Z', side, None)
+        o = _casing_piece('casing', zc1 - zc0, hi)
         # u -> -x for the left (sx=-1) casing, +x for the right
         m = Matrix.Translation((sx * 0.570, y0, zc0)) @ flipy @ Matrix.Diagonal((sx, 1, 1, 1))
         out.append((_place_casing(o, m), 'frame_v'))
@@ -177,7 +176,7 @@ def _casings(hi: bool, side: int):
                                                                OH - 0.005 + 0.061),
                           rot=(-90 * side, 0, 0))
             out.append((ros, 'frame_h'))
-    o = _casing_piece('head_casing', 2 * 0.564, hi, 'X', side, None)
+    o = _casing_piece('head_casing', 2 * 0.564, hi)
     # local: u (profile offset) -> +z (up from the opening), t -> y, w -> x
     m = (Matrix.Translation((-0.564, y0, OH - 0.0)) @ flipy @
          Matrix(((0, 0, 1, 0), (0, 1, 0, 0), (1, 0, 0, 0), (0, 0, 0, 1))))
