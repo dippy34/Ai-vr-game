@@ -8,7 +8,6 @@
 
 import type * as THREE from 'three';
 import type {
-  BreakFreeMethod,
   FlashEvent,
   Handedness,
   HandPose,
@@ -61,16 +60,6 @@ export interface IGameRenderer {
    * catch / jumpscare sequence; for others it can show the monster grabbing them.
    */
   caught(event: { id: PlayerId; position: Vec3 }, state: WorldState, localId: PlayerId, localPose: PlayerPose): void;
-  /**
-   * Second chance: the monster grabbed `event.id` (sim 'playerGrabbed'). For the local player the
-   * catch sequence starts and HOLDS on its face (the struggle) until brokeFree() or caught(); for
-   * others it lunges at them and holds them.
-   */
-  grabbed(event: { id: PlayerId; position: Vec3; window: number }, state: WorldState, localId: PlayerId, localPose: PlayerPose): void;
-  /** The local player's struggle this frame (the pry spots to draw), or null when there is none. */
-  setStrugglePrompt(prompt: StrugglePrompt | null): void;
-  /** `event.id` got out of its grip: it recoils (for the local player, the sequence lets go). */
-  brokeFree(event: { id: PlayerId; method: BreakFreeMethod; position: Vec3 }, state: WorldState, localId: PlayerId): void;
   /** Local player's current voice loudness 0..1 for the wrist noise meter. */
   setLocalNoiseLevel(level: number): void;
   /** Short in-world message floating in front of the player (works in VR and on desktop). */
@@ -81,21 +70,6 @@ export interface IGameRenderer {
    */
   holdingMessages(): boolean;
   render(): void;
-}
-
-/** What to draw while the local player struggles in its grip (see src/game/struggle.ts). */
-export interface StrugglePrompt {
-  /** World positions of the two pry spots on its jaws. */
-  spots: Record<Handedness, Vec3>;
-  /** Desktop: the key for each spot ('Q'); VR: '' (grab it with that hand). */
-  labels: Record<Handedness, string>;
-  /** Spots already done (key pressed / hand latched on). */
-  done: Record<Handedness, boolean>;
-  /** Fraction of the window left, 1 -> 0. */
-  timeLeft: number;
-  state: 'pending' | 'free' | 'fumbled' | 'expired';
-  /** One extra line under the spots ('CLICK: LAST FLASH', 'or SCREAM'), may be ''. */
-  hint: string;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -131,8 +105,6 @@ export interface InputFrame {
   usePressed: boolean;
   /** Menu button / Escape pressed this frame. */
   menuPressed: boolean;
-  /** Desktop: KeyboardEvent.codes pressed this frame (not auto-repeats). Empty in VR. */
-  keysPressed: string[];
 }
 
 export interface IInputManager {

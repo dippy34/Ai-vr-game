@@ -71,8 +71,6 @@ export interface Session {
   sendAction(action: PlayerAction): void;
   /** Host: start/restart a round. Clients: ignored. */
   startRound(): void;
-  /** Host, in the lobby: Loud Mode on/off (clients see it in the state). Clients: ignored. */
-  setLoudMode(on: boolean): void;
   update(dt: number): void;
   close(): void;
 }
@@ -228,10 +226,6 @@ export class HostSession implements Session {
 
   sendAction(action: PlayerAction): void {
     this.emit(this.sim.handleAction(this.localId, action));
-  }
-
-  setLoudMode(on: boolean): void {
-    this.sim.setLoudMode(on);
   }
 
   startRound(): void {
@@ -479,10 +473,6 @@ export class ClientSession implements Session {
   }
 
   startRound(): void {
-    /* only the host can */
-  }
-
-  setLoudMode(): void {
     /* only the host can */
   }
 

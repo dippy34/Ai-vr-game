@@ -229,18 +229,10 @@ describe('client-side sanitizers vs a legit host', () => {
     events.push(...sim.step(1 / 30));
     sim.state.monster.position = v3(0.7, 0, 5.6);
     sim.setPlayerPose('p1', pose(0.7, 5.6));
-    // Grabbed: p1 pries free mid-snapshot, then stays put and gets caught when the stun ends.
-    for (let i = 0; i < 3; i++) events.push(...sim.step(1 / 30));
-    check();
-    events.push(...sim.handleAction('p1', { type: 'breakFree', method: 'pry', hand: 'right', position: v3(0.7, 1.6, 5.6), direction: v3(0, 0, -1) }));
-    check();
-    for (let i = 0; i < 150; i++) {
-      events.push(...sim.step(1 / 30));
-      if (i % 10 === 0) check();
-    }
+    for (let i = 0; i < 5; i++) events.push(...sim.step(1 / 30));
     check();
     const types = new Set(events.map((e) => (e as { type: string }).type));
-    for (const t of ['pickup', 'flash', 'dryFire', 'fuseInserted', 'exitOpened', 'monsterAlert', 'playerEscaped', 'playerGrabbed', 'playerBrokeFree', 'playerCaught', 'phase']) {
+    for (const t of ['pickup', 'flash', 'dryFire', 'fuseInserted', 'exitOpened', 'monsterAlert', 'playerEscaped', 'playerCaught', 'phase']) {
       expect(types).toContain(t);
     }
     for (const e of events) {

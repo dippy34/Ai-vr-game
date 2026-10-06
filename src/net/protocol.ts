@@ -18,8 +18,7 @@ import type {
   WorldState,
 } from '../core/types';
 
-/** Bump when messages or the state change shape (2: second chance, Loud Mode). */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 1;
 
 export interface LobbyPlayer {
   id: PlayerId;

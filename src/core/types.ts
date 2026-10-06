@@ -79,8 +79,6 @@ export interface PlayerState {
   /** True for keyboard/mouse players (they get bigger grab reach). */
   isDesktop: boolean;
   status: PlayerStatus;
-  /** Second chances left this round (the monster grabs instead of catching while > 0). */
-  secondChances: number;
   /** Where this player's rig (feet) should be placed when a round starts. Assigned by the host. */
   spawn: Vec3;
   /** Yaw the player should face at spawn. */
@@ -123,11 +121,7 @@ export type MonsterMode =
   /** Heard something loud and close; running at it. */
   | 'chase'
   /** Just caught someone; pauses before roaming again. */
-  | 'feeding'
-  /** Holding someone who can still break free (WorldState.grab). */
-  | 'grab'
-  /** Reeling after someone broke free: deaf and still, then it chases them. */
-  | 'stunned';
+  | 'feeding';
 
 export interface MonsterState {
   position: Vec3;
@@ -159,22 +153,7 @@ export interface WorldState {
   exitOpen: boolean;
   /** Most recent noise the monster noticed (for debugging / UI). */
   lastHeard: { position: Vec3; loudness: number; time: number } | null;
-  /** Lobby option (host): screaming into your mic breaks you free (SECOND_CHANCE). */
-  loudMode: boolean;
-  /** Who the monster is holding right now (second chance in progress), else null. */
-  grab: GrabState | null;
 }
-
-export interface GrabState {
-  playerId: PlayerId;
-  /** Sim time it grabbed them. */
-  start: number;
-  /** Sim time the host stops accepting a way out (window + latency grace); then: caught. */
-  deadline: number;
-}
-
-/** How someone got out of the monster's grip. */
-export type BreakFreeMethod = 'pry' | 'flash' | 'scream' | 'rescue';
 
 export type NoiseSource = 'voice' | 'footstep' | 'camera' | 'item' | 'door';
 
@@ -194,13 +173,7 @@ export type PlayerAction =
   /** Let go of whatever is in `hand`, leaving it at `position`. */
   | { type: 'release'; hand: Handedness; position: Vec3 }
   /** Pull the camera trigger. Host checks the player holds the camera in `hand` and has film. */
-  | { type: 'flash'; hand: Handedness; position: Vec3; direction: Vec3 }
-  /**
-   * While grabbed: 'pry' (the player won the struggle on their device) or 'flash' (Last Flash with
-   * the camera in `hand`, fired from `position` along `direction`). Host checks the grab, the
-   * deadline, and for 'flash' the camera and film.
-   */
-  | { type: 'breakFree'; method: 'pry' | 'flash'; hand: Handedness; position: Vec3; direction: Vec3 };
+  | { type: 'flash'; hand: Handedness; position: Vec3; direction: Vec3 };
 
 export interface FlashEvent {
   type: 'flash';
@@ -224,10 +197,6 @@ export type SimEvent =
   /** Monster changed mode to 'investigate' or 'chase' (audio plays a growl/shriek). */
   | { type: 'monsterAlert'; mode: MonsterMode; position: Vec3 }
   | { type: 'playerCaught'; id: PlayerId; position: Vec3 }
-  /** Second chance: the monster grabbed `id`; they have `window` seconds to break free. */
-  | { type: 'playerGrabbed'; id: PlayerId; position: Vec3; window: number }
-  /** `id` got out of its grip (`by` = the teammate who rescued them). */
-  | { type: 'playerBrokeFree'; id: PlayerId; method: BreakFreeMethod; position: Vec3; by: PlayerId | null }
   | { type: 'playerEscaped'; id: PlayerId }
   | { type: 'phase'; phase: GamePhase };
 

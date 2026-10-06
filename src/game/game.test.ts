@@ -92,7 +92,6 @@ function fakeSession(sim: GameSim, localId: string): Session & { closed: number;
     sendNoise: vi.fn(),
     sendAction: vi.fn(),
     startRound: vi.fn(),
-    setLoudMode: vi.fn(),
     update: (dt: number) => {
       for (const e of sim.step(dt)) s.callbacks.onEvent(e);
     },

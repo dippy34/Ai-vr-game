@@ -200,8 +200,6 @@ export class InputManager implements IInputManager {
   private pendingUse = false;
   private pendingTrigger = false;
   private pendingMenu = false;
-  /** Desktop key codes pressed since the last update (InputFrame.keysPressed). */
-  private pendingKeys: string[] = [];
   private lastMenuAt = -1e9;
   /** Set when WE release the pointer lock (setEnabled(false) / entering XR): not a menu press. */
   private suppressUnlockMenu = false;
@@ -379,7 +377,6 @@ export class InputManager implements IInputManager {
     const xr = renderer.xr;
     // Desktop-only events are meaningless here.
     this.pendingUse = this.pendingTrigger = this.pendingMenu = false;
-    this.pendingKeys.length = 0;
     this.mouseDX = this.mouseDY = 0;
 
     const gripPressed = edges();
@@ -558,7 +555,6 @@ export class InputManager implements IInputManager {
       triggerPressed,
       usePressed: false,
       menuPressed,
-      keysPressed: [],
     };
   }
 
@@ -672,7 +668,6 @@ export class InputManager implements IInputManager {
     this.mouseDX = this.mouseDY = 0;
     this.pendingUse = false;
     this.pendingTrigger = false;
-    this.pendingKeys.length = 0;
     this.sign = null;
   }
 
@@ -687,7 +682,6 @@ export class InputManager implements IInputManager {
     if (this.isLocked() && GAME_KEYS.has(e.code)) e.preventDefault();
     this.keys.add(e.code);
     if (e.repeat) return;
-    if (this.pendingKeys.length < 16) this.pendingKeys.push(e.code);
     if (e.code === 'KeyE') this.pendingUse = true;
     const preset = signForCode(e.code);
     if (preset) this.sign = { preset, start: this.time, held: true };
@@ -776,9 +770,7 @@ export class InputManager implements IInputManager {
     triggerPressed.right = this.enabled && this.pendingTrigger;
     const usePressed = this.enabled && this.pendingUse;
     const menuPressed = this.pendingMenu;
-    const keysPressed = this.enabled ? this.pendingKeys.slice() : [];
     this.pendingTrigger = this.pendingUse = this.pendingMenu = false;
-    this.pendingKeys.length = 0;
 
     return {
       mode: 'desktop',
@@ -794,7 +786,6 @@ export class InputManager implements IInputManager {
       triggerPressed,
       usePressed,
       menuPressed,
-      keysPressed,
     };
   }
 }

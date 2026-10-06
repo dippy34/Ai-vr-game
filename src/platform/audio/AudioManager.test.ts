@@ -15,7 +15,6 @@ function player(id: string, x: number, z: number, status: PlayerState['status'] 
     color: 0xffffff,
     isDesktop: true,
     status,
-    secondChances: 1,
     spawn: { x, y: 0, z },
     spawnYaw: 0,
     pose: { head: { position: { x, y: 1.6, z }, rotation: { x: 0, y: 0, z: 0, w: 1 } }, left: hand(), right: hand() },
@@ -36,8 +35,6 @@ function world(): WorldState {
     fusesRequired: 3,
     exitOpen: false,
     lastHeard: null,
-    loudMode: false,
-    grab: null,
   };
 }
 

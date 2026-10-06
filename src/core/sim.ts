@@ -1,6 +1,5 @@
-import { GAME, HEARING, MONSTER, NOISE, PLAYER, PLAYER_COLORS, SECOND_CHANCE } from '../config';
+import { GAME, HEARING, MONSTER, NOISE, PLAYER, PLAYER_COLORS } from '../config';
 import type {
-  BreakFreeMethod,
   Box,
   Handedness,
   HandPose,
@@ -33,7 +32,6 @@ import {
   normalize3,
   quatFromYaw,
   rotate3,
-  sub3,
   v3,
   wrapAngle,
   yawFromQuat,
@@ -178,12 +176,6 @@ interface Brain {
   visited: number[];
   /** Noise memory per nav node (by index): how much it has heard around there lately. */
   heat: number[];
-  /** Seconds of stun left, and who broke free (it goes for them when the stun ends). */
-  stun: number;
-  stunTarget: PlayerId | null;
-  /** A rescued player it ignores (touch / catch) until `spareUntil`. */
-  spare: PlayerId | null;
-  spareUntil: number;
 }
 
 /**
@@ -239,8 +231,6 @@ export class GameSim {
       fusesRequired: this.fusesRequired(),
       exitOpen: false,
       lastHeard: null,
-      loudMode: false,
-      grab: null,
     };
     this.resetWorld();
   }
@@ -265,7 +255,6 @@ export class GameSim {
       color,
       isDesktop,
       status: 'alive',
-      secondChances: SECOND_CHANCE.perRound,
       spawn: copy3(sp.position),
       spawnYaw: sp.yaw,
       pose: makeSpawnPose(sp.position, sp.yaw),
@@ -289,11 +278,6 @@ export class GameSim {
     delete this.moveBudget[id];
     this.joinOrder = this.joinOrder.filter((j) => j !== id);
     if (this.state.monster.targetPlayer === id) this.state.monster.targetPlayer = null;
-    if (this.state.grab?.playerId === id) {
-      this.state.grab = null;
-      this.enterWander();
-    }
-    if (this.brain.stunTarget === id) this.brain.stunTarget = null;
     this.checkEnd(out);
     return out;
   }
@@ -332,7 +316,6 @@ export class GameSim {
       const idx = i % spawns.length;
       this.spawnOf[id] = idx;
       p.status = 'alive';
-      p.secondChances = SECOND_CHANCE.perRound;
       p.held = { left: null, right: null };
       p.spawn = copy3(spawns[idx].position);
       p.spawnYaw = spawns[idx].yaw;
@@ -342,12 +325,6 @@ export class GameSim {
     s.phase = 'playing';
     this.pending = [];
     return [{ type: 'phase', phase: 'playing' }];
-  }
-
-  /** Lobby option: screaming into your mic breaks you free (SECOND_CHANCE). Not mid-round. */
-  setLoudMode(on: boolean): void {
-    if (this.state.phase === 'playing') return;
-    this.state.loudMode = on === true;
   }
 
   // -------------------------------------------------------------------------------------------
@@ -372,13 +349,6 @@ export class GameSim {
     if (!action || !isHand(action.hand) || !isFiniteVec3(action.position)) return out;
     // Hands are never farther than an arm from the eyes (actions come off the network).
     const at = clampToward(p.pose.head.position, copy3(action.position), LIMITS.handReach);
-    if (s.grab?.playerId === id) {
-      // In its grip, the only thing you can do is try to get out.
-      if (action.type === 'breakFree' && (action.method === 'pry' || action.method === 'flash')) {
-        this.breakFree(p, action.method, { hand: action.hand, at, direction: action.direction }, out);
-      }
-      return out;
-    }
     switch (action.type) {
       case 'grab':
         this.grab(p, action.hand, at, action.reach, out);
@@ -460,10 +430,6 @@ export class GameSim {
       stuckCount: 0,
       visited: this.level.nav.map(() => NEVER),
       heat: this.level.nav.map(() => 0),
-      stun: 0,
-      stunTarget: null,
-      spare: null,
-      spareUntil: NEVER,
     };
   }
 
@@ -523,7 +489,6 @@ export class GameSim {
     s.fusesInserted = 0;
     s.exitOpen = s.fusesRequired === 0;
     s.lastHeard = null;
-    s.grab = null;
 
     // Pick fuse spots with a seeded shuffle; a film roll on every film spot.
     const order = L.fuseSpawns.map((_, i) => i);
@@ -759,11 +724,7 @@ export class GameSim {
       if (!src || src.status !== 'alive') return;
     }
     const m = s.monster;
-    if (m.mode === 'feeding' || m.mode === 'stunned') return;
-    if (m.mode === 'grab') {
-      this.hearWhileGrabbing(noise, pid, loudness, out);
-      return;
-    }
+    if (m.mode === 'feeding') return;
     const ratio = this.hearingRatio(noise.position, loudness);
     if (ratio <= 0) return;
     this.remember(noise.position, ratio);
@@ -1068,14 +1029,6 @@ export class GameSim {
       case 'chase':
         this.updateChase(dt, out);
         return;
-      case 'grab':
-        this.updateGrab(out);
-        return;
-      case 'stunned':
-        m.speed = 0;
-        this.brain.stun -= dt;
-        if (this.brain.stun <= 0) this.endStun(out);
-        return;
     }
   }
 
@@ -1242,19 +1195,17 @@ export class GameSim {
   private checkContacts(out: SimEvent[]): void {
     const s = this.state;
     const m = s.monster;
-    if (m.mode === 'feeding' || m.mode === 'grab' || m.mode === 'stunned') return;
+    if (m.mode === 'feeding') return;
     const reachR = Math.max(HEARING.catchRadius, HEARING.touchRadius);
     for (const p of Object.values(s.players)) {
       if (p.status !== 'alive') continue;
-      if (p.id === this.brain.spare && s.time < this.brain.spareUntil) continue;
       const head = p.pose.head.position;
       const d = distXZ(m.position, head);
       if (d > reachR) continue;
       // Never through a wall.
       if (wallsBetween(this.level, v3(m.position.x, head.y, m.position.z), head, this.coll()) > 0) continue;
       if (d <= HEARING.catchRadius) {
-        if (p.secondChances > 0) this.grabPlayer(p, out);
-        else this.catchPlayer(p, out);
+        this.catchPlayer(p, out);
         return;
       }
       if (d <= HEARING.touchRadius) {
@@ -1276,148 +1227,6 @@ export class GameSim {
     this.dropAll(p, out, false);
     out.push({ type: 'playerCaught', id: p.id, position: copy3(p.pose.head.position) });
     this.enterFeeding();
-  }
-
-  // ---- second chance (SECOND_CHANCE) -------------------------------------------------------------
-
-  /** It reached someone who still has a second chance: hold them while they try to get out. */
-  private grabPlayer(p: PlayerState, out: SimEvent[]): void {
-    const s = this.state;
-    const m = s.monster;
-    const b = this.brain;
-    const W = SECOND_CHANCE;
-    p.secondChances = Math.max(0, p.secondChances - 1);
-    s.grab = { playerId: p.id, start: s.time, deadline: s.time + W.window + W.latencyGrace };
-    m.mode = 'grab';
-    m.speed = 0;
-    m.target = null;
-    m.targetPlayer = p.id;
-    m.alert = 1;
-    m.yaw = yawTowards(m.position, p.pose.head.position);
-    b.route = [];
-    b.goal = null;
-    b.chasePos = null;
-    b.listening = false;
-    b.pause = 0;
-    b.stimScore = 0;
-    out.push({ type: 'playerGrabbed', id: p.id, position: copy3(p.pose.head.position), window: W.window });
-  }
-
-  private updateGrab(out: SimEvent[]): void {
-    const s = this.state;
-    const m = s.monster;
-    const g = s.grab;
-    const p = g ? playerOf(s, g.playerId) : undefined;
-    m.speed = 0;
-    if (!g || !p || p.status !== 'alive') {
-      s.grab = null;
-      this.enterWander();
-      return;
-    }
-    m.yaw = yawTowards(m.position, p.pose.head.position);
-    if (s.time > g.deadline) {
-      s.grab = null;
-      this.catchPlayer(p, out);
-    }
-  }
-
-  /**
-   * `p` got out by themselves (pry / Last Flash / scream). Ignored unless it is holding them and
-   * the window is open; Last Flash also needs the camera in `flash.hand` and film.
-   */
-  private breakFree(
-    p: PlayerState,
-    method: Exclude<BreakFreeMethod, 'rescue'>,
-    flash: { hand: Handedness; at: Vec3; direction: Vec3 } | null,
-    out: SimEvent[],
-  ): void {
-    const s = this.state;
-    const g = s.grab;
-    const W = SECOND_CHANCE;
-    if (!g || g.playerId !== p.id || s.monster.mode !== 'grab' || s.time > g.deadline) return;
-    if (method === 'flash') {
-      const cam = s.camera;
-      if (!flash || cam.holder !== p.id || cam.hand !== flash.hand || cam.film <= 0) return;
-      cam.film -= Math.min(cam.film, W.flashFilmCost);
-      cam.lastFlashTime = s.time;
-      const face = v3(s.monster.position.x, MONSTER.height * 0.85, s.monster.position.z);
-      const dir = isFiniteVec3(flash.direction) ? normalize3(flash.direction) : normalize3(sub3(face, flash.at));
-      out.push({ type: 'flash', by: p.id, position: copy3(flash.at), direction: dir, time: s.time });
-    }
-    s.grab = null;
-    // You run with empty hands (Last Flash keeps the camera it was fired from).
-    for (const hand of HANDS) {
-      if (method !== 'flash' || p.held[hand]?.kind !== 'camera') this.dropHand(p, hand, p.pose[hand].position, out, false);
-    }
-    out.push({ type: 'playerBrokeFree', id: p.id, method, position: copy3(p.pose.head.position), by: null });
-    this.stun(p, method === 'flash' ? W.flashStun : method === 'scream' ? W.screamStun : W.pryStun);
-  }
-
-  /** While it holds someone it only listens for their scream (Loud Mode) or a teammate's racket. */
-  private hearWhileGrabbing(noise: NoiseEvent, pid: PlayerId | null, loudness: number, out: SimEvent[]): void {
-    const s = this.state;
-    const g = s.grab;
-    const victim = g ? playerOf(s, g.playerId) : undefined;
-    if (!g || !victim) return;
-    if (pid === g.playerId) {
-      if (s.loudMode && noise.source === 'voice' && loudness >= SECOND_CHANCE.screamLevel) {
-        this.breakFree(victim, 'scream', null, out);
-      }
-      return;
-    }
-    if (loudness < SECOND_CHANCE.rescueLoudness || s.time > g.deadline) return;
-    const ratio = this.hearingRatio(noise.position, loudness);
-    if (ratio < HEARING.chaseRatio) return;
-    // It drops them and goes for the noise.
-    s.grab = null;
-    out.push({ type: 'playerBrokeFree', id: victim.id, method: 'rescue', position: copy3(victim.pose.head.position), by: pid });
-    this.brain.spare = victim.id;
-    this.brain.spareUntil = s.time + SECOND_CHANCE.rescueSpare;
-    s.lastHeard = { position: copy3(noise.position), loudness, time: s.time };
-    this.enterChase(noise.position, pid, out, true);
-    this.setStim(ratio);
-  }
-
-  /** Reel back from `p` (never through a wall), deaf for `seconds`. */
-  private stun(p: PlayerState, seconds: number): void {
-    const m = this.state.monster;
-    const b = this.brain;
-    m.mode = 'stunned';
-    m.speed = 0;
-    m.target = null;
-    m.targetPlayer = null;
-    m.alert = 1;
-    b.stun = seconds;
-    b.stunTarget = p.id;
-    b.route = [];
-    b.goal = null;
-    b.chasePos = null;
-    const head = p.pose.head.position;
-    let dx = m.position.x - head.x;
-    let dz = m.position.z - head.z;
-    let l = Math.hypot(dx, dz);
-    if (l < 1e-4) {
-      dx = Math.sin(m.yaw);
-      dz = Math.cos(m.yaw);
-      l = 1;
-    }
-    const r = SECOND_CHANCE.recoil / l;
-    const np = moveCircle(this.level, m.position, v3(dx * r, 0, dz * r), SIM_TUNING.monsterRadius, this.coll());
-    m.position = v3(np.x, 0, np.z);
-    this.resetStuck();
-  }
-
-  /** Stun over: straight for whoever got away (if they're still in the house). */
-  private endStun(out: SimEvent[]): void {
-    const b = this.brain;
-    const p = playerOf(this.state, b.stunTarget);
-    b.stunTarget = null;
-    if (p && p.status === 'alive') {
-      this.enterChase(p.pose.head.position, p.id, out, true);
-      this.setStim(HEARING.chaseRatio);
-    } else {
-      this.enterWander();
-    }
   }
 
   private checkEscapes(out: SimEvent[]): void {
