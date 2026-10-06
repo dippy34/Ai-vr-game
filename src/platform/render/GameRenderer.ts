@@ -15,6 +15,7 @@ import { LevelView } from './LevelView';
 import { MessagePanel } from './MessagePanel';
 import { MonsterModel } from './MonsterModel';
 import { ModelLibrary } from './assets';
+import { SurfaceLibrary } from './SurfaceTextures';
 import { SkinnedMonster } from './SkinnedMonster';
 import { FURNITURE_MODEL_NAMES } from './FurnitureModels';
 import { NoiseMeter } from './NoiseMeter';
@@ -41,12 +42,14 @@ const AFTERIMAGE_MIN_DOT = 0.1;
 /** GLB models the renderer knows how to use (public/models/<name>.glb). */
 const MODEL_NAMES = [
   'monster', 'hand_left', 'hand_right', 'avatar_head', 'avatar_body',
-  'camera', 'fuse', 'film', 'fusebox', 'door', ...FURNITURE_MODEL_NAMES,
+  'camera', 'fuse', 'film', 'fusebox', 'door', 'window_frame', 'doorway_casing', 'radiator',
+  ...FURNITURE_MODEL_NAMES,
 ];
 /** Every GLB in the manifest with one of these prefixes is loaded too (set dressing). */
 const MODEL_PREFIXES = [DRESSING_PREFIX];
 /** Models that are baked into the level, so the level is rebuilt when they arrive. */
-const isLevelModel = (n: string): boolean => n.startsWith('furniture_') || n.startsWith(DRESSING_PREFIX) || n === 'fusebox' || n === 'door' || n === 'fuse';
+const LEVEL_MODELS = new Set(['fusebox', 'door', 'fuse', 'window_frame', 'doorway_casing', 'radiator']);
+const isLevelModel = (n: string): boolean => n.startsWith('furniture_') || n.startsWith(DRESSING_PREFIX) || LEVEL_MODELS.has(n);
 
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
@@ -74,6 +77,8 @@ export class GameRenderer implements IGameRenderer {
   private monster: MonsterModel | SkinnedMonster;
   /** Blender GLB models; each one replaces its procedural fallback once loaded. */
   readonly models = new ModelLibrary();
+  /** Blender-baked wall/floor/ceiling/trim textures (optional; canvas textures otherwise). */
+  readonly surfaces = new SurfaceLibrary(8);
   private readonly items = new Map<number, Prop>();
   private readonly seenItems = new Set<number>();
   private cameraProp: CameraProp;
@@ -150,7 +155,8 @@ export class GameRenderer implements IGameRenderer {
     this.resize();
     window.addEventListener('resize', this.onResize);
 
-    void this.models.load(MODEL_NAMES, MODEL_PREFIXES).then(() => this.applyModels());
+    // Models and the house's surface textures load together; the level is rebuilt once with both.
+    void Promise.all([this.models.load(MODEL_NAMES, MODEL_PREFIXES), this.surfaces.load()]).then(() => this.applyModels());
   }
 
   /** Swap procedural stand-ins for the Blender models that loaded. */
@@ -199,7 +205,7 @@ export class GameRenderer implements IGameRenderer {
     }
     if (this.models.has('fuse') || this.models.has('film')) this.clearItems();
     // A level built before the models arrived gets rebuilt with them.
-    if (this.levelData && this.models.names().some(isLevelModel)) this.loadLevel(this.levelData);
+    if (this.levelData && (this.models.names().some(isLevelModel) || this.surfaces.loaded)) this.loadLevel(this.levelData);
   }
 
   private clearItems(): void {
@@ -223,7 +229,7 @@ export class GameRenderer implements IGameRenderer {
     this.clearItems();
     this.flashFx.clearAfterimages();
     this.levelData = level;
-    this.level = new LevelView(level, this.models);
+    this.level = new LevelView(level, this.models, this.surfaces);
     this.ctx.scene.add(this.level.group);
     // Compile every shader now (incl. afterimage + whiteout) so the first flash doesn't hitch.
     this.flashFx.setWarmupVisible(true);

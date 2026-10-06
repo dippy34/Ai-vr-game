@@ -22,6 +22,8 @@ import {
 } from './textures';
 import { aabbOf, damp, disposeTree, rayAabb, unitCapsule, type Aabb } from './util';
 import type { ModelLibrary } from './assets';
+import type { SurfaceLibrary } from './SurfaceTextures';
+import { roomAt } from '../../core/level';
 import { StaticBatcher } from './batch';
 import { DressingSet } from './Dressing';
 import { FurnitureSet } from './FurnitureModels';
@@ -60,14 +62,14 @@ class Bucket {
 
   build(material: THREE.Material, name: string): THREE.Mesh | null {
     if (this.parts.length === 0) {
-      material.dispose();
+      if (!material.userData.shared) material.dispose();
       return null;
     }
     const merged = mergeGeometries(this.parts, false);
     for (const p of this.parts) p.dispose();
     this.parts.length = 0;
     if (!merged) {
-      material.dispose();
+      if (!material.userData.shared) material.dispose();
       return null;
     }
     merged.computeBoundingSphere();
@@ -937,6 +939,71 @@ const STATIC_CHUNK = 7;
 
 const _cc = new THREE.Vector3();
 
+/** Rooms that get the second (striped) wallpaper; the rest get the damask. */
+const WALLPAPER_B_ROOMS = new Set(['hallway', 'foyer', 'study', 'kitchen', 'bathroom', 'storage']);
+/** Rooms with tiled floors (the rest are hardwood). */
+const TILE_FLOOR_ROOMS = new Set(['kitchen', 'bathroom']);
+/** The window frame model's glass sits this far inside the wall plane; walls here are solid, so
+ * the model is set this far into the room to keep its glass in front of the wall surface. */
+const WINDOW_GLASS_DEPTH = 0.11;
+
+/**
+ * One side face of a wall box as a quad (front side facing `n`), for per-room wallpaper.
+ * Faces: 0 +X, 1 -X, 2 -Y (underside, e.g. doorway lintels), 3 +Z, 4 -Z. Top faces are hidden.
+ */
+function wallFaceQuad(b: Box, face: number): { geo: THREE.BufferGeometry; n: THREE.Vector3; c: THREE.Vector3 } {
+  const { min, max } = b;
+  let pts: THREE.Vector3[];
+  let n: THREE.Vector3;
+  switch (face) {
+    case 0: n = new THREE.Vector3(1, 0, 0); pts = [[max.x, min.y, max.z], [max.x, min.y, min.z], [max.x, max.y, min.z], [max.x, max.y, max.z]].map((a) => new THREE.Vector3(...a)); break;
+    case 1: n = new THREE.Vector3(-1, 0, 0); pts = [[min.x, min.y, min.z], [min.x, min.y, max.z], [min.x, max.y, max.z], [min.x, max.y, min.z]].map((a) => new THREE.Vector3(...a)); break;
+    case 2: n = new THREE.Vector3(0, -1, 0); pts = [[min.x, min.y, min.z], [max.x, min.y, min.z], [max.x, min.y, max.z], [min.x, min.y, max.z]].map((a) => new THREE.Vector3(...a)); break;
+    case 3: n = new THREE.Vector3(0, 0, 1); pts = [[min.x, min.y, max.z], [max.x, min.y, max.z], [max.x, max.y, max.z], [min.x, max.y, max.z]].map((a) => new THREE.Vector3(...a)); break;
+    default: n = new THREE.Vector3(0, 0, -1); pts = [[max.x, min.y, min.z], [min.x, min.y, min.z], [min.x, max.y, min.z], [max.x, max.y, min.z]].map((a) => new THREE.Vector3(...a)); break;
+  }
+  // Make sure the triangles face outward whatever the corner order above.
+  const e1 = pts[1].clone().sub(pts[0]);
+  const e2 = pts[2].clone().sub(pts[0]);
+  if (e1.cross(e2).dot(n) < 0) pts.reverse();
+  const pos = new Float32Array(12);
+  const nrm = new Float32Array(12);
+  pts.forEach((p, i) => {
+    pos.set([p.x, p.y, p.z], i * 3);
+    nrm.set([n.x, n.y, n.z], i * 3);
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  geo.setIndex([0, 1, 2, 0, 2, 3]);
+  const c = pts.reduce((a, p) => a.add(p), new THREE.Vector3()).multiplyScalar(0.25);
+  return { geo, n, c };
+}
+
+/**
+ * A wall face split into ~1 m pieces along its length, so a long wall (an outside wall runs past
+ * several rooms) gets the right wallpaper on each stretch.
+ */
+function wallFaceSegments(b: Box, face: number, maxLen = 1.0): ReturnType<typeof wallFaceQuad>[] {
+  if (face === 2) return [wallFaceQuad(b, face)];
+  const alongX = face === 3 || face === 4;
+  const lo = alongX ? b.min.x : b.min.z;
+  const hi = alongX ? b.max.x : b.max.z;
+  const n = Math.max(1, Math.ceil((hi - lo) / maxLen - 1e-6));
+  const out: ReturnType<typeof wallFaceQuad>[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = lo + ((hi - lo) * i) / n;
+    const c = lo + ((hi - lo) * (i + 1)) / n;
+    const sub: Box = {
+      ...b,
+      min: alongX ? { ...b.min, x: a } : { ...b.min, z: a },
+      max: alongX ? { ...b.max, x: c } : { ...b.max, z: c },
+    };
+    out.push(wallFaceQuad(sub, face));
+  }
+  return out;
+}
+
 export class LevelView {
   readonly group = new THREE.Group();
   /** Wall boxes for line-of-sight tests (flash afterimages). */
@@ -952,7 +1019,7 @@ export class LevelView {
   /** Merged static Blender models (chunked; see STATIC_CHUNK). */
   private readonly statics = new THREE.Group();
 
-  constructor(level: LevelData, models: ModelLibrary | null = null) {
+  constructor(level: LevelData, models: ModelLibrary | null = null, surfaces: SurfaceLibrary | null = null) {
     this.group.name = 'level';
     // Every static Blender model (furniture, dressing, fuse box body, door frame) merges here.
     const batcher = new StaticBatcher(level.bounds, STATIC_CHUNK);
@@ -961,9 +1028,19 @@ export class LevelView {
     const floorBoxes = level.boxes.filter((b) => b.kind === 'floor');
     for (const w of wallBoxes) this.walls.push(aabbOf(w.min, w.max));
 
-    const walls = new Bucket({ tileU: 2, tileV: 2.7 });
-    const floors = new Bucket({ tileU: 2, tileV: 2, tileTop: 2 });
-    const ceilings = new Bucket({ tileU: 2, tileV: 2, tileTop: 2 });
+    // Blender-baked surfaces when available (UVs in world meters / tile size), else canvas textures.
+    const S = surfaces?.loaded ? surfaces : null;
+    const tileOf = (name: string, fallback: NonNullable<UvMode>): NonNullable<UvMode> => {
+      const set = S?.get(name);
+      return set ? { tileU: set.tile[0], tileV: set.tile[1], tileTop: set.tile[0] } : fallback;
+    };
+    const walls = new Bucket(tileOf('wallpaper_a', { tileU: 2, tileV: 2.7 }));
+    const wallsB = new Bucket(tileOf('wallpaper_b', { tileU: 2, tileV: 2.7 }));
+    const floors = new Bucket(tileOf('wood_floor', { tileU: 2, tileV: 2, tileTop: 2 }));
+    const tileFloors = new Bucket(tileOf('tile_floor', { tileU: 2, tileV: 2, tileTop: 2 }));
+    const ceilings = new Bucket(tileOf('plaster_ceiling', { tileU: 2, tileV: 2, tileTop: 2 }));
+    const trims = new Bucket(tileOf('wood_trim', { tileU: 1, tileV: 1, tileTop: 1 }));
+    const perRoomWalls = !!(S?.has('wallpaper_a') && S.has('wallpaper_b'));
     const wood = new Bucket({ tileU: 1, tileV: 1, tileTop: 1 });
     const fabric = new Bucket({ tileU: 0.5, tileV: 0.5, tileTop: 0.5 });
     const plain = new Bucket(null);
@@ -973,16 +1050,30 @@ export class LevelView {
       const g = boxGeo(b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z);
       switch (b.kind) {
         case 'wall':
-          walls.add(g, tintFromHint(b.color));
+          if (perRoomWalls) {
+            // Each visible face gets the wallpaper of the room it faces.
+            g.dispose();
+            for (let face = 0; face < 5; face++) {
+              if (face === 2 && b.min.y < 0.05) continue; // underside on the floor: never seen
+              for (const { geo, n, c } of wallFaceSegments(b, face)) {
+                const room = roomAt(c.x + n.x * 0.35, c.z + n.z * 0.35);
+                (room && WALLPAPER_B_ROOMS.has(room) ? wallsB : walls).add(geo, tintFromHint(b.color));
+              }
+            }
+          } else {
+            walls.add(g, tintFromHint(b.color));
+          }
           if (b.min.y < 0.05) {
             // Baseboard all around the wall box.
             const e = 0.014;
-            wood.add(boxGeo(b.min.x - e, b.min.y, b.min.z - e, b.max.x + e, b.min.y + 0.13, b.max.z + e), 0x2a1d14);
+            (S?.has('wood_trim') ? trims : wood).add(boxGeo(b.min.x - e, b.min.y, b.min.z - e, b.max.x + e, b.min.y + 0.13, b.max.z + e), S?.has('wood_trim') ? 0xffffff : 0x2a1d14);
           }
           break;
-        case 'floor':
-          floors.add(g, tintFromHint(b.color));
+        case 'floor': {
+          const room = roomAt((b.min.x + b.max.x) / 2, (b.min.z + b.max.z) / 2);
+          (S?.has('tile_floor') && room && TILE_FLOOR_ROOMS.has(room) ? tileFloors : floors).add(g, tintFromHint(b.color));
           break;
+        }
         case 'ceiling':
           ceilings.add(g, tintFromHint(b.color));
           break;
@@ -1030,6 +1121,7 @@ export class LevelView {
       return !insideAny(wallBoxes, { x, y: 1, z });
     };
     const elev = THREE.MathUtils.degToRad(38);
+    const radiatorSpots: { wi: number; pane: THREE.Vector3; inward: THREE.Vector3; yaw: number; W: number; H: number }[] = [];
     for (const [wi, win] of level.windows.entries()) {
       // Boarded windows only leak a little light between the planks.
       const light = boarded.has(wi) ? 0.3 : 1;
@@ -1052,15 +1144,30 @@ export class LevelView {
       const yaw = Math.atan2(inward.x, inward.z);
       const m = new THREE.Matrix4().makeTranslation(pane.x, pane.y, pane.z).multiply(new THREE.Matrix4().makeRotationY(yaw));
       const W = win.width, H = win.height, fw = 0.065;
-      const trim = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, col = 0x2c1f16): void => {
-        wood.add(boxGeo(x0, y0, z0, x1, y1, z1).applyMatrix4(m), col);
-      };
-      trim(-W / 2 - fw, -H / 2 - fw, -0.02, -W / 2, H / 2 + fw, 0.035);
-      trim(W / 2, -H / 2 - fw, -0.02, W / 2 + fw, H / 2 + fw, 0.035);
-      trim(-W / 2, H / 2, -0.02, W / 2, H / 2 + fw, 0.035);
-      trim(-W / 2 - fw - 0.04, -H / 2 - fw - 0.03, -0.02, W / 2 + fw + 0.04, -H / 2, 0.09, 0x33241a);
-      trim(-0.014, -H / 2, -0.01, 0.014, H / 2, 0.02, 0x1c140e);
-      trim(-W / 2, -0.014, -0.01, W / 2, 0.014, 0.02, 0x1c140e);
+      const frameModel = !boarded.has(wi) ? models?.get('window_frame') : undefined;
+      if (frameModel) {
+        // Blender window frame, scaled to this opening; its front (-Z) faces into the room.
+        const op = frameModel.extras.opening;
+        const ow = Array.isArray(op) && typeof op[0] === 'number' ? op[0] : 1.0;
+        const oh = Array.isArray(op) && typeof op[1] === 'number' ? op[1] : 1.2;
+        const at = pane.clone().addScaledVector(inward, WINDOW_GLASS_DEPTH);
+        const place = new THREE.Matrix4()
+          .makeTranslation(at.x, at.y, at.z)
+          .multiply(new THREE.Matrix4().makeRotationY(yaw + Math.PI))
+          .multiply(new THREE.Matrix4().makeScale(W / ow, H / oh, 1));
+        batcher.add(frameModel.scene, place);
+        radiatorSpots.push({ wi, pane: pane.clone(), inward: inward.clone(), yaw, W, H });
+      } else {
+        const trim = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, col = 0x2c1f16): void => {
+          wood.add(boxGeo(x0, y0, z0, x1, y1, z1).applyMatrix4(m), col);
+        };
+        trim(-W / 2 - fw, -H / 2 - fw, -0.02, -W / 2, H / 2 + fw, 0.035);
+        trim(W / 2, -H / 2 - fw, -0.02, W / 2 + fw, H / 2 + fw, 0.035);
+        trim(-W / 2, H / 2, -0.02, W / 2, H / 2 + fw, 0.035);
+        trim(-W / 2 - fw - 0.04, -H / 2 - fw - 0.03, -0.02, W / 2 + fw + 0.04, -H / 2, 0.09, 0x33241a);
+        trim(-0.014, -H / 2, -0.01, 0.014, H / 2, 0.02, 0x1c140e);
+        trim(-W / 2, -0.014, -0.01, W / 2, 0.014, 0.02, 0x1c140e);
+      }
       const pg = new THREE.PlaneGeometry(W, H).applyMatrix4(m);
       panes.add(pg, 0xffffff);
 
@@ -1090,6 +1197,52 @@ export class LevelView {
       quad(patchPos, patchUv, patchIdx, fbl, fbr, ftr, ftl, uvq);
     }
 
+    // Cast-iron radiators under some windows (one per room at most, never inside furniture).
+    const radiator = models?.get('radiator');
+    if (radiator) {
+      const furn = level.boxes.filter((b) => b.kind === 'furniture');
+      const used = new Set<string>();
+      for (const r of radiatorSpots) {
+        const room = roomAt(r.pane.x + r.inward.x * 0.5, r.pane.z + r.inward.z * 0.5);
+        const sillY = level.windows[r.wi].center.y - r.H / 2;
+        if (!room || used.has(room) || sillY < 0.72 || r.W < 0.7 || (r.wi * 7919) % 3 === 0) continue;
+        const at = r.pane.clone().addScaledVector(r.inward, 0.1);
+        const half = 0.48;
+        const blocked = furn.some((b) =>
+          at.x + half > b.min.x - 0.05 && at.x - half < b.max.x + 0.05 && at.z + half > b.min.z - 0.05 && at.z - half < b.max.z + 0.05);
+        if (blocked) continue;
+        used.add(room);
+        const place = new THREE.Matrix4().makeTranslation(at.x, 0, at.z).multiply(new THREE.Matrix4().makeRotationY(r.yaw + Math.PI));
+        batcher.add(radiator.scene, place);
+      }
+    }
+
+    // Doorway casings: every interior doorway is spanned by a lintel (a wall box hanging from the
+    // ceiling down to the top of the opening). The front door has its own frame model.
+    const casing = models?.get('doorway_casing');
+    if (casing) {
+      const op = casing.extras.opening;
+      const ow = Array.isArray(op) && typeof op[0] === 'number' ? op[0] : 1.1;
+      const oh = Array.isArray(op) && typeof op[1] === 'number' ? op[1] : 2.4;
+      const ot = Array.isArray(op) && typeof op[2] === 'number' ? op[2] : 0.2;
+      const door = level.exit.door;
+      for (const b of wallBoxes) {
+        if (b.min.y < 1.8 || b.min.y > 2.7) continue; // not a lintel
+        const overDoor = b.min.x < door.max.x && b.max.x > door.min.x && b.min.z < door.max.z + 0.05 && b.max.z > door.min.z - 0.05;
+        if (overDoor) continue;
+        const sx = b.max.x - b.min.x, sz = b.max.z - b.min.z;
+        const alongX = sx >= sz;
+        const width = alongX ? sx : sz;
+        const thick = alongX ? sz : sx;
+        if (width < 0.6 || width > 2.5) continue;
+        const place = new THREE.Matrix4()
+          .makeTranslation((b.min.x + b.max.x) / 2, 0, (b.min.z + b.max.z) / 2)
+          .multiply(new THREE.Matrix4().makeRotationY(alongX ? 0 : Math.PI / 2))
+          .multiply(new THREE.Matrix4().makeScale(width / ow, b.min.y / oh, thick / ot));
+        batcher.add(casing.scene, place);
+      }
+    }
+
     const mk = (bucket: Bucket, mat: THREE.Material, name: string): void => {
       const mesh = bucket.build(mat, name);
       if (mesh) this.group.add(mesh);
@@ -1099,9 +1252,13 @@ export class LevelView {
     batcher.build(statics);
     this.group.add(statics);
 
-    mk(walls, new THREE.MeshLambertMaterial({ map: wallpaperTexture(), vertexColors: true }), 'walls');
-    mk(floors, new THREE.MeshLambertMaterial({ map: floorTexture(), vertexColors: true }), 'floors');
-    mk(ceilings, new THREE.MeshLambertMaterial({ map: ceilingTexture(), vertexColors: true }), 'ceilings');
+    const surf = (name: string, fallback: () => THREE.Material): THREE.Material => S?.material(name) ?? fallback();
+    mk(walls, surf('wallpaper_a', () => new THREE.MeshLambertMaterial({ map: wallpaperTexture(), vertexColors: true })), 'walls');
+    mk(wallsB, surf('wallpaper_b', () => new THREE.MeshLambertMaterial({ map: wallpaperTexture(), vertexColors: true })), 'walls-b');
+    mk(floors, surf('wood_floor', () => new THREE.MeshLambertMaterial({ map: floorTexture(), vertexColors: true })), 'floors');
+    mk(tileFloors, surf('tile_floor', () => new THREE.MeshLambertMaterial({ map: floorTexture(), vertexColors: true })), 'floors-tile');
+    mk(ceilings, surf('plaster_ceiling', () => new THREE.MeshLambertMaterial({ map: ceilingTexture(), vertexColors: true })), 'ceilings');
+    mk(trims, surf('wood_trim', () => new THREE.MeshLambertMaterial({ map: woodGrainTexture(), vertexColors: true })), 'trim');
     mk(wood, new THREE.MeshLambertMaterial({ map: woodGrainTexture(), vertexColors: true }), 'wood');
     mk(fabric, new THREE.MeshLambertMaterial({ map: fabricTexture(), vertexColors: true }), 'fabric');
     mk(plain, new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 30, specular: 0x222222 }), 'plain');
