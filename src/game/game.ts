@@ -363,6 +363,7 @@ export class Game {
         this.message('The front door is open. RUN.', 4);
         break;
       case 'playerCaught':
+        this.renderer.caught(e, session.state, localId, this.localPose);
         this.message(e.id === localId ? 'It found you.' : `${nameOf(e.id)} was taken.`, 4);
         break;
       case 'playerEscaped':

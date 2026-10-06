@@ -7,6 +7,7 @@ import type {
   PlayerId,
   PlayerPose,
   WorldState,
+  Vec3,
 } from '../../core/types';
 import type { IGameRenderer, RenderContext } from '../types';
 import { FlashEffect } from './FlashEffect';
@@ -494,6 +495,11 @@ export class GameRenderer implements IGameRenderer {
     }
     this.flashFx.fire(this.time, origin, dir, white);
     this.cameraProp.flashed(this.time);
+  }
+
+  /** Catch sequence hook (see IGameRenderer.caught). */
+  caught(event: { id: PlayerId; position: Vec3 }, state: WorldState, localId: PlayerId, localPose: PlayerPose): void {
+    void event; void state; void localId; void localPose;
   }
 
   setLocalNoiseLevel(level: number): void {

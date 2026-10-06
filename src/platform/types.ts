@@ -55,6 +55,11 @@ export interface IGameRenderer {
    * over RENDER.afterimageDuration. This is how hand signs are read in the dark.
    */
   flash(event: FlashEvent, state: WorldState, localId: PlayerId, localPose: PlayerPose): void;
+  /**
+   * The monster caught a player (sim 'playerCaught' event). For the local player this plays the
+   * catch / jumpscare sequence; for others it can show the monster grabbing them.
+   */
+  caught(event: { id: PlayerId; position: Vec3 }, state: WorldState, localId: PlayerId, localPose: PlayerPose): void;
   /** Local player's current voice loudness 0..1 for the wrist noise meter. */
   setLocalNoiseLevel(level: number): void;
   /** Short in-world message floating in front of the player (works in VR and on desktop). */
