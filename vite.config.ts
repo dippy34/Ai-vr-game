@@ -51,5 +51,7 @@ export default defineConfig(({ mode }) => ({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // Generous: some suites simulate minutes of game time and CI/dev machines can be busy.
+    testTimeout: 20000,
   },
 }));

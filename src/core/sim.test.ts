@@ -654,3 +654,38 @@ describe('round flow', () => {
     expect(picks.size).toBeGreaterThan(1);
   });
 });
+
+describe('noise memory', () => {
+  /** Seconds the monster spends in `room` over `seconds` after hearing noises there. */
+  function lingerAfterNoise(noiseMemory: boolean, seed: number, room: string, at: Vec3, seconds: number): number {
+    const sim = new GameSim(createLevel(seed), { noiseMemory });
+    sim.addPlayer('p0', 'Player 0', true);
+    sim.startRound();
+    place(sim, 'p0', 60, 60); // far outside, never reachable
+    // A team that keeps making noise in one spot (heard each time, no player id).
+    for (let i = 0; i < 12; i++) {
+      talk(sim, null, at, NOISE.talk + 0.3);
+      runUntil(sim, 2.5);
+    }
+    let inside = 0;
+    const dt = 1 / 15;
+    for (let t = 0; t < seconds; t += dt) {
+      sim.step(dt);
+      if (roomAt(sim.state.monster.position.x, sim.state.monster.position.z) === room) inside += dt;
+    }
+    return inside;
+  }
+
+  it('makes the monster patrol where it heard noise more often (on average over seeds)', () => {
+    const kitchen = head(7.5, -4.6);
+    const seeds = [1234, 7, 99];
+    const total = (mem: boolean) => seeds.reduce((a, sd) => a + lingerAfterNoise(mem, sd, 'kitchen', kitchen, 180), 0);
+    expect(total(true)).toBeGreaterThan(total(false) * 1.4);
+  });
+
+  it('is deterministic and can be turned off', () => {
+    const kitchen = head(7.5, -4.6);
+    expect(lingerAfterNoise(true, SEED, 'kitchen', kitchen, 30)).toBe(lingerAfterNoise(true, SEED, 'kitchen', kitchen, 30));
+    expect(Number.isFinite(lingerAfterNoise(false, SEED, 'kitchen', kitchen, 30))).toBe(true);
+  });
+});

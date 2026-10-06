@@ -54,6 +54,8 @@ import { findPath, nearestNavNode } from './nav';
 export interface SimOptions {
   fusesRequired?: number;
   startingFilm?: number;
+  /** The monster remembers where it heard things and patrols there more (default true). */
+  noiseMemory?: boolean;
 }
 
 /** Sim-private tunables (shared "feel" numbers live in config.ts). */
@@ -92,6 +94,19 @@ export const SIM_TUNING = {
    * even if the door noise alone would not reach it through the house.
    */
   exitDoorAlwaysAlerts: true,
+  /**
+   * Noise memory: every noise the monster hears warms up the nav nodes around it (gaussian of
+   * this radius, m), the warmth halves every `noiseMemoryHalfLife` s, and while wandering the
+   * monster favors neighbours closer to warm spots (`noiseMemoryPull`). Teams that keep making
+   * noise in one room find it lurking there.
+   */
+  noiseMemoryRadius: 2.5,
+  noiseMemoryHalfLife: 90,
+  noiseMemoryPerNoise: 0.15,
+  noiseMemoryCap: 10,
+  noiseMemoryPull: 0.8,
+  /** Distance falloff (m) of a warm spot's pull on a wander candidate. */
+  noiseMemoryReach: 4,
 } as const;
 
 const HANDS: readonly Handedness[] = ['left', 'right'];
@@ -150,6 +165,8 @@ interface Brain {
   stuckCount: number;
   /** Last time each nav node (by index) was visited while wandering. */
   visited: number[];
+  /** Noise memory per nav node (by index): how much it has heard around there lately. */
+  heat: number[];
 }
 
 /**
@@ -389,6 +406,7 @@ export class GameSim {
       stuckRef: flat(this.level.monsterSpawn),
       stuckCount: 0,
       visited: this.level.nav.map(() => NEVER),
+      heat: this.level.nav.map(() => 0),
     };
   }
 
@@ -645,10 +663,36 @@ export class GameSim {
     if (m.mode === 'feeding') return;
     const ratio = this.hearingRatio(noise.position, loudness);
     if (ratio <= 0) return;
+    this.remember(noise.position, ratio);
     s.lastHeard = { position: copy3(noise.position), loudness, time: s.time };
     const t = clamp((ratio - 1) / (HEARING.chaseRatio - 1), 0, 1);
     m.alert = Math.max(m.alert, 0.25 + 0.75 * t);
     this.react(noise.position, pid, ratio, out);
+  }
+
+  /** Warm up the nav nodes around a heard noise (see SIM_TUNING.noiseMemory*). */
+  private remember(pos: Vec3, ratio: number): void {
+    if (this.opts.noiseMemory === false) return;
+    const T = SIM_TUNING;
+    const amount = T.noiseMemoryPerNoise * Math.min(3, ratio);
+    const r2 = 2 * T.noiseMemoryRadius * T.noiseMemoryRadius;
+    const heat = this.brain.heat;
+    this.level.nav.forEach((n, i) => {
+      const d = distXZ(pos, n.position);
+      if (d > T.noiseMemoryRadius * 3) return;
+      heat[i] = Math.min(T.noiseMemoryCap, heat[i] + amount * Math.exp(-(d * d) / r2));
+    });
+  }
+
+  /** How strongly the remembered noise pulls toward nav node `id`. */
+  private memoryPull(id: number): number {
+    const heat = this.brain.heat;
+    const here = this.level.nav[this.nodeIndex[id]].position;
+    let p = 0;
+    this.level.nav.forEach((n, i) => {
+      if (heat[i] > 0.01) p += heat[i] * Math.exp(-distXZ(here, n.position) / SIM_TUNING.noiseMemoryReach);
+    });
+    return p;
   }
 
   private currentStim(): number {
@@ -890,7 +934,11 @@ export class GameSim {
     if (cands.length === 0) return node.id;
     const now = this.state.time;
     // Prefer nodes not visited for a while, so it roams the whole house.
-    const weights = cands.map((id) => 1 + Math.min(60, now - this.brain.visited[this.nodeIndex[id]]) / 10);
+    const weights = cands.map(
+      (id) =>
+        (1 + Math.min(60, now - this.brain.visited[this.nodeIndex[id]]) / 10) *
+        (1 + SIM_TUNING.noiseMemoryPull * this.memoryPull(id)),
+    );
     const total = weights.reduce((a, w) => a + w, 0);
     let pick = this.rng() * total;
     for (let i = 0; i < cands.length; i++) {
@@ -1027,6 +1075,9 @@ export class GameSim {
     const s = this.state;
     s.time += dt;
     s.monster.alert = Math.max(0, s.monster.alert - dt / SIM_TUNING.alertDecaySeconds);
+    const fade = Math.pow(0.5, dt / SIM_TUNING.noiseMemoryHalfLife);
+    const heat = this.brain.heat;
+    for (let i = 0; i < heat.length; i++) heat[i] *= fade;
     this.checkFuses(out);
     this.updateMonster(dt, out);
     this.checkContacts(out);

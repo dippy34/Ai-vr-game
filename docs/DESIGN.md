@@ -31,6 +31,8 @@ door makes a huge noise, so the last sprint is always a chase.
 - The monster is invisible in the dark. You *hear* it: breathing, heavy steps, the floor creaking.
   Your heartbeat speeds up as it gets near.
 - Hold still and quiet, and it walks right past you (unless it bumps into you).
+- It remembers where it heard things. Keep making noise in one room and it starts patrolling there
+  (the memory fades after a minute or two).
 - Sign to a teammate ("it's there", "3 fuses left", "run", "stop", "come here"), then flash so
   they can see it. The afterimage hangs in the air for ~2 seconds.
 - Caught players become spectators. The monster ignores them.
@@ -89,6 +91,7 @@ fists, open palm "stop", thumbs up/down, counting 1–5, "come here" waves and s
 ## Roadmap after this prototype
 
 1. Playtest the core: is signing in flashes fun? Tune `src/config.ts`.
-2. More houses/levels, item randomization, a smarter monster (learns hiding spots).
+2. More houses/levels, item randomization, a smarter monster (it already remembers noisy areas;
+   next: learning hiding spots).
 3. Proper sound design pass, possibly recorded assets.
 4. Ship: Meta Horizon Store (PWA wrapper or native port), then Steam. See `docs/PORTING.md`.
