@@ -98,6 +98,8 @@ export class ModelLibrary {
   private readonly loader = new GLTFLoader();
   /** Loader for the KTX2-textured copies (null: WebP only). */
   private compressedLoader: GLTFLoader | null = null;
+  /** Set once a KTX2 copy failed to transcode: the rest load as WebP straight away. */
+  private compressedBroken = false;
   /** Textures with a content hash, shared between models (both hands, a trim set used twice...). */
   private readonly sharedTextures = new Map<string, THREE.Texture>();
 
@@ -144,9 +146,14 @@ export class ModelLibrary {
 
   /** The KTX2 copy if there is one (falling back to the original if it fails), else the original. */
   private async loadGltf(name: string, compressed: boolean): Promise<GLTF> {
-    if (compressed && this.compressedLoader) {
+    if (compressed && this.compressedLoader && !this.compressedBroken) {
       try {
-        return await this.compressedLoader.loadAsync(`${MODEL_BASE}ktx2/${name}.glb`);
+        const gltf = await this.compressedLoader.loadAsync(`${MODEL_BASE}ktx2/${name}.glb`);
+        // GLTFLoader keeps a model whose textures failed (untextured): treat that as a failure too.
+        const textures = await gltf.parser.getDependencies('texture').catch(() => null);
+        if (textures && textures.every((t) => !!t)) return gltf;
+        this.compressedBroken = true; // the transcoder is unusable: don't try it for the rest
+        throw new Error('KTX2 textures failed to transcode');
       } catch (err) {
         console.warn(`[models] ${name}: compressed copy failed, loading the WebP original`, err);
       }
