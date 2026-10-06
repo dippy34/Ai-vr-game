@@ -6,3 +6,5 @@ dist/
 coverage/
 .blender-venv
 art/previews/*.blend1
+__pycache__/
+*.pyc
