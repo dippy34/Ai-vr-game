@@ -26,6 +26,7 @@ import {
   distXZ,
   isFiniteVec3,
   lerp,
+  lerp3,
   makeRng,
   mixSeed,
   normalize3,
@@ -468,21 +469,33 @@ export class GameSim {
     }
   }
 
-  /** Where something let go at `pos` comes to rest: out of walls, on the surface below. */
-  private restPoint(pos: Vec3): Vec3 {
-    let p = pushOutOf(wallBoxes(this.level, this.coll()), pos, SIM_TUNING.itemRadius);
+  /**
+   * Where something let go at `pos` by a player whose eyes are at `eye` comes to rest: never on
+   * the far side of a wall from the player, out of walls, on the surface below.
+   */
+  private restPoint(pos: Vec3, eye: Vec3): Vec3 {
+    const opts = this.coll();
+    let at = copy3(pos);
+    if (wallsBetween(this.level, eye, at, opts) > 0) {
+      // Hand (or desktop probe) went through a wall: pull it back toward the player.
+      let t = 1;
+      while (t > 0 && wallsBetween(this.level, eye, lerp3(eye, pos, t), opts) > 0) t -= 0.05;
+      at = lerp3(eye, pos, Math.max(0, t - 0.1));
+      at.y = pos.y;
+    }
+    let p = pushOutOf(wallBoxes(this.level, opts), at, SIM_TUNING.itemRadius);
     // A hand pushed deep into a tall piece of furniture: slide the item out of it.
     const tall: Box[] = this.level.boxes.filter(
       (b) =>
         b.kind === 'furniture' &&
-        b.max.y > pos.y + SUPPORT_TOLERANCE &&
+        b.max.y > at.y + SUPPORT_TOLERANCE &&
         p.x >= b.min.x &&
         p.x <= b.max.x &&
         p.z >= b.min.z &&
         p.z <= b.max.z,
     );
     if (tall.length > 0) p = pushOutOf(tall, p, SIM_TUNING.itemRadius);
-    return v3(p.x, supportHeight(this.level, p.x, p.z, pos.y), p.z);
+    return v3(p.x, supportHeight(this.level, p.x, p.z, at.y), p.z);
   }
 
   private dropHand(p: PlayerState, hand: Handedness, at: Vec3, out: SimEvent[], noisy: boolean): void {
@@ -490,7 +503,7 @@ export class GameSim {
     const h = p.held[hand];
     if (!h) return;
     p.held[hand] = null;
-    const pos = this.restPoint(at);
+    const pos = this.restPoint(at, p.pose.head.position);
     const yaw = yawFromQuat(p.pose[hand].rotation);
     let what: 'camera' | ItemKind;
     if (h.kind === 'camera') {
@@ -529,7 +542,8 @@ export class GameSim {
     const consider = (pos: Vec3): number => {
       const d = dist3(at, pos);
       if (d > r || d >= bestD) return Infinity;
-      if (wallsBetween(this.level, at, pos, opts) > 0) return Infinity;
+      // No reaching through walls: the player's eyes must see it.
+      if (wallsBetween(this.level, p.pose.head.position, pos, opts) > 0) return Infinity;
       return d;
     };
     if (s.camera.holder === null) {
@@ -672,8 +686,8 @@ export class GameSim {
         }
         return;
       case 'chase':
-        if (pid !== null && pid === m.targetPlayer) {
-          // The chased player keeps making noise: refresh where we think they are.
+        if (pid === m.targetPlayer && (pid !== null || chaseLevel)) {
+          // The chased player (or the same unattributed source) keeps making noise: refresh.
           const gap = this.state.time - b.chaseHeardAt;
           b.chasePos = flat(pos);
           b.chaseHeardAt = this.state.time;
@@ -734,7 +748,15 @@ export class GameSim {
   private retargetInvestigate(pos: Vec3): void {
     const m = this.state.monster;
     const b = this.brain;
-    b.goal = this.reachable(pos);
+    const goal = this.reachable(pos);
+    if (m.mode === 'investigate' && !b.listening && b.goal && b.route.length > 0 && distXZ(goal, b.goal) < 0.5) {
+      // Same spot again (e.g. continuous talking): keep walking the current route.
+      b.goal = goal;
+      b.route[b.route.length - 1] = copy3(goal);
+      m.target = copy3(goal);
+      return;
+    }
+    b.goal = goal;
     b.route = this.planRoute(m.position, b.goal, false);
     b.listening = false;
     b.listen = 0;

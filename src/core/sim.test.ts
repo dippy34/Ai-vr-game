@@ -1,0 +1,656 @@
+import { describe, expect, it } from 'vitest';
+import { GAME, HEARING, MONSTER, NOISE, PLAYER, PLAYER_COLORS } from '../config';
+import { createLevel, roomAt } from './level';
+import { distXZ, v3 } from './math';
+import { circleBlocked, moveCircle, supportHeight } from './physics';
+import { GameSim, makeSpawnPose, SIM_TUNING } from './sim';
+import type { PlayerId, SimEvent, Vec3 } from './types';
+
+const SEED = 1234;
+
+function setup(players = 1, opts = {}) {
+  const level = createLevel(SEED);
+  const sim = new GameSim(level, opts);
+  const ids: PlayerId[] = [];
+  for (let i = 0; i < players; i++) {
+    const id = `p${i}`;
+    sim.addPlayer(id, `Player ${i}`, true);
+    ids.push(id);
+  }
+  sim.startRound();
+  return { level, sim, ids };
+}
+
+/** Stand player `id` at (x, z) with tracked hands; optional explicit right-hand position. */
+function place(sim: GameSim, id: PlayerId, x: number, z: number, rightHand?: Vec3, leftHand?: Vec3) {
+  const pose = makeSpawnPose(v3(x, 0, z), 0);
+  pose.left.tracked = true;
+  pose.right.tracked = true;
+  if (rightHand) pose.right.position = { ...rightHand };
+  if (leftHand) pose.left.position = { ...leftHand };
+  sim.setPlayerPose(id, pose);
+}
+
+function placeMonster(sim: GameSim, x: number, z: number) {
+  sim.state.monster.position = v3(x, 0, z);
+}
+
+const head = (x: number, z: number) => v3(x, PLAYER.eyeHeight, z);
+
+function talk(sim: GameSim, id: PlayerId | null, pos: Vec3, loudness: number) {
+  sim.reportNoise({ source: 'voice', position: pos, loudness, playerId: id });
+}
+
+/** Step until `pred` is true (or time runs out). Returns all events. */
+function runUntil(sim: GameSim, seconds: number, pred: (ev: SimEvent[]) => boolean = () => false, dt = 1 / 30) {
+  const all: SimEvent[] = [];
+  for (let t = 0; t < seconds; t += dt) {
+    const ev = sim.step(dt);
+    all.push(...ev);
+    if (pred(ev)) break;
+  }
+  return all;
+}
+
+const has = (ev: SimEvent[], type: SimEvent['type']) => ev.some((e) => e.type === type);
+
+describe('GameSim setup', () => {
+  it('constructs a lobby world', () => {
+    const level = createLevel(SEED);
+    const sim = new GameSim(level);
+    const s = sim.state;
+    expect(s.phase).toBe('lobby');
+    expect(s.levelSeed).toBe(SEED);
+    expect(distXZ(s.monster.position, level.monsterSpawn)).toBe(0);
+    expect(s.monster.mode).toBe('wander');
+    expect(s.camera.film).toBe(GAME.startingFilm);
+    expect(s.camera.position).toEqual(level.cameraSpawn.position);
+    expect(s.camera.lastFlashTime).toBe(-1e9);
+    expect(s.items.filter((i) => i.kind === 'fuse').length).toBe(GAME.fusesRequired);
+    expect(s.items.filter((i) => i.kind === 'film').length).toBe(level.filmSpawns.length);
+    expect(s.fusesRequired).toBe(GAME.fusesRequired);
+    // The lobby does not simulate the monster.
+    sim.step(1);
+    expect(s.time).toBeCloseTo(1);
+    expect(distXZ(s.monster.position, level.monsterSpawn)).toBe(0);
+  });
+
+  it('respects SimOptions', () => {
+    const sim = new GameSim(createLevel(SEED), { fusesRequired: 2, startingFilm: 1 });
+    expect(sim.state.camera.film).toBe(1);
+    expect(sim.state.fusesRequired).toBe(2);
+    expect(sim.state.items.filter((i) => i.kind === 'fuse').length).toBe(2);
+  });
+
+  it('assigns colors and spawns in join order, reusing freed ones', () => {
+    const level = createLevel(SEED);
+    const sim = new GameSim(level);
+    const a = sim.addPlayer('a', 'A', false);
+    const b = sim.addPlayer('b', 'B', true);
+    expect(a.color).toBe(PLAYER_COLORS[0]);
+    expect(b.color).toBe(PLAYER_COLORS[1]);
+    expect(a.spawn).toEqual(level.playerSpawns[0].position);
+    expect(b.spawn).toEqual(level.playerSpawns[1].position);
+    expect(a.pose.head.position.y).toBeCloseTo(PLAYER.eyeHeight);
+    expect(a.pose.left.tracked).toBe(false);
+    expect(a.held).toEqual({ left: null, right: null });
+    expect(a.status).toBe('alive');
+    sim.removePlayer('a');
+    const c = sim.addPlayer('c', 'C', true);
+    expect(c.color).toBe(PLAYER_COLORS[0]);
+    expect(c.spawn).toEqual(level.playerSpawns[0].position);
+    // Mid-round joiner.
+    sim.startRound();
+    const d = sim.addPlayer('d', 'D', true);
+    expect(d.status).toBe('alive');
+    expect(d.spawn).toEqual(level.playerSpawns[2].position);
+  });
+
+  it('snapshot is a deep copy', () => {
+    const { sim } = setup(1);
+    const snap = sim.snapshot();
+    snap.monster.position.x = 999;
+    snap.players.p0.pose.head.position.x = 999;
+    expect(sim.state.monster.position.x).not.toBe(999);
+    expect(sim.state.players.p0.pose.head.position.x).not.toBe(999);
+    expect(JSON.parse(JSON.stringify(snap)).phase).toBe('playing');
+  });
+
+  it('is deterministic for identical inputs', () => {
+    const script = () => {
+      const { sim } = setup(2);
+      const evs: SimEvent[] = [];
+      for (let i = 0; i < 900; i++) {
+        if (i === 200) talk(sim, 'p0', head(0, 4), NOISE.talk);
+        if (i === 500) talk(sim, 'p1', head(0, 0), NOISE.shout);
+        evs.push(...sim.step(1 / 30));
+      }
+      return JSON.stringify({ s: sim.snapshot(), evs });
+    };
+    expect(script()).toBe(script());
+  });
+});
+
+describe('hearing', () => {
+  it('does not hear a whisper from far away or through a wall', () => {
+    const { sim } = setup(1);
+    placeMonster(sim, -3.45, 0);
+    place(sim, 'p0', 2.55, 0);
+    talk(sim, 'p0', head(2.55, 0), NOISE.whisper); // ~6 m in the open
+    // ~2.8 m but through the storage/study wall
+    placeMonster(sim, -3.6, -3.0);
+    place(sim, 'p0', -0.9, -3.5);
+    talk(sim, 'p0', head(-0.9, -3.5), NOISE.whisper);
+    expect(sim.state.lastHeard).toBeNull();
+    expect(sim.state.monster.mode).toBe('wander');
+    // Same distance without a wall IS heard.
+    placeMonster(sim, -3.45, 0);
+    place(sim, 'p0', -0.75, 0);
+    talk(sim, 'p0', head(-0.75, 0), NOISE.whisper);
+    expect(sim.state.lastHeard).not.toBeNull();
+    expect(sim.state.monster.mode).toBe('investigate');
+  });
+
+  it('does not hear normal talk from the far side of the house', () => {
+    const { sim } = setup(1);
+    placeMonster(sim, -6.0, 3.6); // living room
+    place(sim, 'p0', 7.5, -6.4); // kitchen
+    talk(sim, 'p0', head(7.5, -6.4), NOISE.talk);
+    expect(sim.state.lastHeard).toBeNull();
+  });
+
+  it('hears a shout from far away and investigates it', () => {
+    const { sim } = setup(1);
+    placeMonster(sim, -10.2, 0);
+    place(sim, 'p0', 6.55, 0);
+    talk(sim, 'p0', head(6.55, 0), NOISE.shout); // ~17 m down the hallway
+    expect(sim.state.monster.mode).toBe('investigate');
+    expect(sim.state.lastHeard?.loudness).toBeCloseTo(NOISE.shout);
+  });
+
+  it('talking nearby makes it investigate (with one alert event)', () => {
+    const { sim } = setup(1);
+    placeMonster(sim, -3.45, 0);
+    place(sim, 'p0', 4.5, 0.2);
+    expect(sim.hearingRatio(head(4.5, 0.2), NOISE.talk)).toBeLessThan(HEARING.chaseRatio);
+    talk(sim, 'p0', head(4.5, 0.2), NOISE.talk);
+    const m = sim.state.monster;
+    expect(m.mode).toBe('investigate');
+    expect(m.targetPlayer).toBeNull();
+    expect(m.alert).toBeGreaterThan(0);
+    const ev = sim.step(1 / 30);
+    expect(ev.filter((e) => e.type === 'monsterAlert')).toEqual([
+      expect.objectContaining({ type: 'monsterAlert', mode: 'investigate' }),
+    ]);
+    // Another noise of the same kind does not re-alert.
+    talk(sim, 'p0', head(4.5, 0.2), NOISE.talk);
+    expect(has(sim.step(1 / 30), 'monsterAlert')).toBe(false);
+  });
+
+  it('a loud noise close by makes it chase the source player', () => {
+    const { sim } = setup(1);
+    placeMonster(sim, -3.45, 0);
+    place(sim, 'p0', -0.5, 0);
+    talk(sim, 'p0', head(-0.5, 0), NOISE.shout);
+    expect(sim.state.monster.mode).toBe('chase');
+    expect(sim.state.monster.targetPlayer).toBe('p0');
+    expect(sim.state.monster.alert).toBeCloseTo(1, 1);
+  });
+
+  it('noises made by actions return their alerts immediately', () => {
+    const { sim, level } = setup(1);
+    const camPos = level.cameraSpawn.position;
+    place(sim, 'p0', -1.5, 6.5, camPos);
+    sim.handleAction('p0', { type: 'grab', hand: 'right', position: camPos, reach: PLAYER.vrGrabReach });
+    placeMonster(sim, -1.5, 5.0);
+    const ev = sim.handleAction('p0', { type: 'flash', hand: 'right', position: camPos, direction: v3(1, 0, 0) });
+    expect(ev.map((e) => e.type)).toEqual(['flash', 'monsterAlert']);
+    expect(sim.state.lastHeard?.loudness).toBeCloseTo(NOISE.cameraClick);
+  });
+
+  it('ignores noise outside play and from non-alive players', () => {
+    const level = createLevel(SEED);
+    const lobby = new GameSim(level);
+    lobby.addPlayer('p0', 'P', true);
+    talk(lobby, 'p0', v3(-3, 2, -5.6), NOISE.shout);
+    expect(lobby.state.lastHeard).toBeNull();
+
+    const { sim } = setup(2);
+    sim.state.players.p1.status = 'caught';
+    talk(sim, 'p1', v3(-3.4, 2, -5), NOISE.shout);
+    talk(sim, 'ghost', v3(-3.4, 2, -5), NOISE.shout);
+    expect(sim.state.lastHeard).toBeNull();
+    expect(sim.state.monster.mode).toBe('wander');
+  });
+
+  it('alert decays over ~8 s', () => {
+    const { sim } = setup(1);
+    placeMonster(sim, -3.45, 0);
+    talk(sim, null, v3(-3.45, 2, 0.5), NOISE.shout);
+    expect(sim.state.monster.alert).toBeGreaterThan(0.9);
+    runUntil(sim, 4);
+    expect(sim.state.monster.alert).toBeGreaterThan(0.3);
+    expect(sim.state.monster.alert).toBeLessThan(0.7);
+    runUntil(sim, 4.5);
+    expect(sim.state.monster.alert).toBe(0);
+  });
+
+  it('a quieter noise from someone else does not steal an ongoing chase', () => {
+    const { sim } = setup(2);
+    placeMonster(sim, -3.45, 0);
+    place(sim, 'p0', -1.5, 0);
+    place(sim, 'p1', 6.55, 0);
+    talk(sim, 'p0', head(-1.5, 0), NOISE.shout);
+    expect(sim.state.monster.targetPlayer).toBe('p0');
+    talk(sim, 'p1', head(6.55, 0), NOISE.talk);
+    expect(sim.state.monster.mode).toBe('chase');
+    expect(sim.state.monster.targetPlayer).toBe('p0');
+  });
+});
+
+describe('monster behaviour', () => {
+  it('walks to a noise and catches a silent player standing there, feeds, then wanders', () => {
+    const { sim, level } = setup(2);
+    placeMonster(sim, -3.45, 0);
+    place(sim, 'p0', 4.5, 0.2); // hallway, east part
+    place(sim, 'p1', 7.0, 6.5); // dining room, silent, far away
+    talk(sim, 'p0', head(4.5, 0.2), NOISE.talk);
+    expect(sim.state.monster.mode).toBe('investigate');
+    const ev = runUntil(sim, 20, (e) => has(e, 'playerCaught'));
+    const caught = ev.find((e) => e.type === 'playerCaught');
+    expect(caught).toMatchObject({ type: 'playerCaught', id: 'p0' });
+    expect(sim.state.players.p0.status).toBe('caught');
+    expect(sim.state.monster.mode).toBe('feeding');
+    expect(sim.state.phase).toBe('playing');
+    expect(circleBlocked(level, sim.state.monster.position, SIM_TUNING.monsterRadius - 0.02)).toBe(false);
+    runUntil(sim, GAME.feedingTime + 0.2);
+    expect(sim.state.monster.mode).toBe('wander');
+    // Caught players are ignored.
+    talk(sim, 'p0', head(4.5, 0.2), NOISE.shout);
+    expect(sim.state.monster.mode).toBe('wander');
+  });
+
+  it('navigates through doorways to investigate a noise in another room', () => {
+    const { sim, level } = setup(1);
+    place(sim, 'p0', 0.7, 6.6);
+    // Monster starts in the bathroom; a noise in the bedroom next door.
+    talk(sim, null, v3(-9.9, 1.0, -2.4), 0.6);
+    expect(sim.state.monster.mode).toBe('investigate');
+    let maxSpeed = 0;
+    runUntil(sim, 25, () => {
+      maxSpeed = Math.max(maxSpeed, sim.state.monster.speed);
+      expect(circleBlocked(level, sim.state.monster.position, SIM_TUNING.monsterRadius - 0.02)).toBe(false);
+      return distXZ(sim.state.monster.position, v3(-9.9, 0, -2.4)) < 0.5;
+    });
+    expect(distXZ(sim.state.monster.position, v3(-9.9, 0, -2.4))).toBeLessThan(0.5);
+    expect(maxSpeed).toBeLessThanOrEqual(MONSTER.investigateSpeed + 1e-6);
+    expect(maxSpeed).toBeGreaterThan(MONSTER.investigateSpeed * 0.8);
+    // Then it listens for MONSTER.listenTime and goes back to wandering.
+    runUntil(sim, 1);
+    expect(sim.state.monster.mode).toBe('investigate');
+    expect(sim.state.monster.speed).toBe(0);
+    runUntil(sim, MONSTER.listenTime);
+    expect(sim.state.monster.mode).toBe('wander');
+  });
+
+  it('gives up a chase after silence and investigates the last spot', () => {
+    const { sim } = setup(1);
+    placeMonster(sim, -3.45, 0);
+    place(sim, 'p0', 0, 0);
+    talk(sim, 'p0', head(0, 0), NOISE.shout);
+    expect(sim.state.monster.mode).toBe('chase');
+    place(sim, 'p0', 7.0, 6.5); // sneaks away silently to the dining room
+    runUntil(sim, HEARING.chaseForget - 0.3);
+    expect(sim.state.monster.mode).toBe('chase');
+    expect(distXZ(sim.state.monster.position, v3(0, 0, 0))).toBeLessThan(0.5);
+    const ev = runUntil(sim, 0.6);
+    expect(sim.state.monster.mode).toBe('investigate');
+    expect(ev).toContainEqual(expect.objectContaining({ type: 'monsterAlert', mode: 'investigate' }));
+    runUntil(sim, MONSTER.listenTime + 1);
+    expect(sim.state.monster.mode).toBe('wander');
+    expect(sim.state.players.p0.status).toBe('alive');
+  });
+
+  it('keeps chasing while the target keeps making noise, and re-alerts after a gap', () => {
+    const { sim } = setup(1);
+    placeMonster(sim, -10.2, 0);
+    place(sim, 'p0', -6.45, 0);
+    talk(sim, 'p0', head(-6.45, 0), NOISE.shout);
+    expect(sim.state.monster.mode).toBe('chase');
+    sim.step(1 / 30);
+    // Player runs east down the hallway, footsteps every 0.7 m.
+    let x = -6.45;
+    const evs: SimEvent[] = [];
+    for (let i = 0; i < 60 && x < 9; i++) {
+      x += 0.7;
+      place(sim, 'p0', x, 0);
+      sim.reportNoise({ source: 'footstep', position: v3(x, 0, 0), loudness: NOISE.sprintStep, playerId: 'p0' });
+      evs.push(...runUntil(sim, 0.7 / PLAYER.sprintSpeed));
+      if (sim.state.players.p0.status !== 'alive') break;
+    }
+    expect(sim.state.monster.mode === 'chase' || sim.state.players.p0.status === 'caught').toBe(true);
+    expect(evs.filter((e) => e.type === 'monsterAlert').length).toBe(0);
+  });
+
+  it('notices a silent player it bumps into', () => {
+    const { sim } = setup(1);
+    const m = sim.state.monster;
+    placeMonster(sim, 0, 0);
+    place(sim, 'p0', 0.3, 0.3);
+    const ev = sim.step(1 / 30);
+    expect(has(ev, 'playerCaught')).toBe(true);
+    expect(m.mode).toBe('feeding');
+  });
+
+  it('never catches through a wall', () => {
+    const { sim } = setup(1);
+    // Monster in the storage room right behind the hallway wall (z = -1.2); a VR player leans
+    // their head into the wall from the hallway side: 0.6 m apart, but a wall in between.
+    placeMonster(sim, -2.6, -1.7);
+    place(sim, 'p0', -2.6, -1.1);
+    expect(distXZ(sim.state.monster.position, sim.state.players.p0.pose.head.position)).toBeLessThan(
+      HEARING.catchRadius,
+    );
+    expect(has(sim.step(1 / 60), 'playerCaught')).toBe(false);
+    expect(sim.state.players.p0.status).toBe('alive');
+    // Same distance on the same side of the wall: caught.
+    placeMonster(sim, -2.6, -1.7);
+    place(sim, 'p0', -2.6, -2.3);
+    expect(has(sim.step(1 / 60), 'playerCaught')).toBe(true);
+  });
+
+  it('chases through doorways and catches a player in the next room', () => {
+    const { sim, level } = setup(1);
+    // Monster in the bathroom (spawn); player shouts in the bedroom next door.
+    place(sim, 'p0', -7.4, -4.6);
+    talk(sim, 'p0', head(-7.4, -4.6), NOISE.shout);
+    expect(sim.state.monster.mode).toBe('chase');
+    const ev = runUntil(sim, 10, (e) => {
+      expect(circleBlocked(level, sim.state.monster.position, SIM_TUNING.monsterRadius - 0.02)).toBe(false);
+      return has(e, 'playerCaught');
+    });
+    expect(ev).toContainEqual(expect.objectContaining({ type: 'playerCaught', id: 'p0' }));
+  });
+
+  it('re-alerts when a chased player is heard again after a gap', () => {
+    const { sim } = setup(1);
+    placeMonster(sim, -10.2, 0);
+    place(sim, 'p0', -3.45, 0);
+    talk(sim, 'p0', head(-3.45, 0), NOISE.shout);
+    sim.step(1 / 30);
+    place(sim, 'p0', 2.55, 0);
+    runUntil(sim, SIM_TUNING.chaseRegainGap + 0.5); // silent, but less than chaseForget
+    expect(sim.state.monster.mode).toBe('chase');
+    sim.reportNoise({ source: 'footstep', position: v3(2.55, 0, 0), loudness: NOISE.sprintStep, playerId: 'p0' });
+    const ev = sim.step(1 / 30);
+    expect(ev).toContainEqual(expect.objectContaining({ type: 'monsterAlert', mode: 'chase' }));
+  });
+
+  it('wanders the whole house over time without ever clipping geometry', () => {
+    const level = createLevel(99);
+    const sim = new GameSim(level);
+    sim.startRound(); // no players: phase stays 'playing'
+    const rooms = new Set<string>();
+    const nodes = level.nav;
+    let k = 0;
+    const b = level.bounds;
+    for (let i = 0; i < 30 * 600; i++) {
+      if (i % 240 === 0) {
+        // A random-ish unattributed noise somewhere (deterministic).
+        const n = nodes[(k = (k * 7 + 3) % nodes.length)];
+        sim.reportNoise({ source: 'item', position: v3(n.position.x, 1, n.position.z), loudness: 0.4, playerId: null });
+      }
+      sim.step(1 / 30);
+      const p = sim.state.monster.position;
+      if (circleBlocked(level, p, SIM_TUNING.monsterRadius - 0.02)) {
+        throw new Error(`monster clipped geometry at ${p.x.toFixed(2)},${p.z.toFixed(2)} t=${sim.state.time}`);
+      }
+      expect(p.x > b.min.x && p.x < b.max.x && p.z > b.min.z && p.z < 8).toBe(true);
+      const r = roomAt(p.x, p.z);
+      if (r) rooms.add(r);
+    }
+    expect(rooms.size).toBeGreaterThanOrEqual(8);
+  });
+});
+
+describe('items and camera', () => {
+  it('grab / flash / film / dry-fire rules', () => {
+    const { sim, level } = setup(2);
+    const cam = sim.state.camera;
+    const camPos = level.cameraSpawn.position;
+    place(sim, 'p0', -1.5, 6.5, v3(camPos.x, camPos.y + 0.1, camPos.z));
+    place(sim, 'p1', -1.5, 5.8, v3(camPos.x, camPos.y + 0.1, camPos.z));
+
+    // Not holding it: flash does nothing.
+    expect(sim.handleAction('p0', { type: 'flash', hand: 'right', position: camPos, direction: v3(0, 0, -1) })).toEqual(
+      [],
+    );
+    // Too far for VR reach.
+    expect(sim.handleAction('p0', { type: 'grab', hand: 'left', position: v3(-1.5, 1, 6.5), reach: PLAYER.vrGrabReach })).toEqual([]);
+    // Grab.
+    const g = sim.handleAction('p0', { type: 'grab', hand: 'right', position: v3(camPos.x, camPos.y + 0.1, camPos.z), reach: PLAYER.vrGrabReach });
+    expect(g).toContainEqual(expect.objectContaining({ type: 'pickup', by: 'p0', what: 'camera' }));
+    expect(cam.holder).toBe('p0');
+    expect(cam.hand).toBe('right');
+    expect(sim.state.players.p0.held.right).toEqual({ kind: 'camera' });
+    // Someone else can't take it out of your hand.
+    expect(sim.handleAction('p1', { type: 'grab', hand: 'right', position: camPos, reach: 1 })).toEqual([]);
+    // Held camera follows the hand.
+    place(sim, 'p0', -1.5, 6.5, v3(-1.2, 1.3, 6.2));
+    expect(cam.position).toEqual(v3(-1.2, 1.3, 6.2));
+
+    // Wrong hand: ignored.
+    expect(sim.handleAction('p0', { type: 'flash', hand: 'left', position: cam.position, direction: v3(0, 0, -1) })).toEqual([]);
+    // Flash.
+    const f = sim.handleAction('p0', { type: 'flash', hand: 'right', position: cam.position, direction: v3(0, 0, -5) });
+    const flash = f.find((e) => e.type === 'flash');
+    expect(flash).toMatchObject({ type: 'flash', by: 'p0', direction: { x: 0, y: 0, z: -1 } });
+    expect(cam.film).toBe(GAME.startingFilm - 1);
+    // Cooldown -> dry fire.
+    const dry = sim.handleAction('p0', { type: 'flash', hand: 'right', position: cam.position, direction: v3(0, 0, -1) });
+    expect(dry.map((e) => e.type)).toContain('dryFire');
+    expect(cam.film).toBe(GAME.startingFilm - 1);
+    // Use up all film.
+    for (let i = 0; i < 10; i++) {
+      runUntil(sim, GAME.flashCooldown + 0.05);
+      place(sim, 'p0', -1.5, 6.5, v3(-1.2, 1.3, 6.2));
+      sim.handleAction('p0', { type: 'flash', hand: 'right', position: cam.position, direction: v3(0, 0, -1) });
+    }
+    expect(cam.film).toBe(0);
+    runUntil(sim, GAME.flashCooldown + 0.05);
+    const empty = sim.handleAction('p0', { type: 'flash', hand: 'right', position: cam.position, direction: v3(0, 0, -1) });
+    expect(empty.map((e) => e.type)).toEqual(expect.arrayContaining(['dryFire']));
+    expect(empty.map((e) => e.type)).not.toContain('flash');
+
+    // Film roll: grabbing it loads the camera and leaves the hand empty.
+    const roll = sim.state.items.find((i) => i.kind === 'film')!;
+    place(sim, 'p0', roll.position.x, roll.position.z + 0.5, v3(-1.2, 1.3, 6.2), v3(roll.position.x, roll.position.y + 0.05, roll.position.z));
+    const fl = sim.handleAction('p0', { type: 'grab', hand: 'left', position: v3(roll.position.x, roll.position.y + 0.05, roll.position.z), reach: PLAYER.vrGrabReach });
+    expect(fl).toContainEqual(expect.objectContaining({ type: 'filmLoaded', amount: GAME.filmPerRoll, total: GAME.filmPerRoll }));
+    expect(roll.where).toBe('used');
+    expect(cam.film).toBe(GAME.filmPerRoll);
+    expect(sim.state.players.p0.held.left).toBeNull();
+
+    // Release the camera onto the dining table: y snaps to the table top.
+    const tablePos = v3(7.0, 1.1, 4.5);
+    place(sim, 'p0', 7.0, 5.5, v3(7.0, 1.1, 4.8));
+    place(sim, 'p1', 6.0, 3.3);
+    const rel = sim.handleAction('p0', { type: 'release', hand: 'right', position: tablePos });
+    expect(rel).toContainEqual(expect.objectContaining({ type: 'drop', what: 'camera' }));
+    expect(cam.holder).toBeNull();
+    expect(cam.position.y).toBeCloseTo(supportHeight(level, 7.0, 4.5));
+    expect(cam.position.y).toBeCloseTo(0.76);
+    expect(sim.state.players.p0.held.right).toBeNull();
+    // Released on the floor.
+    const g2 = sim.handleAction('p1', { type: 'grab', hand: 'right', position: v3(7.0, 0.9, 4.5), reach: PLAYER.desktopGrabReach });
+    expect(g2).toContainEqual(expect.objectContaining({ type: 'pickup', what: 'camera' }));
+    sim.handleAction('p1', { type: 'release', hand: 'right', position: v3(5.0, 1.2, 3.0) });
+    expect(cam.position.y).toBe(0);
+  });
+
+  it('can not grab through walls, and ignores actions outside play or from caught players', () => {
+    const level = createLevel(SEED);
+    const lobby = new GameSim(level);
+    lobby.addPlayer('p0', 'P', true);
+    const camPos = level.cameraSpawn.position;
+    expect(lobby.handleAction('p0', { type: 'grab', hand: 'right', position: camPos, reach: 1 })).toEqual([]);
+
+    const { sim } = setup(1);
+    // Camera is on the foyer side of the living-room wall (x = -3); the player is in the living
+    // room with their (desktop) probe poking through the wall.
+    place(sim, 'p0', -3.6, 6.5);
+    expect(sim.handleAction('p0', { type: 'grab', hand: 'right', position: v3(-2.9, 1, 6.5), reach: 1.6 })).toEqual([]);
+    // Dropping something with the hand through a wall leaves it on the player's side.
+    const fuse = sim.state.items.find((i) => i.kind === 'fuse')!;
+    place(sim, 'p0', fuse.position.x, fuse.position.z, v3(fuse.position.x, fuse.position.y + 0.05, fuse.position.z));
+    sim.handleAction('p0', { type: 'grab', hand: 'right', position: v3(fuse.position.x, fuse.position.y + 0.05, fuse.position.z), reach: 0.35 });
+    expect(fuse.where).toBe('held');
+    place(sim, 'p0', -3.6, 6.5);
+    sim.handleAction('p0', { type: 'release', hand: 'right', position: v3(-2.6, 1.2, 6.0) });
+    expect(fuse.where).toBe('world');
+    expect(fuse.position.x).toBeLessThan(-3.1);
+    expect(roomAt(fuse.position.x, fuse.position.z)).toBe('living');
+    sim.state.players.p0.status = 'caught';
+    expect(sim.handleAction('p0', { type: 'grab', hand: 'right', position: camPos, reach: 1 })).toEqual([]);
+  });
+
+  it('fuses -> exit opens -> escape -> won', () => {
+    const { sim, level } = setup(2);
+    const s = sim.state;
+    placeMonster(sim, -9.9, -2.4); // far away in the bedroom
+    place(sim, 'p1', 0.7, 5.6);
+    const box = level.fuseBox.position;
+    const all: SimEvent[] = [];
+    for (const fuse of s.items.filter((i) => i.kind === 'fuse')) {
+      const at = v3(fuse.position.x, fuse.position.y + 0.05, fuse.position.z);
+      place(sim, 'p0', fuse.position.x, fuse.position.z, at);
+      const ev = sim.handleAction('p0', { type: 'grab', hand: 'right', position: at, reach: PLAYER.vrGrabReach });
+      expect(ev).toContainEqual(expect.objectContaining({ type: 'pickup', what: 'fuse' }));
+      expect(fuse.where).toBe('held');
+      // Carry it to the fuse box.
+      place(sim, 'p0', box.x, box.z - 0.5, v3(box.x, box.y, box.z - 0.3));
+      expect(fuse.position).toEqual(v3(box.x, box.y, box.z - 0.3));
+      all.push(...sim.step(1 / 30));
+      expect(fuse.where).toBe('used');
+      expect(sim.state.players.p0.held.right).toBeNull();
+    }
+    const inserted = all.filter((e) => e.type === 'fuseInserted');
+    expect(inserted.map((e) => (e.type === 'fuseInserted' ? e.count : 0))).toEqual([1, 2, 3]);
+    expect(s.fusesInserted).toBe(GAME.fusesRequired);
+    expect(s.exitOpen).toBe(true);
+    expect(has(all, 'exitOpened')).toBe(true);
+    // The door noise brings the monster.
+    expect(['investigate', 'chase']).toContain(s.monster.mode);
+
+    // The door no longer blocks.
+    const out = moveCircle(level, v3(0, 1.6, 7), v3(0, 0, 2), PLAYER.radius, { exitOpen: s.exitOpen });
+    expect(out.z).toBeGreaterThan(level.exit.zone.min.z);
+
+    // p0 walks out.
+    place(sim, 'p0', 0, 8.6);
+    const esc = sim.step(1 / 30);
+    expect(esc).toContainEqual({ type: 'playerEscaped', id: 'p0' });
+    expect(s.players.p0.status).toBe('escaped');
+    expect(s.phase).toBe('playing'); // p1 is still inside
+    // p1 gets caught -> still a win because someone escaped.
+    placeMonster(sim, 0.7, 5.3);
+    s.monster.mode = 'wander';
+    const end = sim.step(1 / 30);
+    expect(end).toContainEqual(expect.objectContaining({ type: 'playerCaught', id: 'p1' }));
+    expect(end).toContainEqual({ type: 'phase', phase: 'won' });
+    expect(s.phase).toBe('won');
+  });
+
+  it('nobody can escape while the door is closed', () => {
+    const { sim } = setup(1);
+    place(sim, 'p0', 0, 8.6);
+    expect(has(sim.step(1 / 30), 'playerEscaped')).toBe(false);
+    expect(sim.state.players.p0.status).toBe('alive');
+  });
+});
+
+describe('round flow', () => {
+  it('everyone caught -> lost', () => {
+    const { sim } = setup(1);
+    // p0 is carrying a fuse when caught: it gets dropped.
+    const fuse = sim.state.items.find((i) => i.kind === 'fuse')!;
+    const at = v3(fuse.position.x, fuse.position.y + 0.05, fuse.position.z);
+    place(sim, 'p0', fuse.position.x, fuse.position.z, at);
+    sim.handleAction('p0', { type: 'grab', hand: 'right', position: at, reach: PLAYER.vrGrabReach });
+    placeMonster(sim, -3.45, 0);
+    place(sim, 'p0', -1.0, 0, v3(-0.8, 1.0, -0.2));
+    talk(sim, 'p0', head(-1.0, 0), NOISE.shout);
+    const ev = runUntil(sim, 10, (e) => has(e, 'phase'));
+    expect(ev).toContainEqual(expect.objectContaining({ type: 'playerCaught', id: 'p0' }));
+    expect(ev).toContainEqual(expect.objectContaining({ type: 'drop', what: 'fuse' }));
+    expect(ev).toContainEqual({ type: 'phase', phase: 'lost' });
+    expect(sim.state.phase).toBe('lost');
+    expect(fuse.where).toBe('world');
+    // Nothing happens after the round ended.
+    const pos = { ...sim.state.monster.position };
+    sim.step(1);
+    expect(sim.state.monster.position).toEqual(pos);
+  });
+
+  it('removing players drops their things and can end the round', () => {
+    const { sim, level } = setup(2);
+    const camPos = level.cameraSpawn.position;
+    place(sim, 'p1', -1.5, 6.5, camPos);
+    sim.handleAction('p1', { type: 'grab', hand: 'right', position: camPos, reach: PLAYER.vrGrabReach });
+    sim.state.players.p0.status = 'caught';
+    const ev = sim.removePlayer('p1');
+    expect(ev).toContainEqual(expect.objectContaining({ type: 'drop', by: 'p1', what: 'camera' }));
+    expect(sim.state.camera.holder).toBeNull();
+    expect(sim.state.players.p1).toBeUndefined();
+    expect(ev).toContainEqual({ type: 'phase', phase: 'lost' });
+
+    // With no players at all, the round just stays as is.
+    const { sim: solo } = setup(1);
+    expect(solo.removePlayer('p0')).toEqual([]);
+    expect(solo.state.phase).toBe('playing');
+    expect(solo.removePlayer('nobody')).toEqual([]);
+  });
+
+  it('startRound resets everything', () => {
+    const { sim, level } = setup(2);
+    const s = sim.state;
+    s.camera.film = 0;
+    s.fusesInserted = 2;
+    s.exitOpen = true;
+    s.players.p0.status = 'caught';
+    s.players.p1.status = 'escaped';
+    s.items.forEach((i) => (i.where = 'used'));
+    placeMonster(sim, 5, 5);
+    s.monster.mode = 'chase';
+    s.phase = 'lost';
+    const ev = sim.startRound();
+    expect(ev).toContainEqual({ type: 'phase', phase: 'playing' });
+    expect(s.phase).toBe('playing');
+    expect(s.camera.film).toBe(GAME.startingFilm);
+    expect(s.camera.holder).toBeNull();
+    expect(s.fusesInserted).toBe(0);
+    expect(s.exitOpen).toBe(false);
+    expect(s.lastHeard).toBeNull();
+    expect(s.monster.mode).toBe('wander');
+    expect(distXZ(s.monster.position, level.monsterSpawn)).toBe(0);
+    expect(s.items.every((i) => i.where === 'world')).toBe(true);
+    expect(s.items.filter((i) => i.kind === 'fuse').length).toBe(GAME.fusesRequired);
+    expect(Object.values(s.players).every((p) => p.status === 'alive')).toBe(true);
+    expect(s.players.p0.spawn).toEqual(level.playerSpawns[0].position);
+    expect(s.players.p1.spawn).toEqual(level.playerSpawns[1].position);
+    expect(s.players.p0.pose.head.position.z).toBeCloseTo(level.playerSpawns[0].position.z);
+
+    // Fuse picks come from distinct spawn spots and vary across rounds.
+    const picks = new Set<string>();
+    for (let r = 0; r < 6; r++) {
+      sim.startRound();
+      const fuses = s.items.filter((i) => i.kind === 'fuse').map((i) => `${i.position.x},${i.position.z}`);
+      expect(new Set(fuses).size).toBe(fuses.length);
+      for (const f of fuses) {
+        expect(level.fuseSpawns.some((p) => `${p.x},${p.z}` === f)).toBe(true);
+      }
+      picks.add(fuses.sort().join('|'));
+    }
+    expect(picks.size).toBeGreaterThan(1);
+  });
+});

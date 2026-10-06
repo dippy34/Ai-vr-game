@@ -80,7 +80,7 @@ describe('moveCircle', () => {
 
   it('slides around an outside corner', () => {
     const B = testLevel([{ kind: 'furniture', min: v3(-0.5, 0, -0.5), max: v3(0.5, 0.8, 0.5) }]);
-    let p = v3(-0.2, 0, -2);
+    let p = v3(-0.65, 0, -2); // clips the corner by 0.1 m
     for (let i = 0; i < 120; i++) p = moveCircle(B, p, v3(0, 0, 0.05), r);
     expect(p.z).toBeGreaterThan(2); // slid off the edge and kept going
     expect(circleBlocked(B, p, r - 1e-3)).toBe(false);
