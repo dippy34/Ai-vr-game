@@ -3,14 +3,15 @@
  * boxes: picks the best-fitting variant for each box's style, faces it away from the nearest
  * wall, scales it to fit, and tiles modular pieces (shelves, counters) along long boxes.
  *
- * All placed copies of the same source mesh are merged into one static mesh, so the whole
- * furniture set costs roughly one draw call per unique mesh (Quest budget).
+ * Placed copies go into a StaticBatcher (shared with the rest of the level's static models), which
+ * merges all copies of a source mesh per chunk of the house: one draw call per unique mesh per
+ * chunk (Quest budget).
  */
 
 import * as THREE from 'three';
 import type { Box, PropStyle } from '../../core/types';
 import { extrasSize, type ModelLibrary } from './assets';
-import { StaticBatcher } from './batch';
+import type { StaticBatcher } from './batch';
 
 /** Variants per level style, by GLB name (without the furniture_ prefix). */
 export const FURNITURE_VARIANTS: Record<PropStyle, string[]> = {
@@ -75,14 +76,11 @@ function variantInfo(lib: ModelLibrary, name: string): Variant | null {
 const err = (want: number, have: number): number => Math.abs(Math.log(want / have));
 
 export class FurnitureSet {
-  readonly group = new THREE.Group();
   /** Every model placed so far. */
   readonly placed: PlacedFurniture[] = [];
 
-  /** `batcher`: where placed copies go (shared with other static models so it all merges once). */
-  constructor(private readonly lib: ModelLibrary, private readonly batcher = new StaticBatcher()) {
-    this.group.name = 'furniture-models';
-  }
+  /** `batcher`: where placed copies go; the owner builds it once everything is queued. */
+  constructor(private readonly lib: ModelLibrary, private readonly batcher: StaticBatcher) {}
 
   /** True if this style has at least one loaded model. */
   covers(style: PropStyle | undefined): boolean {
@@ -146,16 +144,5 @@ export class FurnitureSet {
     this.placed.push({
       name: v.name, center: c, yaw: frame.yaw, w: v.size.x * sx, h: v.size.y * sy, d: v.size.z * sz, matrix: place, scene: v.scene,
     });
-  }
-
-  /** Merge everything queued into static meshes. Call once after all place() calls. */
-  build(): void {
-    this.batcher.build(this.group);
-  }
-
-  dispose(): void {
-    for (const c of this.group.children) (c as THREE.Mesh).geometry?.dispose();
-    this.group.clear();
-    // Materials/textures belong to the ModelLibrary.
   }
 }

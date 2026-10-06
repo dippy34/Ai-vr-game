@@ -107,7 +107,7 @@ def build_books_pile():
     col, r, h = L.age(g, col, 0.9, h, dust=0.8, grime=1.0, wear=0.0, scratch=0.0, stains=0.6, seed=2.0, film=0.1)
     g.finish(col, r, h, bump_dist=0.0004)
     colors = ['5a2a24', '3e4a34', '2c3448', '5a4630', '4a4a44', '6a3a20']
-    covers = [L.mat_fabric(f'book_cloth_{i}', hexc(c), None, weave=900.0, fade=0.45, stains=0.7, dust=0.9,
+    covers = [L.mat_fabric(f'book_cloth_{i}', hexc(c), None, weave=900.0, fade=0.2, stains=0.7, dust=0.22,
                            grime=0.9, seed=10.0 + i, rough=0.82) for i, c in enumerate(colors)]
     # stack: (w, h, t, yaw, tilt_x, tilt_y, dx, dy, cover)
     specs = [(0.19, 0.27, 0.045, 8, 0, 0, 0.0, 0.0, 3), (0.16, 0.235, 0.055, -14, 0, 0, 0.012, -0.01, 0),
@@ -120,8 +120,10 @@ def build_books_pile():
         book(P, f'b{i}', w, hh, t, M, covers[ci], pages)
         z += t + 0.0005
     # one fallen off the pile, leaning against it
-    book(P, 'lean', 0.15, 0.22, 0.032, Matrix.Translation((0.2, 0.05, 0.0)) @ Matrix.Rotation(math.radians(15), 4, 'Z')
-         @ Matrix.Rotation(math.radians(-64), 4, 'Y') @ Matrix.Translation((0.075, 0, 0)), covers[2], pages)
+    # standing on its tail, leaning against the stack
+    book(P, 'lean', 0.15, 0.22, 0.032, Matrix.Translation((0.205, 0.035, 0.0)) @ Matrix.Rotation(math.radians(8), 4, 'Z')
+         @ Matrix.Rotation(math.radians(-24), 4, 'Y') @ Matrix.Rotation(math.radians(90), 4, 'X')
+         @ Matrix.Translation((0, 0.11, 0)), covers[2], pages)
     # an open book face-up on top, pages swollen and fanned
     top = z
     ow, oh = 0.145, 0.21
@@ -165,22 +167,15 @@ def build_books_pile():
 def build_bottles():
     P = L.Piece('bottles', 'surface', tex=512, glass_tex=512, max_tris=1500, ao=0.05, bevel=0.002, ao_small=0.006,
                 seed=61)
-    green = L.mat_glass('glass_green', tint=hexc('1a3020'), alpha=0.42, dust=0.9, grime=0.7, seed=1.0, rough=0.08)
-    amber = L.mat_glass('glass_amber', tint=hexc('3a200c'), alpha=0.5, dust=0.9, grime=0.7, seed=2.0)
-    clear = L.mat_glass('glass_clear', tint=hexc('6a786e'), alpha=0.14, dust=0.85, grime=0.6, seed=3.0)
-    aqua = L.mat_glass('glass_aqua', tint=hexc('4a6a66'), alpha=0.22, dust=0.8, grime=0.6, seed=4.0)
+    green = L.mat_glass('glass_green', film=0.4, tint=hexc('1a3020'), alpha=0.5, dust=1.0, grime=0.8, seed=1.0, rough=0.08)
+    amber = L.mat_glass('glass_amber', film=0.4, tint=hexc('3a200c'), alpha=0.6, dust=1.0, grime=0.8, seed=2.0)
+    clear = L.mat_glass('glass_clear', film=0.4, tint=hexc('6a786e'), alpha=0.24, dust=1.0, grime=0.8, seed=3.0)
+    aqua = L.mat_glass('glass_aqua', film=0.4, tint=hexc('4a6a66'), alpha=0.3, dust=1.0, grime=0.7, seed=4.0)
     tin = L.mat_metal('lid_tin', hexc('8a8478'), rough=0.5, tarnish=0.5, rust=0.85, dust=0.6, seed=5.0)
-    label = L.new_material('labels')
-    g = G(label)
-    uv = g.uv('src')
-    u, v, _ = g.sep(uv)
-    base = g.mix(g.rng(g.noise(g.pos(), 30.0, 3, 0.5), 0.3, 0.7), hexc('c8b890'), hexc('a8946a'))
-    border = g.mx(g.mul(g.rng(v, 0.08, 0.06), g.rng(v, 0.04, 0.06)), g.mul(g.rng(v, 0.92, 0.94), g.rng(v, 0.96, 0.94)))
-    col = g.mix(border, base, hexc('6a2a20'))
-    col = text_block(g, uv, lines=7.0, margin=0.18, col=col, ink=hexc('3a2a20'))
-    col, r, h = L.age(g, col, 0.85, 0.0, dust=0.6, grime=0.9, wear=0.0, scratch=0.0, stains=0.8, fade=0.4,
-                      stain_col=hexc('7a5a34'), seed=6.0, film=0.1)
-    g.finish(col, r, h)
+    label = mat_paper('label_wine', image=L.np_image('wine_label', I.wine_label()), seed=6.0, dust=0.5, stains=0.5,
+                      edge=0.4)
+    label_med = mat_paper('label_med', image=L.np_image('med_label', I.med_label()), seed=7.0, dust=0.5, stains=0.5,
+                          edge=0.4)
     residue = L.mat_plain('residue', hexc('2a1810'), 0.35, dust=0.0, grime=0.5, noise_amt=0.4, wear=0.0, scratch=0.0,
                           seed=7.0)
     cork = L.mat_plain('cork', hexc('6a4c30'), 0.9, dust=0.6, grime=0.9, noise_amt=0.5, wear=0.2, seed=8.0)
@@ -222,14 +217,14 @@ def build_bottles():
             co = ml.data.vertices[ml.data.loops[li].vertex_index].co
             a = math.degrees(math.atan2(co.y + 0.035, co.x - 0.045))
             uvl.data[li].uv = (((a - 60) % 360) / 150, (co.z - 0.02) / 0.045)
-    P.add(ml, label, smooth=40, uv='src', weight=0.6)
+    P.add(ml, label_med, smooth=40, uv='src', weight=0.7)
     # 3) mason jar, murky dried residue, rusted lid
     jar = [(0.0, 0.0), (0.036, 0.0), (0.04, 0.008), (0.04, 0.11), (0.036, 0.125), (0.032, 0.13), (0.033, 0.142)]
     P.add(L.lathe('jar', jar, segs=16, M=xf((0.06, 0.06, 0)), cap_top=False), clear, smooth=40, weight=1.0)
     P.add(L.lathe('jar_lid', [(0.0, 0.0), (0.035, 0.0), (0.0355, 0.012), (0.033, 0.014), (0.0, 0.0145)], segs=16,
                   M=xf((0.06, 0.06, 0.134), (3, -2, 0))), tin, smooth=40, weight=0.6)
-    P.add(L.lathe('jar_gunk', [(0.0, 0.003), (0.037, 0.003), (0.039, 0.03), (0.036, 0.026), (0.0, 0.022)], segs=14,
-                  M=xf((0.06, 0.06, 0))), residue, smooth=40, weight=0.4)
+    P.add(L.lathe('jar_gunk', [(0.0, 0.003), (0.037, 0.003), (0.0385, 0.018), (0.034, 0.015), (0.0, 0.012)], segs=14,
+                  M=xf((0.06, 0.06, 0)), jitter=0.05), residue, smooth=40, weight=0.4)
     # 4) a clear-aqua soda bottle tipped over on its side
     soda = [(0.0, 0.0), (0.027, 0.0), (0.03, 0.006), (0.03, 0.12), (0.024, 0.15), (0.0125, 0.18), (0.012, 0.205),
             (0.0145, 0.21), (0.013, 0.214)]
@@ -244,92 +239,124 @@ def build_bottles():
 # Candles
 # =============================================================================================
 
+def seg_dist(g, p, a, b):
+    """Shader: distance from p to segment a-b, and the parameter t along it."""
+    ab = Vector(b) - Vector(a)
+    ap = g.v('SUBTRACT', p, tuple(a))
+    t = g.clamp(g.mul(g.v('DOT_PRODUCT', ap, tuple(ab)), 1.0 / max(ab.length_squared, 1e-9)))
+    q = g.vadd(g.vmul(g.comb(t, t, t), tuple(ab)), tuple(a))
+    return g.v('DISTANCE', p, q), t
+
+
+def mat_wax(name, base, dark, seed, drips=()):
+    """Old candle wax. drips: [(top, bottom, width)] world-space segments on the candle surface; they
+    are baked into the normal map as raised, glossier runs ending in a bead."""
+    mat = L.new_material(name)
+    g = G(mat)
+    p = g.pos()
+    x, y, z = g.sep(p)
+    col = g.mix(g.rng(g.noise(p, 30.0, 3, 0.5, offset=(seed, 0, 0)), 0.3, 0.7), base, dark)
+    dh = None
+    wob = g.mul(g.sub(g.noise(p, 300.0, 2, 0.5), 0.5), 0.0012)
+    for (a, b, w) in drips:
+        d, t = seg_dist(g, p, a, b)
+        wid = g.add(g.mul(t, w * 0.6), w * 0.7)
+        run = g.rng(g.add(d, wob), wid, g.mul(wid, 0.2))
+        bead = g.rng(g.v('DISTANCE', p, tuple(b)), w * 1.5, w * 0.3)
+        r_ = g.mx(run, bead)
+        dh = r_ if dh is None else g.mx(dh, r_)
+    # soot darkening around the burnt tops
+    soot = g.mul(g.rng(z, 0.035, 0.075), g.rng(g.noise(p, 25.0, 3, 0.6), 0.3, 0.7))
+    col = g.mix(g.mul(soot, 0.5), col, hexc('2a241c'))
+    h = g.mul(g.noise(p, 160.0, 3, 0.6), 0.4)
+    rough = g.add(0.45, 0.0)
+    if dh is not None:
+        col = g.mix(g.mul(dh, 0.6), col, g.hsv(base, s=0.9, v=1.12))
+        h = g.add(h, g.mul(dh, 3.0))
+        rough = g.mixf(dh, rough, 0.28)
+    col, rough, h = L.age(g, col, rough, h, dust=0.75, grime=0.45, wear=0.0, scratch=0.2, stains=0.4, seed=seed,
+                          film=0.12, dust_scale=2.0)
+    return g.finish(col, rough, h, bump_dist=0.0008)
+
+
 def build_candles():
-    P = L.Piece('candles', 'surface', tex=512, max_tris=1500, ao=0.04, bevel=0.0015, ao_small=0.005, seed=71)
+    P = L.Piece('candles', 'surface', tex=512, max_tris=1500, ao=0.02, bevel=0.0015, ao_small=0.004, seed=71)
     china = L.new_material('saucer_china')
     g = G(china)
     p = g.pos()
     x, y, z = g.sep(p)
     r = g.m('SQRT', g.add(g.mul(x, x), g.mul(y, y)))
     band = g.mul(g.rng(r, 0.058, 0.06), g.rng(r, 0.066, 0.064))
-    col = g.mix(band, hexc('d8d0bc'), hexc('7a6a3a'))  # worn gilt line on the rim
+    col = g.mix(band, hexc('bfb7a2'), hexc('6a5a30'))  # worn gilt line on the rim
+    tea = g.mul(g.rng(r, 0.028, 0.032), g.rng(r, 0.046, 0.04))
+    col = g.mix(g.mul(tea, g.rng(g.noise(p, 18.0, 3, 0.6), 0.3, 0.6, 0.2, 0.7)), col, hexc('6a4a2a'))
     craze = g.vor(p, 90.0, 'DISTANCE_TO_EDGE')
     col = g.mix(g.mul(g.rng(craze, 0.025, 0.0), 0.5), col, hexc('6a5a40'))
     chip = g.rng(g.add(g.noise(p, 40.0, 3, 0.6), g.mul(g.convex(), 0.4)), 0.78, 0.8, smooth=False)
     col = g.mix(chip, col, hexc('a89e88'))
-    col, rough, h = L.age(g, col, g.mixf(chip, 0.18, 0.8), g.mul(chip, -0.5), dust=0.6, grime=1.0, wear=0.0,
-                          scratch=0.4, stains=0.6, seed=1.0, film=0.06)
+    col, rough, h = L.age(g, col, g.mixf(chip, 0.2, 0.8), g.mul(chip, -0.5), dust=0.9, grime=1.0, wear=0.0,
+                          scratch=0.4, stains=0.8, stain_col=hexc('6a5030'), seed=1.0, film=0.15, dust_scale=2.0)
     g.finish(col, rough, h, soft=0.0015)
-    wax = L.new_material('wax')
-    g = G(wax)
-    p = g.pos()
-    x, y, z = g.sep(p)
-    base = g.mix(g.rng(g.noise(p, 30.0, 3, 0.5), 0.3, 0.7), hexc('cfc2a0'), hexc('b8a880'))
-    # soot darkening near the burnt tops, drips glossier
-    soot = g.mul(g.rng(z, 0.03, 0.075), g.rng(g.noise(p, 25.0, 3, 0.6), 0.3, 0.7))
-    col = g.mix(g.mul(soot, 0.6), base, hexc('3a3228'))
-    h = g.mul(g.noise(p, 160.0, 3, 0.6), 0.4)
-    col, rough, h = L.age(g, col, 0.42, h, dust=0.7, grime=0.9, wear=0.0, scratch=0.15, stains=0.3, seed=2.0,
-                          film=0.08)
-    g.finish(col, rough, h, bump_dist=0.0004)
+    specs = ((-0.012, 0.006, 0.0115, 0.058, 2, 'ivory'), (0.019, -0.006, 0.01, 0.034, -3, 'red'),
+             (0.004, 0.024, 0.0095, 0.021, 5, 'ivory'))
+    rnd = random.Random(7)
+    drips = {'ivory': [], 'red': []}
+    for (cx, cy, cr, ch, lean, wk) in specs:
+        Ml = xf((cx, cy, 0.009), (lean, 0, 0))
+        for d in range(4 if ch > 0.04 else 3):
+            a = rnd.uniform(0, 2 * math.pi)
+            z0 = ch - rnd.uniform(0.002, 0.006)
+            z1 = rnd.uniform(0.004, z0 * 0.6)
+            top = Ml @ Vector((math.cos(a) * cr, math.sin(a) * cr, z0))
+            bot = Ml @ Vector((math.cos(a + 0.1) * cr, math.sin(a + 0.1) * cr, z1))
+            drips[wk].append((top, bot, rnd.uniform(0.0018, 0.0026)))
+    ivory = mat_wax('wax_ivory', hexc('c8b890'), hexc('a8946a'), 2.0, drips['ivory'])
+    red = mat_wax('wax_red', hexc('6a2420'), hexc('4a1814'), 3.0, drips['red'])
     wick = L.mat_plain('wick', hexc('0e0c0a'), 0.9, dust=0.2, grime=0.3, wear=0.0, scratch=0.0, seed=3.0)
-    # saucer
     sau = [(0.0, 0.0), (0.03, 0.0), (0.032, 0.004), (0.045, 0.006), (0.062, 0.013), (0.068, 0.017), (0.066, 0.019),
            (0.06, 0.016), (0.044, 0.01), (0.0, 0.009)]
-    so = L.lathe('saucer', sau, segs=18, cap_top=True, cap_bot=True)
-    # a chunk missing from the rim
-    for v in so.data.vertices:
+    so = L.lathe('saucer', sau, segs=24, cap_top=True, cap_bot=True)
+    for v in so.data.vertices:  # a chunk missing from the rim
         a = math.degrees(math.atan2(v.co.y, v.co.x))
         if 20 < a < 44 and math.hypot(v.co.x, v.co.y) > 0.058:
-            k = 0.88
-            v.co.x *= k
-            v.co.y *= k
+            v.co.x *= 0.88
+            v.co.y *= 0.88
     P.add(so, china, smooth=35, weight=1.0)
-    rnd = random.Random(7)
-    # wax pool fused onto the saucer
     pool = []
-    for k in range(16):
-        a = 2 * math.pi * k / 16
-        rr = 0.036 + rnd.uniform(-0.006, 0.008)
+    for k in range(14):
+        a = 2 * math.pi * k / 14
+        rr = 0.034 + rnd.uniform(-0.006, 0.008)
         pool.append((rr * math.cos(a) + 0.004, rr * math.sin(a) - 0.002))
-    po = L.prism('pool', pool, 0.003, M=xf((0, 0, 0.0085)), bevel=0.0012)
-    P.add(po, wax, smooth=50)
-    # candle stubs: (x, y, radius, height, lean)
-    for i, (cx, cy, cr, ch, lean) in enumerate(((-0.012, 0.006, 0.0115, 0.058, 2), (0.019, -0.006, 0.01, 0.034, -3),
-                                                (0.004, 0.024, 0.0095, 0.021, 5))):
+    P.add(L.prism('pool', pool, 0.0025, M=xf((0, 0, 0.0085)), bevel=0.001), ivory, smooth=50)
+    # candle stubs: (x, y, radius, height, lean, wax)
+    for i, (cx, cy, cr, ch, lean, wk) in enumerate(specs):
+        wm = ivory if wk == 'ivory' else red
         top_r = cr * 0.55
         prof = [(0.0, 0.0), (cr * 1.25, 0.0), (cr * 1.05, 0.004), (cr, 0.01), (cr * 1.02, ch * 0.6), (cr, ch - 0.004),
                 (cr * 0.92, ch), (top_r * 1.1, ch - 0.0015), (top_r * 0.6, ch - 0.004), (0.0, ch - 0.0045)]
-        o = L.lathe(f'candle_{i}', prof, segs=10, jitter=0.06, seed=i)
-        # melted, lopsided rim: one side burnt lower
-        for v in o.data.vertices:
+        o = L.lathe(f'candle_{i}', prof, segs=14, jitter=0.04, seed=i)
+        for v in o.data.vertices:  # melted, lopsided rim: one side burnt lower
             if v.co.z > ch * 0.8:
                 a = math.atan2(v.co.y, v.co.x)
                 v.co.z -= 0.006 * (0.5 + 0.5 * math.cos(a - 1.0 - i)) * (v.co.z - ch * 0.8) / (ch * 0.2)
-        L.place(o, xf((cx, cy, 0.009), (lean, 0, rnd.uniform(0, 90))), 'z')
-        P.add(o, wax, smooth=50, weight=1.0)
-        # drips running down the side and pooling at the base
-        for d in range(3):
-            a = rnd.uniform(0, 2 * math.pi)
-            z0 = ch - rnd.uniform(0.002, 0.01)
-            z1 = rnd.uniform(0.004, z0 * 0.6)
-            r0 = cr + 0.0012
-            pts = [(cx + math.cos(a) * r0, cy + math.sin(a) * r0, 0.009 + z) for z in np.linspace(z0, z1, 4)]
-            rads = [0.0018, 0.0022, 0.0024, 0.003]
-            P.add(L.tube(f'drip_{i}_{d}', pts, rads, segs=5, caps=True), wax, smooth=60, weight=0.3)
-        # curled black wick
-        wz = 0.009 + ch - 0.004
-        pts = [(cx, cy, wz), (cx + 0.001, cy, wz + 0.006), (cx + 0.0035, cy + 0.001, wz + 0.009)]
+        L.place(o, xf((cx, cy, 0.009), (lean, 0, 0)), 'z')
+        P.add(o, wm, smooth=50, weight=1.0)
+        wz = ch - 0.004
+        Ml = xf((cx, cy, 0.009), (lean, 0, 0))
+        pts = [Ml @ Vector((0, 0, wz)), Ml @ Vector((0.001, 0, wz + 0.006)), Ml @ Vector((0.0035, 0.001, wz + 0.009))]
         P.add(L.tube(f'wick_{i}', pts, 0.0009, segs=4, caps=True), wick, smooth=60, weight=0.2)
-    # drips over the saucer rim, frozen mid-fall
-    for d, a in enumerate((2.3, 3.4, 5.1)):
-        r0 = 0.066
-        pts = [(math.cos(a) * 0.05, math.sin(a) * 0.05, 0.0115), (math.cos(a) * r0, math.sin(a) * r0, 0.0185),
-               (math.cos(a) * 0.069, math.sin(a) * 0.069, 0.012), (math.cos(a) * 0.069, math.sin(a) * 0.069, 0.004 + d * 0.002)]
-        P.add(L.tube(f'rimdrip_{d}', pts, [0.0025, 0.0026, 0.0024, 0.003], segs=5), wax, smooth=60, weight=0.3)
-    # a spent match on the saucer
-    P.add(L.box('match', (0.042, 0.0024, 0.0024), xf((0.03, 0.035, 0.0105), (0, 0, 70)), bevel=0.0004), wick, weight=0.2)
-    P.finish(previews=dict(yaw=30, pitch=28))
+    # one drip running over the saucer rim, frozen mid-fall
+    a = 2.6
+    pts = [(math.cos(a) * r_, math.sin(a) * r_, z_) for r_, z_ in ((0.05, 0.01), (0.06, 0.0148), (0.066, 0.0194),
+                                                                  (0.0684, 0.016), (0.0686, 0.0095))]
+    P.add(L.tube('rimdrip', pts, [0.0024, 0.0026, 0.0026, 0.0026, 0.0034], segs=6, scale_xy=(0.6, 1.0),
+                 up_hint=(0, 0, 1)), ivory, smooth=180, weight=0.4)
+    # a spent match lying in the well: pale stick, charred head
+    matchwood = L.mat_plain('matchwood', hexc('b09a70'), 0.8, dust=0.5, grime=0.6, wear=0.0, scratch=0.0, seed=4.0)
+    Mm = xf((0.03, 0.026, 0.0105), (0, 0, 62))
+    P.add(L.box('match', (0.034, 0.0024, 0.0024), Mm @ xf((0.004, 0, 0)), bevel=0.0004), matchwood, weight=0.2)
+    P.add(L.box('match_head', (0.008, 0.0028, 0.0028), Mm @ xf((-0.017, 0, 0)), bevel=0.0008), wick, weight=0.1)
+    P.finish(previews=dict(yaw=30, pitch=28, extra=[dict(tag="close", yaw=10, pitch=10, zoom=2.0)]))
 
 
 # =============================================================================================
@@ -341,114 +368,108 @@ def build_plate_broken():
     pat = L.np_image('plate_pattern', I.plate_pattern(512))
     china = L.new_material('plate_china')
     g = G(china)
-    uv = g.uv('src')
     c, _ = g.img(pat)
     p = g.pos()
     craze = g.vor(p, 70.0, 'DISTANCE_TO_EDGE')
     col = g.mix(g.mul(g.rng(craze, 0.02, 0.0), 0.35), c, hexc('6a5a40'))
-    # broken edges show the unglazed biscuit (bevel edge mask)
-    col = g.mix(g.mul(g.edge(), 0.9), col, hexc('cfc6b4'))
-    col, rough, h = L.age(g, col, g.mixf(g.edge(), 0.12, 0.85), 0.0, dust=0.55, grime=0.9, wear=0.0, scratch=0.3,
-                          stains=0.5, seed=1.0, film=0.06)
+    # dried food smear + the broken edges show the unglazed biscuit
+    fs = g.noise(p, 14.0, 4, 0.65, offset=(3.0, 0, 0))
+    food = g.mul(g.rng(fs, 0.62, 0.7), g.rng(g.v('LENGTH', g.vmul(p, (1, 1, 0))), 0.09, 0.05))
+    col = g.mix(g.mul(food, 0.8), col, hexc('4a3220'))
+    col = g.mix(g.mul(g.edge(), 0.9), col, hexc('c9c0ae'))
+    col, rough, h = L.age(g, col, g.mixf(g.edge(), 0.14, 0.85), g.mul(food, 0.3), dust=0.5, grime=0.5, wear=0.0,
+                          scratch=0.4, stains=0.4, stain_col=hexc('7a6040'), seed=1.0, film=0.06, dust_scale=2.0)
     g.finish(col, rough, h, soft=0.001)
     R = 0.13
-    prof_r = [0.0, 0.05, 0.075, 0.09, 0.105, 0.118, 0.13]
-    prof_z = [0.002, 0.0, 0.002, 0.009, 0.014, 0.018, 0.019]
-    NA = 28
+    prof = [(0.0, 0.002), (0.075, 0.002), (0.095, 0.0105), (0.118, 0.018), (0.13, 0.019), (0.131, 0.0165),
+            (0.116, 0.0145), (0.093, 0.006), (0.076, 0.0), (0.0, -0.001)]
+    # top surface outer -> rim -> underside back to the center: one closed lathe
     rnd = random.Random(9)
-    # shard regions: nearest of a few seeds in (angle, radius) space
-    seeds = [(rnd.uniform(0, 2 * math.pi), rnd.uniform(0.02, 0.12)) for _ in range(9)]
-
-    def owner(a, r):
-        best, bi = 1e9, 0
-        for i, (sa, sr) in enumerate(seeds):
-            dx = math.cos(a) * r - math.cos(sa) * sr
-            dy = math.sin(a) * r - math.sin(sa) * sr
-            d = dx * dx + dy * dy
-            if d < best:
-                best, bi = d, i
-        return bi
-    # cells: (ring j, angle k)
-    cells = {}
-    for j in range(len(prof_r) - 1):
-        for k in range(NA):
-            a = 2 * math.pi * (k + 0.5) / NA
-            r = (prof_r[j] + prof_r[j + 1]) / 2
-            cells[(j, k)] = owner(a, r)
-    th = 0.0035
-
-    def pt(j, k):
-        a = 2 * math.pi * k / NA
-        r = prof_r[j]
-        return Vector((r * math.cos(a), r * math.sin(a), prof_z[j]))
+    imp = Vector((0.025, -0.01, 0))
+    rays = sorted(rnd.uniform(0, 2 * math.pi) for _ in range(6))
+    rays = [r_ for r_ in rays]
     shards = []
-    for si in range(len(seeds)):
-        mine = [c for c, o in cells.items() if o == si]
-        if not mine:
-            continue
-        bm = bmesh.new()
-        uvl = bm.loops.layers.uv.new('src')
-        vmap = {}
-
-        def V(j, k):
-            key = (0, 0) if j == 0 else (j, k % NA)
-            if key not in vmap:
-                vmap[key] = bm.verts.new(pt(j, k))
-            return vmap[key]
-        for (j, k) in mine:
-            if j == 0:
-                f = bm.faces.new((V(0, 0) if False else V(0, k), V(1, k), V(1, k + 1)))
-            else:
-                f = bm.faces.new((V(j, k), V(j + 1, k), V(j + 1, k + 1), V(j, k + 1))[::-1][::-1])
-            for lp in f.loops:
-                co = lp.vert.co
-                lp[uvl].uv = (co.x / (2 * R) + 0.5, co.y / (2 * R) + 0.5)
-        bm.normal_update()
-        for f in bm.faces:
-            if f.normal.z < 0:
-                f.normal_flip()
-        # jagged break: jitter boundary verts slightly in the plane
-        boundary = {v for e in bm.edges if e.is_boundary for v in e.verts}
-        for v in boundary:
-            if math.hypot(v.co.x, v.co.y) < R - 0.002:
-                v.co.x += rnd.uniform(-0.003, 0.003)
-                v.co.y += rnd.uniform(-0.003, 0.003)
-        res = bmesh.ops.solidify(bm, geom=bm.faces[:], thickness=th)
-        o = L._link(bm, f'shard_{si}')
-        shards.append((o, len(mine)))
-    # scatter: big pieces stay near where it landed, small ones skitter away; some flipped
-    for i, (o, n) in enumerate(shards):
-        cen = sum((v.co for v in o.data.vertices), Vector()) / len(o.data.vertices)
-        flip = rnd.random() < 0.3 and n < 12
-        dist = 0.02 + (0.18 if n < 6 else 0.05) * rnd.random()
-        out = Vector((cen.x, cen.y, 0)).normalized() if cen.length > 1e-4 else Vector((1, 0, 0))
-        M = Matrix.Translation(-cen)
+    for k in range(len(rays)):
+        a0, a1 = rays[k], rays[(k + 1) % len(rays)] + (2 * math.pi if k == len(rays) - 1 else 0)
+        span = a1 - a0
+        cuts = [(a0, a1)]
+        if span > 1.6:  # split wide wedges in two
+            m = a0 + span * rnd.uniform(0.4, 0.6)
+            cuts = [(a0, m), (m, a1)]
+        for (b0, b1) in cuts:
+            ring_cut = rnd.uniform(0.05, 0.085) if (b1 - b0) > 0.8 else None
+            for part in ((0.0, ring_cut), (ring_cut, None)) if ring_cut else ((0.0, None),):
+                o = L.lathe('plate', prof, segs=28, cap_top=False, cap_bot=False)
+                bm = bmesh.new()
+                bm.from_mesh(o.data)
+                planes = []
+                for ang, sgn in ((b0, -1), (b1, 1)):
+                    n = Vector((-math.sin(ang), math.cos(ang), 0)) * sgn
+                    planes.append((imp, n))
+                if part[1] is not None:  # keep inside the cross cut
+                    ca = (b0 + b1) / 2
+                    d = Vector((math.cos(ca), math.sin(ca), 0))
+                    planes.append((imp + d * part[1], d))
+                if part[0]:
+                    ca = (b0 + b1) / 2
+                    d = Vector((math.cos(ca), math.sin(ca), 0))
+                    planes.append((imp + d * part[0], -d))
+                for (co, no) in planes:
+                    geom = bm.verts[:] + bm.edges[:] + bm.faces[:]
+                    bmesh.ops.bisect_plane(bm, geom=geom, plane_co=co, plane_no=no, clear_outer=True)
+                bnd = [e for e in bm.edges if e.is_boundary]
+                if bnd:
+                    bmesh.ops.holes_fill(bm, edges=bnd, sides=0)
+                if len(bm.faces) < 4:
+                    bm.free()
+                    bpy.data.objects.remove(o)
+                    continue
+                uvl = bm.loops.layers.uv.new('src')
+                for f in bm.faces:
+                    for lp in f.loops:
+                        co = lp.vert.co
+                        lp[uvl].uv = (co.x / (2 * R) + 0.5, co.y / (2 * R) + 0.5)
+                bm.to_mesh(o.data)
+                bm.free()
+                shards.append(o)
+    # scatter around where it landed: big pieces stay close, small ones skitter away, a few flipped
+    for i, o in enumerate(shards):
+        vs = o.data.vertices
+        cen = sum((v.co for v in vs), Vector()) / len(vs)
+        area = sum(f.area for f in o.data.polygons)
+        small = area < 0.006
+        flip = False
+        out = Vector((cen.x, cen.y, 0))
+        out = out.normalized() if out.length > 1e-4 else Vector((1, 0, 0))
+        dist = (0.06 + 0.12 * rnd.random()) if small else (0.008 + 0.025 * rnd.random())
+        M = Matrix.Translation(-Vector((cen.x, cen.y, 0)))
         if flip:
             M = Matrix.Rotation(math.pi, 4, 'X') @ M
-        M = Matrix.Rotation(rnd.uniform(-0.6, 0.6), 4, 'Z') @ Matrix.Rotation(rnd.uniform(-0.12, 0.12), 4, 'X') @ M
+        M = Matrix.Rotation(rnd.uniform(-0.5, 0.5) if small else rnd.uniform(-0.15, 0.15), 4, 'Z') @ M
         o.data.transform(M)
-        lo = min(v.co.z for v in o.data.vertices)
+        # rest on the floor: tilt so the piece lies on its lowest points (rims make them rock)
+        lo = min(v.co.z for v in vs)
         o.data.transform(Matrix.Translation(Vector((cen.x, cen.y, 0)) + out * dist + Vector((0, 0, -lo))))
         L.place(o, None, 'x')
-        P.add(o, china, smooth=30, weight=1.0, uv='src')
+        P.add(o, china, smooth=30, weight=1.0, uv='smart')
     # fork, dropped next to it (tarnished silver plate)
-    silver = L.mat_metal('fork_silver', hexc('a8a49a'), rough=0.3, tarnish=0.7, tarnish_col=hexc('3a3428'), dust=0.4,
+    silver = L.mat_metal('fork_silver', hexc('8a8478'), rough=0.32, tarnish=0.8, tarnish_col=hexc('2e2a20'), dust=0.5,
                          seed=4.0, wear=0.5, scratch=0.6)
-    handle = [(-0.1, 0.0), (-0.09, 0.0), (0.0, 0.0), (0.03, 0.0)]
+    n0 = len(P.parts)
     pts = [Vector((-0.115 + 0.115 * t, 0.0, 0.004 + 0.006 * math.sin(t * 2.6))) for t in np.linspace(0, 1, 6)]
     widths = [0.0105, 0.012, 0.009, 0.0055, 0.006, 0.008]
-    fk = L.tube('fork_handle', pts, widths, segs=6, scale_xy=(0.28, 1.0), up_hint=(0, 0, 1))
-    P.add(fk, silver, smooth=50, weight=0.7)
-    # head + four tines
+    P.add(L.tube('fork_handle', pts, widths, segs=6, scale_xy=(0.3, 1.0), up_hint=(0, 0, 1)), silver, smooth=50,
+          weight=0.8)
     hd = [Vector((0.0, 0.0, 0.0095)), Vector((0.025, 0.0, 0.01))]
     P.add(L.tube('fork_head', hd, [0.008, 0.0115], segs=6, scale_xy=(0.25, 1.0), up_hint=(0, 0, 1)), silver, smooth=50,
           weight=0.5)
     for k in range(4):
         y0 = -0.0083 + k * 0.0055
-        tp = [Vector((0.024, y0, 0.0098)), Vector((0.045, y0 * 1.05, 0.0085)), Vector((0.062, y0 * 1.1 + (0.002 if k == 2 else 0.0), 0.0055 + (0.006 if k == 2 else 0)))]
+        bent = 0.006 if k == 2 else 0.0
+        tp = [Vector((0.024, y0, 0.0098)), Vector((0.045, y0 * 1.05, 0.0085)), Vector((0.062, y0 * 1.1, 0.0055 + bent))]
         P.add(L.tube(f'tine_{k}', tp, [0.0016, 0.0014, 0.0009], segs=4), silver, smooth=50, weight=0.3)
-    for part in P.parts[-6:]:
-        part['obj'].data.transform(Matrix.Translation((0.17, 0.09, -0.002)) @ Matrix.Rotation(math.radians(-35), 4, 'Z'))
+    for part in P.parts[n0:]:
+        part['obj'].data.transform(Matrix.Translation((0.2, 0.1, -0.0025)) @ Matrix.Rotation(math.radians(-35), 4, 'Z'))
     P.finish(previews=dict(yaw=30, pitch=45))
 
 
@@ -496,7 +517,18 @@ def build_bulb():
     P.add(L.lathe('screw', [(r, z) for r, z in reversed(base)], segs=10, M=SM), brass, smooth=40, weight=0.5)
     env = [(0.0, -0.205), (0.012, -0.203), (0.025, -0.193), (0.031, -0.177), (0.03, -0.157), (0.024, -0.135),
            (0.016, -0.11), (0.0128, -0.095), (0.0125, -0.089)]
-    glass = L.mat_glass('bulb_glass', tint=hexc('5a5e58'), alpha=0.16, dust=1.0, grime=0.7, seed=5.0)
+    glass = L.new_material('bulb_glass')
+    g = G(glass)
+    glass['glass'] = 1
+    p = g.pos()
+    x, y, z = g.sep(p)
+    # burnt-out: a gray-black mirror of tungsten deposited inside the tip, dust film on top
+    blk = g.rng(g.sub(z, bot.z), -0.15, -0.2)
+    dn = g.noise(p, 30.0, 3, 0.6)
+    col = g.mix(blk, hexc('6a6e68'), hexc('16140f'))
+    col = g.mix(g.mul(g.up(0.1, 0.8), g.rng(dn, 0.3, 0.7)), col, L.DUST)
+    a_ = g.clamp(g.add(g.add(0.14, g.mul(blk, 0.75)), g.mul(g.up(0.1, 0.8), 0.4)))
+    g.finish(col, g.mixf(g.up(0.1, 0.8), 0.08, 0.7), None, alpha=a_)
     P.add(L.lathe('envelope', env, segs=14, M=SM, cap_top=False), glass, smooth=60, weight=1.0)
     # inner glass stem + broken filament
     wire = L.mat_metal('filament', hexc('3a3632'), rough=0.5, tarnish=0.6, dust=0.0, seed=6.0)
@@ -518,17 +550,21 @@ def build_bulb():
                           stain_col=hexc('8a7048'), seed=7.0, film=0.1, up_lo=0.2)
     g.finish(col, rough, h, soft=0.0015)
     rnd = random.Random(3)
-    shade_prof = [(0.026, -0.066), (0.05, -0.08), (0.08, -0.105), (0.098, -0.13)]
-    arc = 150
-    so = L.lathe('shade', shade_prof, segs=9, arc=arc, start=200, cap_top=False, cap_bot=False, M=None)
-    # jag the free edges (lower rim + both side breaks)
+    shade_prof = [(0.026, -0.066), (0.05, -0.079), (0.075, -0.1), (0.092, -0.124), (0.1, -0.145)]
+    arc = 160
+    so = L.lathe('shade', shade_prof, segs=10, arc=arc, start=195, cap_top=False, cap_bot=False, M=None)
+    # sawtooth break along the lower edge, the side breaks run up at an angle
     for v in so.data.vertices:
         rr = math.hypot(v.co.x, v.co.y)
-        if rr > 0.06:
-            v.co.z += rnd.uniform(-0.012, 0.016)
+        a = math.degrees(math.atan2(v.co.y, v.co.x)) % 360
+        k = round((a - 195) / (arc / 10))
+        if rr > 0.07:
+            v.co.z += (0.022 if k % 2 else -0.004) * (rr - 0.07) / 0.03 + rnd.uniform(-0.004, 0.004)
+        if k in (0, 10) and rr > 0.045:
+            v.co.z += 0.02 * (rr - 0.045) / 0.055
     bm = bmesh.new()
     bm.from_mesh(so.data)
-    bmesh.ops.solidify(bm, geom=bm.faces[:], thickness=0.0025)
+    bmesh.ops.solidify(bm, geom=bm.faces[:], thickness=0.004)
     bm.to_mesh(so.data)
     bm.free()
     so.data.transform(SM)
@@ -552,10 +588,11 @@ def build_papers():
         'letter': L.np_image('paper_letter', I.handwritten(320, 420)),
         'typed': L.np_image('paper_typed', I.typed_page(320, 420, title='NOTICE OF FORECLOSURE')),
     }
-    mats = {k: mat_paper(f'paper_{k}', image=v, seed=i, dust=0.45, stains=0.4, edge=0.3) for i, (k, v) in
+    mats = {k: mat_paper(f'paper_{k}', image=v, seed=i, dust=0.5, stains=0.5, edge=0.4, rough=0.9) for i, (k, v) in
             enumerate(imgs.items())}
-    back = mat_paper('paper_back', hexc('c8bb9a'), seed=9.0, dust=0.4, stains=0.7)
-    plain = mat_paper('paper_plain', hexc('cdbfa0'), text=True, seed=8.0, dust=0.5, stains=0.6, lines=26.0)
+    back = mat_paper('paper_back', hexc('bcae8a'), seed=9.0, dust=0.4, stains=0.7)
+    plain = mat_paper('paper_plain', image=L.np_image('paper_typed2', I.typed_page(320, 420, seed=38, title='MEMO')),
+                      seed=8.0, dust=0.5, stains=0.6)
     rnd = random.Random(12)
 
     def sheet(name, w, h, M, mat, nu=3, nv=2, curl=0.0, lift=0.0, weight=1.0, back_w=0.3):
@@ -573,7 +610,7 @@ def build_papers():
         bmesh.ops.reverse_faces(bm, faces=bm.faces[:])
         bm.to_mesh(b.data)
         bm.free()
-        P.add(b, back if mat is not plain else back, smooth=60, weight=back_w, uv='smart')
+        P.add(b, back, smooth=60, weight=0.08, uv='smart')
     # folded newspaper: front page up, half flipped open
     Mn = xf((0.05, 0.02, 0.0), (0, 0, 14))
     sheet('news', 0.36, 0.48, Mn, mats['news'], nu=3, nv=3, curl=0.04, weight=1.6, back_w=0.2)

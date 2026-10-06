@@ -574,7 +574,7 @@ def mat_fabric(name, base, alt=None, *, weave=420.0, fade=0.4, stains=0.4, dust=
 
 
 def mat_glass(name, tint=(0.05, 0.06, 0.05), *, alpha=0.18, dust=0.8, grime=0.6, seed=0.0, rough=0.06,
-              cracks=None):
+              cracks=None, film=0.0):
     """Alpha glass (baked as RGBA). cracks: optional (image) whose R marks crack lines in 'src' UV."""
     mat = new_material(name)
     g = G(mat)
@@ -584,6 +584,11 @@ def mat_glass(name, tint=(0.05, 0.06, 0.05), *, alpha=0.18, dust=0.8, grime=0.6,
     dn = g.noise(p, 4.0, 3, 0.6, offset=(seed, 3.0, 0))
     smear = g.noise(p, 1.5, 4, 0.7, stretch=(1.0, 1.0, 3.0), offset=(0, seed, 0))
     d = g.clamp(g.add(g.mul(g.mul(up, g.rng(dn, 0.25, 0.7, 0.3, 1.0)), dust), g.mul(g.rng(smear, 0.45, 0.7), dust * 0.25)))
+    if film:
+        # a dull haze of dust everywhere, thicker in blotches; finger-wiped streaks clean through it
+        fh = g.noise(p, 9.0, 4, 0.6, offset=(seed, 7.0, 1.0))
+        wipe = g.rng(g.vor(p, 14.0, 'DISTANCE_TO_EDGE', stretch=(1.0, 1.0, 0.3), offset=(seed, 0, 0)), 0.02, 0.0)
+        d = g.clamp(g.add(d, g.mul(g.mul(g.rng(fh, 0.3, 0.7, 0.5, 1.0), film), g.inv(g.mul(wipe, 0.7)))))
     cav = g.mul(g.cavity(0.5, 0.98), grime)
     col = g.mix(d, tint, DUST)
     col = g.mix(cav, col, GRIME)

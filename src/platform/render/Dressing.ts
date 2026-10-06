@@ -913,7 +913,9 @@ export class DressingSet {
   private flatWall(x: number, z: number, nx: number, nz: number, hw: number, y0: number, y1: number, room: Room): number | null {
     let face: number | null = null;
     const tx = -nz, tz = nx;
-    for (let u = -hw; u <= hw + 1e-6; u += Math.min(0.1, hw)) {
+    // A little past the piece's edges too, so it never hangs right at a doorway or corner.
+    const span = hw + 0.12;
+    for (let u = -span; u <= span + 1e-6; u += Math.min(0.1, span)) {
       const px = x + tx * u, pz = z + tz * u;
       if (this.roomOf(px, pz) !== room) return null;
       for (const y of [y0, (y0 + y1) / 2, y1]) {

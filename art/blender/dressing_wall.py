@@ -308,7 +308,7 @@ def build_clock():
     P.add(o, wood, weight=0.8)
     fin = [(0, 0), (0.012, 0), (0.014, 0.008), (0.008, 0.016), (0.011, 0.028), (0.006, 0.04), (0.002, 0.05), (0, 0.052)]
     for fx, fh in ((-0.16, 0.0), (0.16, 0.0), (0.0, 0.07)):
-        o = L.lathe(f'finial_{fx}', fin, segs=8, M=M @ xf((fx, H / 2 - 0.005 + fh, D - 0.01), (-90, 0, 0)))
+        o = L.lathe(f'finial_{fx}', fin, segs=7, M=M @ xf((fx, H / 2 - 0.005 + fh, D - 0.01), (-90, 0, 0)))
         P.add(o, wood, smooth=50, weight=0.5)
     # base + drop finial
     P.add(L.box('base_a', (W + 0.03, 0.02, D + 0.02), M @ xf((0, -H / 2 + 0.03, (D + 0.02) / 2)), bevel=0.004), wood)

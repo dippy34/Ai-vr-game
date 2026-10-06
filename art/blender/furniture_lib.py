@@ -1728,6 +1728,19 @@ def transfer_uv(dst, src):
     tree = BVHTree.FromPolygons(verts, tris)
     suv = sm.uv_layers.active.data
     dm = dst.data
+    # orient decal faces like the surface under them (up-facing masks, bump direction)
+    bm = bmesh.new()
+    bm.from_mesh(dm)
+    bm.normal_update()
+    flip = []
+    for f in bm.faces:
+        loc, nrm, idx, _d = tree.find_nearest(f.calc_center_median())
+        if idx is not None and f.normal.dot(nrm) < 0:
+            flip.append(f)
+    if flip:
+        bmesh.ops.reverse_faces(bm, faces=flip)
+        bm.to_mesh(dm)
+    bm.free()
     layer = dm.uv_layers.get(sm.uv_layers.active.name) or dm.uv_layers.new(name=sm.uv_layers.active.name)
     for loop in dm.loops:
         co = dm.vertices[loop.vertex_index].co

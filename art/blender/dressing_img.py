@@ -888,6 +888,7 @@ INK = hexa('1e1a16')
 
 def _age_paper(a, seed, strength=1.0, edge=0.5):
     h, w = a.shape[:2]
+    a = a * (1 - 0.3 * strength) + a * hexa('d8c090') * 0.22 * strength
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
     U, V = (xx + 0.5) / w, (yy + 0.5) / h
     de = np.minimum(np.minimum(U, 1 - U), np.minimum(V, 1 - V))
@@ -964,7 +965,8 @@ def newspaper(w=384, h=512, seed=31):
         if k:
             cv.fill(_rect(cv, x0 - 5, 320, x0 - 4.2, h - m), INK, 0.6)
     cv.fill(_rect(cv, m, 318, w - m, 319.5), INK, 0.8)
-    a = _age_paper(cv.a, seed, 1.0)
+    boot_print(cv, w * 0.62, h * 0.62, 150, -1.2, 0.55, seed + 3)
+    a = _age_paper(cv.a, seed, 1.2)
     return np.clip(a, 0, 1)
 
 
@@ -1235,3 +1237,53 @@ def crack_map_rays(w, h, cx, cy, angles, seed=5):
                 cv.stroke([pts[k], pts[k + 1]], 1.1, (1, 1, 1), 0.8, 0.7)
     cv.fill(cv.ellipse(px, py, 7, 7, 0, 2.5), (1, 1, 1), 0.9)
     return np.clip(cv.a[..., 0], 0, 1)
+
+
+def wine_label(w=256, h=128, seed=51):
+    cv = Canvas(w, h, hexa('d2c49c'), seed)
+    red = hexa('6a2420')
+    cv.fill(_rect(cv, 4, 4, w - 4, 7), red, 0.9)
+    cv.fill(_rect(cv, 4, h - 7, w - 4, h - 4), red, 0.9)
+    cv.text('CHATEAU', w / 2, 34, 14, 2.2, INK, 0.9, 0.0, 1.3, align='center', fit=w * 0.7)
+    cv.text('MARSH', w / 2, 70, 30, 4.0, red, 0.95, 0.0, 1.2, align='center', fit=w * 0.75)
+    cv.text('1958  VIN ROUGE', w / 2, 98, 10, 1.5, INK, 0.85, 0.0, 1.3, align='center', fit=w * 0.7)
+    # a vine sprig ornament
+    for sx in (-1, 1):
+        cv.stroke([(w / 2 + sx * 30, 112), (w / 2 + sx * 60, 108), (w / 2 + sx * 90, 114)], 1.2, INK, 0.6)
+    a = _age_paper(cv.a, seed, 1.4)
+    # wine drip stain running down from the top
+    yy, xx = cv.yy, cv.xx
+    drip = np.exp(-((xx - w * 0.7) / 6) ** 2) * smooth(yy, 0, h * 0.8) * (1 - smooth(yy, h * 0.7, h))
+    a = lerp(a, hexa('4a1a16'), drip * 0.6)
+    return np.clip(a, 0, 1)
+
+
+def med_label(w=128, h=128, seed=52):
+    cv = Canvas(w, h, hexa('cfc6aa'), seed)
+    red = hexa('8a2a20')
+    cv.fill(_rect(cv, 0, 0, w, 26), red, 0.95)
+    cv.text('POISON', w / 2, 20, 14, 2.4, hexa('e0d6bc'), 0.95, 0.0, 1.2, align='center', fit=w * 0.85)
+    cv.text('PAREGORIC', w / 2, 52, 11, 1.8, INK, 0.9, 0.0, 1.2, align='center', fit=w * 0.85)
+    cv.text('TINCT. OPII', w / 2, 72, 8, 1.3, INK, 0.85, 0.0, 1.25, align='center', fit=w * 0.8)
+    text_lines(cv, 12, 88, w - 12, h - 10, 8.0, word=(4, 14), height=0.45)
+    # hand-written dosage in pencil, a child's name
+    cv.text('FOR ELLIE', w * 0.15, h - 6, 7, 1.0, hexa('3a3a40'), 0.7, -0.05, 1.2, jitter=0.4)
+    return np.clip(_age_paper(cv.a, seed, 1.3), 0, 1)
+
+
+def boot_print(cv, x, y, length, angle, alpha=0.6, seed=0):
+    """Muddy boot sole print (heel + forefoot) with tread bars; partial/smudged."""
+    rng = np.random.default_rng(seed)
+    ca, sa = math.cos(angle), math.sin(angle)
+    X = cv.xx - x
+    Y = cv.yy - y
+    u = X * ca + Y * sa      # along the foot
+    v = -X * sa + Y * ca
+    L_ = length
+    fore = ((u - L_ * 0.25) / (L_ * 0.3)) ** 2 + (v / (L_ * 0.17)) ** 2 < 1.0
+    heel = ((u + L_ * 0.32) / (L_ * 0.17)) ** 2 + (v / (L_ * 0.14)) ** 2 < 1.0
+    tread = (np.sin(u / L_ * 60.0) > -0.2) | (np.abs(v) > L_ * 0.13)
+    m = ((fore | heel) & tread).astype(np.float32)
+    n = vnoise(cv.w, cv.h, 4, seed, 3)
+    m = m * smooth(n, 0.3, 0.6) * (0.6 + 0.4 * smooth(u / L_, -0.5, 0.5))
+    cv.fill(m, hexa('3a2e22'), alpha)

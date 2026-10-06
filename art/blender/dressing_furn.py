@@ -250,14 +250,14 @@ def mat_planks(name, light, dark, seed, nails, gray=0.0):
     for (nx, nz) in nails:
         dx = g.absf(g.sub(x, nx))
         dz = g.sub(nz, z)  # > 0 below the nail
-        width = g.add(0.005, g.mul(g.mx(dz, 0.0), 0.06))
-        streak = g.mul(g.rng(dx, width, 0.0), g.mul(g.rng(dz, 0.22, 0.0), g.rng(dz, -0.004, 0.004)))
-        ring = g.rng(g.m('SQRT', g.add(g.mul(dx, dx), g.mul(dz, dz))), 0.014, 0.004)
+        width = g.add(0.008, g.mul(g.mx(dz, 0.0), 0.09))
+        streak = g.mul(g.rng(dx, width, 0.0), g.mul(g.rng(dz, 0.26, 0.0), g.rng(dz, -0.006, 0.006)))
+        ring = g.rng(g.m('SQRT', g.add(g.mul(dx, dx), g.mul(dz, dz))), 0.02, 0.006)
         r = g.mx(streak, ring)
         rust = r if rust is None else g.mx(rust, r)
     if rust is not None:
-        rn = g.noise(p, 60.0, 2, 0.6, stretch=(3.0, 1.0, 0.3))
-        rust = g.mul(rust, g.rng(rn, 0.25, 0.6, 0.3, 1.0))
+        rn = g.noise(p, 40.0, 2, 0.6, stretch=(3.0, 1.0, 0.3))
+        rust = g.mul(rust, g.rng(rn, 0.2, 0.55, 0.5, 1.0))
         col = g.mix(g.mul(rust, 0.95), col, hexc('4a220e'))
         rough = g.mixf(rust, rough, 0.9)
     if gray:
@@ -268,103 +268,58 @@ def mat_planks(name, light, dark, seed, nails, gray=0.0):
 
 
 def build_boards():
+    """Planks + nails only: the game puts this in front of its own window_frame.glb (casing, sash,
+    glass), scaled to cover the window + trim (~1.2 x 1.45 m as modeled, for a 1.0 x 1.2 m opening)."""
     P = L.Piece('boards', 'wall', tex=512, max_tris=1500, ao=0.12, bevel=0.004, ao_small=0.012, seed=31)
     M = WALL
-    paint = L.mat_paint('window_paint', hexc('b0a88e'), hexc('6a5038'), gloss=0.5, chip=0.75, dust=0.7, grime=1.0,
-                        wear=0.6, seed=1.0, stains=0.6, fade=0.3)
-    # casing (molded trim) around the opening + stool + apron
-    OW, OH = 0.51, 0.71
-    path = [(-OW, -OH), (OW, -OH), (OW, OH), (-OW, OH)]
-    prof = [(0.0, 0.0), (0.0, 0.016), (0.006, 0.022), (0.05, 0.022), (0.062, 0.019), (0.072, 0.014), (0.08, 0.012),
-            (0.08, 0.0)]
-    P.add(L.sweep('casing', prof, path, M=M), paint, smooth=30)
-    P.add(L.box('stool', (1.12, 0.028, 0.065), M @ xf((0, -OH + 0.06, 0.0325)), bevel=0.004), paint)
-    P.add(L.box('apron', (0.9, 0.06, 0.018), M @ xf((0, -OH - 0.012, 0.009)), bevel=0.003), paint, weight=0.6)
-    # two-over-two sash inside the opening (lower sash a touch proud of the upper one)
-    IW, IH = OW - 0.08, OH - 0.08
-    sash = L.mat_paint('sash_paint', hexc('a49c84'), hexc('5a4430'), gloss=0.45, chip=0.85, dust=0.8, grime=1.0,
-                       wear=0.5, seed=2.0, stains=0.7, fade=0.35)
-    panes = []
-    for si, (y0, y1, z0) in enumerate(((0.0, IH, 0.004), (-IH, 0.0, 0.012))):
-        t = 0.045
-        cy = (y0 + y1) / 2
-        hh = y1 - y0
-        for nm, sz, loc in (('l', (t, hh, 0.02), (-IW + t / 2, cy, z0 + 0.01)), ('r', (t, hh, 0.02), (IW - t / 2, cy, z0 + 0.01)),
-                            ('t', (2 * IW - 2 * t, t, 0.02), (0, y1 - t / 2, z0 + 0.01)),
-                            ('b', (2 * IW - 2 * t, t, 0.02), (0, y0 + t / 2, z0 + 0.01)),
-                            ('m', (0.022, hh - 2 * t, 0.016), (0, cy, z0 + 0.008))):
-            P.add(L.box(f'sash{si}_{nm}', sz, M @ xf(loc), bevel=0.0), sash, weight=0.5, flat=True)
-        for k, (xa, xb) in enumerate(((-IW + t, -0.011), (0.011, IW - t))):
-            panes.append((xa, xb, y0 + t, y1 - t, z0 + 0.006, len(panes)))
-    # dark, dirty glass; one pane smashed (hole + cracks), one cracked
-    crack_tiles = []
-    for i in range(4):
-        if i == 1:
-            crack_tiles.append(I.crack_map_rays(128, 192, 0.45, 0.4, [a * 0.7 for a in range(9)], seed=40 + i))
-        elif i == 2:
-            crack_tiles.append(I.crack_map_rays(128, 192, 0.6, 0.7, [1.0, 2.4, 3.9, 5.2], seed=40 + i) * 0.8)
-        else:
-            crack_tiles.append(np.zeros((192, 128), dtype=np.float32))
-    cimg = L.np_image('window_cracks', np.concatenate(crack_tiles, axis=1), non_color=True)
-    gm = L.new_material('window_glass')
-    g = L.G(gm)
-    p = g.pos()
-    cr = g.sep(g.img(cimg)[0])[0]
-    uvp = g.uv('src')
-    u_, v_, _ = g.sep(uvp)
-    # the smashed hole in tile 1: black void with sharp edges
-    hole = g.rng(g.v('LENGTH', g.vmul(g.vadd(uvp, (-0.3625, -0.4, 0.0)), (4.0, 1.0, 0.0))), 0.13, 0.11)
-    streak = g.noise(p, 3.0, 4, 0.6, stretch=(1.0, 1.0, 0.25))
-    dirt = g.rng(streak, 0.4, 0.75)
-    col = g.mix(dirt, hexc('0b0d0f'), hexc('3a3a34'))
-    col = g.mix(cr, col, hexc('9a9c98'))
-    col = g.mix(hole, col, hexc('000000'))
-    rough = g.mixf(dirt, 0.08, 0.6)
-    rough = g.mixf(hole, rough, 1.0)
-    col, rough, _ = L.age(g, col, rough, 0.0, dust=0.6, grime=0.9, wear=0.0, scratch=0.0, seed=5.0, film=0.05,
-                          up_lo=0.2)
-    g.finish(col, rough, None)
-    for (xa, xb, ya, yb, zz, k) in panes:
-        o = L.grid(f'pane_{k}', 1, 1, lambda u, v: (xa + (xb - xa) * u, ya + (yb - ya) * v, zz), M=M)
-        for d_ in o.data.uv_layers['src'].data:
-            d_.uv = ((k + d_.uv[0]) / 4.0, d_.uv[1])
-        P.add(o, gm, flat=True, uv='smart', weight=0.8)
-    # planks: (center y, angle, width, length, z, broken, seed, material)
-    boards = [(0.43, -4.0, 0.17, 1.12, 0.026, False, 1, 0), (0.12, 3.0, 0.19, 1.16, 0.026, False, 2, 1),
-              (-0.21, -2.0, 0.15, 1.10, 0.026, False, 3, 0), (-0.52, 6.0, 0.18, 1.06, 0.026, True, 4, 1),
-              (-0.02, 37.0, 0.16, 1.52, 0.05, False, 5, 0)]
-    nails, heads = [], []
+    # (center y, angle, width, length, z, broken, seed, material)
+    boards = [(0.6, -4.0, 0.17, 1.18, 0.0, False, 1, 0), (0.27, 3.0, 0.19, 1.2, 0.0, False, 2, 1),
+              (-0.08, -2.0, 0.15, 1.14, 0.0, False, 3, 0), (-0.42, 5.0, 0.18, 1.12, 0.0, True, 4, 1),
+              (-0.66, -1.5, 0.12, 1.16, 0.0, False, 6, 0), (0.0, 52.0, 0.16, 1.62, 0.022, False, 5, 0)]
+    heads = []
     for (cy, ang, wd, ln, zz, broken, sd, mi) in boards:
-        R = Matrix.Rotation(math.radians(ang), 4, 'Z')
-        T = Matrix.Translation((0.0 if ang < 20 else 0.0, cy, zz))
-        for cx in (-0.47, 0.47):
-            if ang > 20:
-                break
+        T = Matrix.Translation((0.0, cy, zz)) @ Matrix.Rotation(math.radians(ang), 4, 'Z')
+        if ang > 20:
+            for t in (-0.6, -0.12, 0.42):
+                heads.append(T @ Vector((t, 0.0, 0.022)))
+            continue
+        for cx in (-0.5, 0.5):
             if broken and cx > 0:
                 continue
             for sy in (-0.28, 0.28):
-                lp = (T @ R) @ Vector((cx / math.cos(math.radians(ang)), sy * wd, 0.022))
-                heads.append(lp)
-        if ang > 20:
-            for t in (-0.62, 0.0, 0.62):
-                heads.append((T @ R) @ Vector((t, 0.0, 0.022)))
-    for lp in heads:
-        bp = M @ lp
-        nails.append((bp.x, bp.z))
-    mats = [mat_planks('planks_gray', hexc('7a7062'), hexc('4a4238'), 3.0, nails, gray=0.4),
-            mat_planks('planks_brown', hexc('6e5236'), hexc('3e2c1a'), 7.0, nails)]
+                heads.append(T @ Vector((cx / math.cos(math.radians(ang)), sy * wd, 0.022)))
+    # one nail left where a plank was torn off, bent over
+    heads.append(Vector((0.52, -0.25, 0.0)))
+    objs = []
     for (cy, ang, wd, ln, zz, broken, sd, mi) in boards:
         o = L.prism(f'plank_{sd}', plank_outline(ln, wd, sd, broken), 0.022)
+        if zz == 0.0:  # the back face lies on the window trim: never seen, drop it
+            bm = bmesh.new()
+            bm.from_mesh(o.data)
+            bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.z < -0.9], context='FACES')
+            bm.to_mesh(o.data)
+            bm.free()
         L.place(o, M @ Matrix.Translation((0, cy, zz)) @ Matrix.Rotation(math.radians(ang), 4, 'Z'), 'x')
+        objs.append((o, mi))
+    lo, hi = L.bounds([o for o, _ in objs])
+    pivot = Vector(((lo.x + hi.x) / 2, lo.y, (lo.z + hi.z) / 2))
+    nails = [((M @ lp).x - pivot.x, (M @ lp).z - pivot.z) for lp in heads]
+    mats = [mat_planks('planks_gray', hexc('7a7062'), hexc('4a4238'), 3.0, nails, gray=0.4),
+            mat_planks('planks_brown', hexc('6e5236'), hexc('3e2c1a'), 7.0, nails)]
+    for o, mi in objs:
         P.add(o, mats[mi], smooth=30, weight=1.0)
     iron = L.mat_metal('nail_iron', hexc('3a3632'), rough=0.6, tarnish=0.4, rust=0.8, dust=0.2, seed=8.0)
     for k, lp in enumerate(heads):
         pts = [(0.0045 * math.cos(2 * math.pi * i / 5), 0.0045 * math.sin(2 * math.pi * i / 5)) for i in range(5)]
+        if k == len(heads) - 1:  # the bent loose nail: shank sticking out of the wall, bent down
+            sh = [M @ lp, M @ (lp + Vector((0, 0, 0.03))), M @ (lp + Vector((0.004, -0.02, 0.036)))]
+            P.add(L.tube('bent_nail', sh, 0.0018, segs=4), iron, smooth=50, weight=0.3)
+            continue
         o = L.prism(f'nail_{k}', pts, 0.0015)
         L.place(o, M @ Matrix.Translation(lp))
         P.add(o, iron, flat=True, weight=0.3)
-    P.finish(origin=(0, 0, 0), previews=dict(yaw=25, pitch=5, extra=[dict(tag='flash_front', yaw=0, pitch=0,
-                                                                          mood='flash')]))
+    P.finish(origin=tuple(pivot), previews=dict(yaw=25, pitch=5, extra=[dict(tag='flash_front', yaw=0, pitch=0,
+                                                                           mood='flash')]))
 
 
 # =============================================================================================
@@ -437,14 +392,16 @@ def build_coat_rack():
     rnd = random.Random(5)
     folds = [(rnd.uniform(0, 6.28), rnd.uniform(0, 6.28)) for _ in range(3)]
     verts, faces = [], []
-    c0 = Vector((hk.x, hk.y, 0)) + fwd * 0.115
+    hk_xy = Vector((hk.x, hk.y, 0))
+    c0 = hk_xy + fwd * 0.12
     for ri, (z, w, d, fa) in enumerate(rings):
         for k in range(nseg):
             a_ = 2 * math.pi * k / nseg
             # vertical folds that run the whole length (same phase on every ring) + some twist
             f = (math.sin(5 * a_ + folds[0][0]) * 0.6 + math.sin(3 * a_ + folds[1][0] + z * 2.0) * 0.4)
             r = 1 + fa * f
-            pos = c0 + side * (math.cos(a_) * w * r) + fwd * (math.sin(a_) * d * r)
+            # each ring's back edge hangs straight down under the hook tip (the coat drapes off it)
+            pos = hk_xy + fwd * (d + 0.004) + side * (math.cos(a_) * w * r) + fwd * (math.sin(a_) * d * r)
             zz = z
             if ri == len(rings) - 1:
                 zz += 0.03 * math.sin(3 * a_ + folds[2][0]) - 0.02 * max(0.0, math.sin(a_))  # uneven hem, front hangs lower
@@ -458,7 +415,8 @@ def build_coat_rack():
     last = (len(rings) - 1) * nseg
     for k in range(nseg):
         v = Vector(verts[last + k])
-        inner = c0 + (Vector((v.x, v.y, 0)) - Vector((c0.x, c0.y, 0))) * 0.88
+        cl = hk_xy + fwd * (rings[-1][2] + 0.004)
+        inner = cl + (Vector((v.x, v.y, 0)) - cl) * 0.88
         verts.append((inner.x, inner.y, 0.71))
     for k in range(nseg):
         a0, b0 = last + k, last + (k + 1) % nseg
@@ -470,7 +428,7 @@ def build_coat_rack():
     P.add(coat, cmat, smooth=80, weight=1.1)
     # sleeves hang down the front of the body, a little bent
     for sx in (-1, 1):
-        sh = c0 + side * (sx * 0.15) + Vector((0, 0, 1.585))
+        sh = hk_xy + fwd * 0.11 + side * (sx * 0.15) + Vector((0, 0, 1.585))
         pts = [sh, sh + side * sx * 0.012 + fwd * 0.045 + Vector((0, 0, -0.2)),
                sh - side * sx * 0.005 + fwd * 0.085 + Vector((0, 0, -0.4)),
                sh - side * sx * 0.02 + fwd * 0.095 + Vector((0, 0, -0.58))]

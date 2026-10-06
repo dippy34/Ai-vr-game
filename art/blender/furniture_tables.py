@@ -18,7 +18,7 @@ def build_table_dining():
     """2.4 m dining table: three-board top (two halves + a warped leaf), apron, turned legs."""
     P = F.Piece('table_dining', seed=12)
     wood = J.mahogany('dining_mahogany', seed=1.0, rings=1.0, stains=0.5, burn=0.3, peel=0.3)
-    wiped = J.mahogany('dining_wiped', seed=1.0, rings=1.0, stains=0.5, burn=0.3, peel=0.3, dust=0.42, film=0.12)
+    wiped = J.mahogany('dining_wiped', seed=1.0, rings=1.0, stains=0.5, burn=0.3, peel=0.3, dust=0.3, film=0.1)
     smear = J.mahogany('dining_smear', seed=1.0, rings=1.0, stains=0.5, burn=0.3, peel=0.3, dust=0.55, film=0.12)
     W, D, H = 2.4, 1.0, 0.76
     t = 0.032
@@ -139,7 +139,7 @@ def build_desk():
     wood = J.oak('desk_oak', seed=6.0, rings=0.5, stains=0.4, peel=0.2)
     inner = J.interior('desk_inside')
     brass = J.brass('desk_brass')
-    leather = F.mat_plain('desk_leather', hexc('2c3626'), 0.6, dust=0.7, grime=0.9, noise_amt=0.5, wear=0.8,
+    leather = F.mat_plain('desk_leather', hexc('1e2a1a'), 0.55, dust=0.3, grime=0.9, noise_amt=0.6, wear=1.0,
                           bevel_r=0.004)
     W, D, H = 1.6, 0.8, 0.76
     t = 0.03

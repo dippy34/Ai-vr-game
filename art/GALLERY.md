@@ -158,6 +158,10 @@ screenshots from the actual three.js game renderer (`*_threejs`).
 
 ## Furniture
 
+**furniture lineup**
+
+![furniture lineup](previews/furniture_lineup.png)
+
 **furniture armchair flash**
 
 ![furniture armchair flash](previews/furniture_armchair_flash.png)
@@ -352,6 +356,38 @@ screenshots from the actual three.js game renderer (`*_threejs`).
 
 ![dressing boards threejs flash](previews/dressing_boards_threejs_flash.png)
 
+**dressing books pile threejs**
+
+![dressing books pile threejs](previews/dressing_books_pile_threejs.png)
+
+**dressing books pile threejs flash**
+
+![dressing books pile threejs flash](previews/dressing_books_pile_threejs_flash.png)
+
+**dressing bottles threejs**
+
+![dressing bottles threejs](previews/dressing_bottles_threejs.png)
+
+**dressing bottles threejs flash**
+
+![dressing bottles threejs flash](previews/dressing_bottles_threejs_flash.png)
+
+**dressing bulb threejs**
+
+![dressing bulb threejs](previews/dressing_bulb_threejs.png)
+
+**dressing bulb threejs flash**
+
+![dressing bulb threejs flash](previews/dressing_bulb_threejs_flash.png)
+
+**dressing candles threejs**
+
+![dressing candles threejs](previews/dressing_candles_threejs.png)
+
+**dressing candles threejs flash**
+
+![dressing candles threejs flash](previews/dressing_candles_threejs_flash.png)
+
 **dressing chair fallen threejs**
 
 ![dressing chair fallen threejs](previews/dressing_chair_fallen_threejs.png)
@@ -399,6 +435,22 @@ screenshots from the actual three.js game renderer (`*_threejs`).
 **dressing frame portrait threejs flash**
 
 ![dressing frame portrait threejs flash](previews/dressing_frame_portrait_threejs_flash.png)
+
+**dressing papers threejs**
+
+![dressing papers threejs](previews/dressing_papers_threejs.png)
+
+**dressing papers threejs flash**
+
+![dressing papers threejs flash](previews/dressing_papers_threejs_flash.png)
+
+**dressing plate broken threejs**
+
+![dressing plate broken threejs](previews/dressing_plate_broken_threejs.png)
+
+**dressing plate broken threejs flash**
+
+![dressing plate broken threejs flash](previews/dressing_plate_broken_threejs_flash.png)
 
 **dressing rug threejs**
 
