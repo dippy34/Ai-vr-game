@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { GAME, NET, NOISE, PLAYER } from '../config';
 import { add3, dist3, forwardFromYaw, rotate3, v3, yawFromQuat } from '../core/math';
-import { moveCircle, pushOut } from '../core/physics';
+import { moveCircle, pushOut, wallsBetween } from '../core/physics';
 import type {
   Handedness,
   HeldRef,
@@ -18,11 +18,33 @@ import type {
   Vec3,
   WorldState,
 } from '../core/types';
-import type { IAudioManager, IGameRenderer, IInputManager, InputFrame } from '../platform/types';
+import type { IAudioManager, IGameRenderer, IInputManager, InputFrame, Readable } from '../platform/types';
 import type { UI } from '../ui/ui';
 import type { Session } from './session';
 
 const HANDS: Handedness[] = ['left', 'right'];
+
+/**
+ * Desktop reading: aim at a note within `reach` (m), at most `aim` rad off the crosshair, press
+ * E, and the eyes lean in `above` m over it looking down at `pitch` (what a VR player does with
+ * their real head). E again, moving or the menu stands you back up.
+ */
+const READ = { reach: 1.9, aim: 0.2, above: 0.3, pitch: -1.35 } as const;
+
+/** What desktop E would do right now. */
+type UseTarget =
+  | { kind: 'read'; note: Readable }
+  | { kind: 'grab'; hand: Handedness; probe: Vec3 }
+  | { kind: 'drop'; hand: Handedness }
+  | null;
+
+/** Angle (rad) between the view direction `look` and the direction from `eye` to `p`. */
+function aimAngle(eye: Vec3, look: Vec3, p: Vec3): number {
+  const v = { x: p.x - eye.x, y: p.y - eye.y, z: p.z - eye.z };
+  const l = Math.hypot(v.x, v.y, v.z);
+  if (l < 1e-6) return 0;
+  return Math.acos(Math.max(-1, Math.min(1, (v.x * look.x + v.y * look.y + v.z * look.z) / l)));
+}
 
 function defaultPose(): PlayerPose {
   const hand = () => ({
@@ -63,6 +85,8 @@ export class Game {
   private roundStartedAt = -1;
   private roundFlashes = 0;
   private paused = false;
+  /** Desktop: the note we are leaning in over (READ), else null. */
+  private reading: Readable | null = null;
   /** A desktop HUD message waiting for the renderer to let go of the screen (see message()). */
   private heldMessage: { text: string; seconds: number } | null = null;
   private readonly tmpV = new THREE.Vector3();
@@ -132,6 +156,7 @@ export class Game {
     this.session.close();
     this.session = null;
     this.heldMessage = null;
+    this.stopReading();
     this.audio.setLevel(null);
   }
 
@@ -161,6 +186,12 @@ export class Game {
 
     const state = session.state;
     const me = state.players[session.localId];
+    if (this.reading) {
+      const moving = Math.hypot(frame.move.x, frame.move.y) > 0.1;
+      if (moving || frame.menuPressed || frame.mode !== 'desktop' || state.phase !== 'playing' || me?.status !== 'alive') {
+        this.stopReading();
+      }
+    }
 
     this.localPose = { head: frame.head, left: frame.left, right: frame.right };
     if (!this.paused) this.locomote(frame, dt, state);
@@ -191,7 +222,10 @@ export class Game {
   private locomote(frame: InputFrame, dt: number, state: WorldState): void {
     const session = this.session!;
     const rig = this.renderer.ctx.rig;
-    const head = frame.head.position;
+    // A desktop lean (reading a note) moves only the eyes, over the table: collide with the body
+    // under the normal eye point instead (on desktop that is the rig's own position).
+    const head =
+      frame.mode === 'desktop' && this.input.leaning ? v3(rig.position.x, frame.head.position.y, rig.position.z) : frame.head.position;
     const crouched = this.isCrouched(frame);
     const speed = frame.sprint ? PLAYER.sprintSpeed : crouched ? PLAYER.sneakSpeed : PLAYER.walkSpeed;
 
@@ -233,6 +267,7 @@ export class Game {
     const last = this.lastHead;
     this.lastHead = { ...head };
     if (!last || dt <= 0) return;
+    if (this.input.leaning) return; // leaning in over a note, not walking
     const d = Math.hypot(head.x - last.x, head.z - last.z);
     if (d > 1) return; // teleport, not a step
     this.stepAccum += d;
@@ -279,7 +314,9 @@ export class Game {
 
     // ---- desktop ----
     const look = this.lookDirection();
-    if (frame.usePressed && canPlay) this.desktopUse(state, held, look);
+    const target = canPlay ? this.desktopUseTarget(state, held, look) : null;
+    this.ui.hud.setAim(this.reading ? 'E · stand up' : target?.kind === 'read' ? 'E · read' : '');
+    if (frame.usePressed && canPlay) this.desktopUse(target);
     if (frame.triggerPressed.left || frame.triggerPressed.right) {
       const camHand: Handedness | null =
         held.left?.kind === 'camera' ? 'left' : held.right?.kind === 'camera' ? 'right' : null;
@@ -301,30 +338,95 @@ export class Game {
     }
   }
 
-  /** Desktop E: grab the nearest thing in reach with a free hand, otherwise drop something. */
-  private desktopUse(state: WorldState, held: Record<Handedness, HeldRef | null>, look: Vec3): void {
-    const session = this.session!;
+  /**
+   * Desktop E: stand back up if reading; else read the note in your sights (unless the thing you
+   * would grab is more in the middle of your view), else grab the nearest thing in reach with a
+   * free hand, else drop something.
+   */
+  private desktopUseTarget(state: WorldState, held: Record<Handedness, HeldRef | null>, look: Vec3): UseTarget {
     const head = this.localPose.head.position;
     const probe = add3(head, { x: look.x * 0.5, y: look.y * 0.5, z: look.z * 0.5 });
     const reach = PLAYER.desktopGrabReach;
 
     let nearest = Infinity;
-    if (!state.camera.holder) nearest = Math.min(nearest, dist3(probe, state.camera.position));
-    for (const item of state.items) {
-      if (item.where === 'world') nearest = Math.min(nearest, dist3(probe, item.position));
-    }
+    let nearestAt: Vec3 | null = null;
+    const consider = (p: Vec3) => {
+      const d = dist3(probe, p);
+      if (d < nearest) {
+        nearest = d;
+        nearestAt = p;
+      }
+    };
+    if (!state.camera.holder) consider(state.camera.position);
+    for (const item of state.items) if (item.where === 'world') consider(item.position);
     // The left hand carries things on desktop; the right hand does the signing.
     const free: Handedness | null = !held.left ? 'left' : !held.right ? 'right' : null;
-    if (nearest <= reach && free) {
-      session.sendAction({ type: 'grab', hand: free, position: probe, reach });
-      return;
-    }
+    const grab = nearest <= reach && free && nearestAt ? { at: nearestAt as Vec3, hand: free } : null;
+
+    const note = this.noteInSight(look);
+    if (note && (!grab || note.angle < aimAngle(head, look, grab.at))) return { kind: 'read', note: note.note };
+    if (grab) return { kind: 'grab', hand: grab.hand, probe };
     const drop: Handedness | null =
       held.left?.kind === 'item' ? 'left' : held.right?.kind === 'item' ? 'right' : held.left ? 'left' : held.right ? 'right' : null;
-    if (drop) {
-      const at = v3(head.x + look.x * 0.6, Math.max(0, head.y - 0.9), head.z + look.z * 0.6);
-      session.sendAction({ type: 'release', hand: drop, position: at });
+    return drop ? { kind: 'drop', hand: drop } : null;
+  }
+
+  private desktopUse(target: UseTarget): void {
+    const session = this.session!;
+    if (this.reading) {
+      this.stopReading();
+      return;
     }
+    if (!target) return;
+    const head = this.localPose.head.position;
+    switch (target.kind) {
+      case 'read':
+        this.startReading(target.note);
+        return;
+      case 'grab':
+        session.sendAction({ type: 'grab', hand: target.hand, position: target.probe, reach: PLAYER.desktopGrabReach });
+        return;
+      case 'drop': {
+        const look = this.lookDirection();
+        const at = v3(head.x + look.x * 0.6, Math.max(0, head.y - 0.9), head.z + look.z * 0.6);
+        session.sendAction({ type: 'release', hand: target.hand, position: at });
+        return;
+      }
+    }
+  }
+
+  /** The note closest to the crosshair within READ.reach / READ.aim (not through a wall). */
+  private noteInSight(look: Vec3): { note: Readable; angle: number } | null {
+    const session = this.session;
+    if (!session) return null;
+    const eye = this.localPose.head.position;
+    let best: { note: Readable; angle: number } | null = null;
+    for (const note of this.renderer.readables()) {
+      if (dist3(eye, note.position) > READ.reach) continue;
+      const angle = aimAngle(eye, look, note.position);
+      if (angle > READ.aim || (best && angle >= best.angle)) continue;
+      if (wallsBetween(session.level, eye, note.position) > 0) continue;
+      best = { note, angle };
+    }
+    return best;
+  }
+
+  private startReading(note: Readable): void {
+    this.reading = note;
+    // Eyes over the note, a little back so the downward view centers on it.
+    const back = (READ.above / Math.tan(-READ.pitch)) * 1.0;
+    const position = v3(
+      note.position.x + Math.sin(note.readYaw) * back,
+      note.position.y + READ.above,
+      note.position.z + Math.cos(note.readYaw) * back,
+    );
+    this.input.setLean({ position, yaw: note.readYaw, pitch: READ.pitch });
+  }
+
+  private stopReading(): void {
+    if (!this.reading) return;
+    this.reading = null;
+    this.input.setLean(null);
   }
 
   private lookDirection(): Vec3 {
@@ -396,6 +498,7 @@ export class Game {
 
   /** Put the local rig so the head is at our spawn, facing the spawn yaw. */
   private placeAtSpawn(state: WorldState): void {
+    this.stopReading();
     const me = this.session && state.players[this.session.localId];
     if (!me) return;
     const { rig, camera } = this.renderer.ctx;

@@ -65,11 +65,22 @@ export interface IGameRenderer {
   /** Short in-world message floating in front of the player (works in VR and on desktop). */
   showMessage(text: string, seconds?: number): void;
   /**
+   * Things in the current level meant to be read up close (the handwritten notes). VR players
+   * lean in with their real head; desktop players aim at one and press E (IInputManager.setLean).
+   */
+  readables(): readonly Readable[];
+  /**
    * True while a full-view sequence (the catch) owns the screen. showMessage() already waits it
    * out; screen-space UI (the desktop HUD) should hold its messages until this turns false.
    */
   holdingMessages(): boolean;
   render(): void;
+}
+
+/** A note lying on a surface: its center, and the yaw to face for its text to read upright. */
+export interface Readable {
+  position: Vec3;
+  readYaw: number;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -117,6 +128,14 @@ export interface IInputManager {
   update(dt: number): InputFrame;
   /** Desktop: enable/disable mouse look + keys (disabled while menus are open). */
   setEnabled(enabled: boolean): void;
+  /**
+   * Desktop: ease the eyes to `lean` (world position, facing `yaw`, looking down at `pitch` rad)
+   * the way a VR player leans their head in, e.g. over a note; null eases back. Mouse look pauses
+   * while leaning. Ignored in VR (you lean for real).
+   */
+  setLean(lean: { position: Vec3; yaw: number; pitch: number } | null): void;
+  /** True while the eyes are away from the normal desktop eye point (leaning in or easing back). */
+  readonly leaning: boolean;
 }
 
 // ---------------------------------------------------------------------------------------------

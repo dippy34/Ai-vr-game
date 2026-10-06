@@ -123,6 +123,41 @@ async function monsterAway(page, x, z, d = 4) {
   // stand next to the camera table, facing it (camera is at -X of the foyer)
   await teleport(page, cam.x + 0.9, cam.z, 90);
   await sleep(1500);
+
+  // Desktop reading: aim at the tutorial note on the same table, E leans in over it, E stands up.
+  const note = await page.evaluate(([x, z]) => {
+    const notes = window.__mute.renderer.readables();
+    let best = null;
+    for (const n of notes) if (!best || Math.hypot(n.position.x - x, n.position.z - z) < Math.hypot(best.position.x - x, best.position.z - z)) best = n;
+    return best;
+  }, [cam.x, cam.z]);
+  if (note) {
+    const at = { x: cam.x + 0.9, z: cam.z };
+    const dx = note.position.x - at.x;
+    const dz = note.position.z - at.z;
+    await teleport(page, at.x, at.z, (Math.atan2(-dx, -dz) * 180) / Math.PI);
+    await page.evaluate(([y, h]) => { window.__mute.input.pitch = Math.atan2(y - 1.6, h); }, [note.position.y, Math.hypot(dx, dz)]);
+    await sleep(1200);
+    const aim = await page.textContent('.hud .aim');
+    await page.keyboard.press('e');
+    const leaned = await page.waitForFunction(() => {
+      const m = window.__mute;
+      return m.input.leaning && m.renderer.ctx.camera.getWorldPosition(m.renderer.ctx.camera.position.clone()).y < 1.25;
+    }, null, { timeout: 60000 }).then(() => true, () => false);
+    await sleep(800);
+    await page.screenshot({ path: `${out}/a0-reading-note.png` });
+    s = await state(page);
+    check(aim === 'E · read' && leaned && s.st.camera.holder === null, `desktop E reads the tutorial note (aim "${aim}", leaned ${leaned})`);
+    await page.keyboard.press('e');
+    const up = await page.waitForFunction(() => !window.__mute.input.leaning, null, { timeout: 60000 }).then(() => true, () => false);
+    check(up, 'E again stands back up');
+    await page.evaluate(() => { window.__mute.input.pitch = 0; });
+    await teleport(page, cam.x + 0.9, cam.z, 90);
+    await sleep(800);
+  } else {
+    check(false, 'the tutorial note is placed');
+  }
+
   await page.keyboard.press('e');
   s = await waitState(page, (s) => s.st.camera.holder === s.id, null, 'camera grabbed', 60000).catch((e) => (console.log(e.message), null));
   check(!!s, 'desktop E grabs the camera');

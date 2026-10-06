@@ -73,6 +73,8 @@ export const MOUSE_SENSITIVITY = 0.0022;
 export const MAX_PITCH = (85 * Math.PI) / 180;
 /** Desktop crouch easing rate (1/s). */
 export const CROUCH_EASE_RATE = 10;
+/** Desktop lean in / back (setLean), 1/s. */
+export const LEAN_EASE_RATE = 7;
 /** Desktop synthesized hand easing rate (1/s) when moving between rest pose and signs. */
 export const DESKTOP_HAND_EASE_RATE = 14;
 /** Ignore single mouse deltas bigger than this (px): some browsers spike when the lock engages. */
@@ -197,6 +199,10 @@ export class InputManager implements IInputManager {
   private mouseDY = 0;
   private pitch = 0;
   private eyeY: number = PLAYER.eyeHeight;
+  /** Desktop lean (setLean): the target, the last one (to ease back from) and how far in, 0..1. */
+  private lean: { position: THREE.Vector3; yaw: number; pitch: number } | null = null;
+  private leanLast: { position: THREE.Vector3; yaw: number; pitch: number } | null = null;
+  private leanK = 0;
   private pendingUse = false;
   private pendingTrigger = false;
   private pendingMenu = false;
@@ -244,6 +250,21 @@ export class InputManager implements IInputManager {
    * input. Enabling also tries to grab pointer lock, which succeeds when called from a user
    * gesture (e.g. the menu's Play/Resume click) and is silently ignored otherwise.
    */
+  setLean(lean: { position: Vec3; yaw: number; pitch: number } | null): void {
+    if (!lean) {
+      this.lean = null;
+      return;
+    }
+    const p = lean.position;
+    if (![p.x, p.y, p.z, lean.yaw, lean.pitch].every(Number.isFinite)) return;
+    this.lean = { position: new THREE.Vector3(p.x, p.y, p.z), yaw: lean.yaw, pitch: clamp(lean.pitch, -MAX_PITCH, MAX_PITCH) };
+    this.leanLast = this.lean;
+  }
+
+  get leaning(): boolean {
+    return this.leanK > 0;
+  }
+
   setEnabled(enabled: boolean): void {
     if (enabled === this.enabled) return;
     this.enabled = enabled;
@@ -333,6 +354,8 @@ export class InputManager implements IInputManager {
     this.releasePointerLock();
     this.clearDesktopInput();
     this.pendingMenu = false;
+    this.lean = this.leanLast = null;
+    this.leanK = 0;
     for (const h of HANDS) this.deskHands[h].init = false;
     this.sprintLatched = false;
     this.sprintIdle = 0;
@@ -701,8 +724,8 @@ export class InputManager implements IInputManager {
   private updateDesktop(dt: number): InputFrame {
     const { rig, camera } = this.ctx;
 
-    // ---- look ----
-    if (this.enabled && this.isLocked()) {
+    // ---- look (paused while leaning in) ----
+    if (this.enabled && this.isLocked() && !this.lean) {
       rig.rotation.y = wrapAngle(rig.rotation.y - this.mouseDX * MOUSE_SENSITIVITY);
       this.pitch = clamp(this.pitch - this.mouseDY * MOUSE_SENSITIVITY, -MAX_PITCH, MAX_PITCH);
     }
@@ -713,8 +736,22 @@ export class InputManager implements IInputManager {
     const targetEye = crouch ? PLAYER.crouchEyeHeight : PLAYER.eyeHeight;
     this.eyeY += (targetEye - this.eyeY) * (1 - Math.exp(-CROUCH_EASE_RATE * dt));
     if (Math.abs(this.eyeY - targetEye) < 1e-4) this.eyeY = targetEye;
-    camera.position.set(0, this.eyeY, 0);
-    camera.rotation.set(this.pitch, 0, 0);
+    // ---- lean in (desktop stand-in for leaning your head down in VR, e.g. over a note) ----
+    const leanTo = this.lean ? 1 : 0;
+    this.leanK += (leanTo - this.leanK) * (1 - Math.exp(-LEAN_EASE_RATE * dt));
+    if (Math.abs(this.leanK - leanTo) < 2e-3) this.leanK = leanTo;
+    const L = this.lean ?? this.leanLast;
+    camera.rotation.order = 'YXZ';
+    if (this.leanK > 0 && L) {
+      const k = this.leanK * this.leanK * (3 - 2 * this.leanK);
+      rig.updateWorldMatrix(true, false);
+      const local = rig.worldToLocal(_v.copy(L.position));
+      camera.position.set(local.x * k, this.eyeY + (local.y - this.eyeY) * k, local.z * k);
+      camera.rotation.set(this.pitch + (L.pitch - this.pitch) * k, wrapAngle(L.yaw - rig.rotation.y) * k, 0);
+    } else {
+      camera.position.set(0, this.eyeY, 0);
+      camera.rotation.set(this.pitch, 0, 0);
+    }
     camera.updateWorldMatrix(true, false);
     camera.matrixWorld.decompose(_p, _q, _s);
     const head: HeadPose = { position: v3(_p), rotation: q4(_q) };

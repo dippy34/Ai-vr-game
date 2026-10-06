@@ -21,6 +21,7 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design and
 | Sneak (quiet) | Crouch for real | Hold C |
 | Run (loud) | Click left stick | Shift |
 | Grab / drop | Grip near the thing | E |
+| Read a note | Lean in close | Look at it, E (E again to stand up) |
 | Flash the camera | Trigger while holding it | Left click while holding it |
 | Hand signs | Your real hands | Keys 1–6 |
 | Talk | Just talk (it hears you) | Just talk |
@@ -48,8 +49,9 @@ one tab and join with the code in the other (no internet needed, no voice).
 
 ## Put it online (GitHub Pages)
 
-1. Repo **Settings → Pages → Source: GitHub Actions**.
-2. Merge to `main`. `.github/workflows/pages.yml` builds and deploys automatically.
+1. Repo **Settings → Pages → Build and deployment → Source: GitHub Actions** (not "Deploy from a
+   branch": that publishes the raw source files, which can't run).
+2. Push to the default branch. `.github/workflows/pages.yml` builds and deploys automatically.
 3. Open `https://<user>.github.io/<repo>/` in the Quest browser and share it with friends.
 
 ## Project layout

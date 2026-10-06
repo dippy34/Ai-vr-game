@@ -9,7 +9,8 @@ import type {
   WorldState,
   Vec3,
 } from '../../core/types';
-import type { IGameRenderer, RenderContext } from '../types';
+import type { IGameRenderer, Readable, RenderContext } from '../types';
+import { NOTE_PREFIX } from './Decals';
 import { FlashEffect } from './FlashEffect';
 import { HandFactory, type Hand } from './hands';
 import { Jumpscare } from './Jumpscare';
@@ -50,7 +51,7 @@ const MODEL_NAMES = [
   ...FURNITURE_MODEL_NAMES,
 ];
 /** Every GLB in the manifest with one of these prefixes is loaded too (set dressing). */
-const MODEL_PREFIXES = [DRESSING_PREFIX, 'decal_', 'note_'];
+const MODEL_PREFIXES = [DRESSING_PREFIX, 'decal_', NOTE_PREFIX];
 /** Models that are baked into the level, so the level is rebuilt when they arrive. */
 const LEVEL_MODELS = new Set(['fusebox', 'door', 'fuse', 'window_frame', 'doorway_casing', 'radiator']);
 const isLevelModel = (n: string): boolean => n.startsWith('furniture_') || n.startsWith(DRESSING_PREFIX) || LEVEL_MODELS.has(n);
@@ -73,6 +74,8 @@ export class GameRenderer implements IGameRenderer {
   private readonly hemi: THREE.HemisphereLight;
   private readonly nearLight: THREE.PointLight;
   private level: LevelView | null = null;
+  /** readables() for the current level view (rebuilt with it). */
+  private readableCache: { view: LevelView; list: Readable[] } | null = null;
   private levelData: LevelData | null = null;
   private readonly localHandMat: THREE.MeshLambertMaterial;
   private localLeft: Hand;
@@ -548,6 +551,18 @@ export class GameRenderer implements IGameRenderer {
 
   holdingMessages(): boolean {
     return this.jumpscare.holdsScreen;
+  }
+
+  readables(): readonly Readable[] {
+    const view = this.level;
+    if (!view) return [];
+    if (this.readableCache?.view !== view) {
+      const notes = (view.decals?.placed ?? []).filter((p) => p.name.startsWith(NOTE_PREFIX));
+      // A note's text reads upright when you face its yaw + 180 degrees.
+      const list = notes.map((n) => ({ position: { x: n.x, y: n.y, z: n.z }, readYaw: Math.atan2(Math.sin(n.yaw + Math.PI), Math.cos(n.yaw + Math.PI)) }));
+      this.readableCache = { view, list };
+    }
+    return this.readableCache.list;
   }
 
   render(): void {

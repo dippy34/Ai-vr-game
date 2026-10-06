@@ -300,6 +300,17 @@ details[open] summary {
   line-height: 1.6;
 }
 
+.hud .aim {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 18px);
+  transform: translateX(-50%);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
 .hud .film {
   position: absolute;
   right: 16px;

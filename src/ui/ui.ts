@@ -439,6 +439,8 @@ export class Hud {
   private readonly film: HTMLElement;
   private readonly meter: { root: HTMLElement; fill: HTMLElement };
   private readonly toast: HTMLElement;
+  /** Small prompt under the crosshair ("E · read"). */
+  private readonly aim: HTMLElement;
   private toastTimer = 0;
   private statusText = '';
 
@@ -447,13 +449,15 @@ export class Hud {
     this.film = el('div', { class: 'film' });
     this.meter = micMeter();
     this.toast = el('div', { class: 'toast' });
+    this.aim = el('div', { class: 'aim' });
     this.root = el('div', { class: 'hud', hidden: '' }, [
       el('div', { class: 'crosshair' }),
+      this.aim,
       this.status,
       this.film,
       el('div', { class: 'mic' }, [el('div', { class: 'label' }, ['your noise']), this.meter.root]),
       el('div', { class: 'hint' }, [
-        'E grab/drop · Click flash · 1–6 signs · Shift run · C sneak · Esc menu',
+        'E grab/read · Click flash · 1–6 signs · Shift run · C sneak · Esc menu',
       ]),
       this.toast,
     ]);
@@ -466,6 +470,11 @@ export class Hud {
     if (this.statusText === text) return;
     this.statusText = text;
     this.status.replaceChildren(...lines.flatMap((l, i) => (i ? [el('br'), l] : [l])));
+  }
+
+  /** What E does for what's under the crosshair ('' = nothing to say). */
+  setAim(text: string): void {
+    if (this.aim.textContent !== text) this.aim.textContent = text;
   }
 
   setFilm(film: number | null): void {
