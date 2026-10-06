@@ -63,6 +63,8 @@ export class Game {
   private roundStartedAt = -1;
   private roundFlashes = 0;
   private paused = false;
+  /** A desktop HUD message waiting for the renderer to let go of the screen (see message()). */
+  private heldMessage: { text: string; seconds: number } | null = null;
   private readonly tmpV = new THREE.Vector3();
   private readonly tmpQ = new THREE.Quaternion();
 
@@ -129,6 +131,7 @@ export class Game {
     for (const id of Object.keys(this.session.state.players)) this.audio.removeRemoteVoice(id);
     this.session.close();
     this.session = null;
+    this.heldMessage = null;
     this.audio.setLevel(null);
   }
 
@@ -180,6 +183,7 @@ export class Game {
 
     this.renderer.setLocalNoiseLevel(micLevel);
     this.renderer.update(session.state, session.localId, this.localPose, dt);
+    this.flushHeldMessage();
     this.audio.update(session.state, session.localId, this.localPose.head, dt);
     this.renderer.render();
   }
@@ -445,7 +449,16 @@ export class Game {
 
   private message(text: string, seconds = 3): void {
     if (this.input.mode === 'xr') this.renderer.showMessage(text, seconds);
+    // Not over the monster's face mid-catch: the HUD shows it once the renderer lets go.
+    else if (this.renderer.holdingMessages()) this.heldMessage = { text, seconds };
     else this.ui.hud.showMessage(text, seconds);
+  }
+
+  private flushHeldMessage(): void {
+    const m = this.heldMessage;
+    if (!m || this.renderer.holdingMessages()) return;
+    this.heldMessage = null;
+    this.message(m.text, m.seconds);
   }
 
   /** Occasional reminders of what to do next (mostly for VR, where there are no menus). */

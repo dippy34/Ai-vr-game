@@ -546,6 +546,10 @@ export class GameRenderer implements IGameRenderer {
     this.message.show(text, seconds ?? 3);
   }
 
+  holdingMessages(): boolean {
+    return this.jumpscare.holdsScreen;
+  }
+
   render(): void {
     this.ctx.renderer.render(this.ctx.scene, this.ctx.camera);
     this.perf?.frame(this.ctx.renderer, this.ctx.scene, performance.now());

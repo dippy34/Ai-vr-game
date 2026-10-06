@@ -306,6 +306,11 @@ export class Jumpscare {
   }
 
   /** Hold a message until the sequence is over (it would float over the monster's face). */
+  /** The local catch sequence is playing (messages wait until it ends). */
+  get holdsScreen(): boolean {
+    return this.localActive;
+  }
+
   deferMessage(text: string, seconds: number): boolean {
     if (!this.localActive) return false;
     this.deferred = { text, seconds };

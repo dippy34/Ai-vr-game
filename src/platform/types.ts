@@ -64,6 +64,11 @@ export interface IGameRenderer {
   setLocalNoiseLevel(level: number): void;
   /** Short in-world message floating in front of the player (works in VR and on desktop). */
   showMessage(text: string, seconds?: number): void;
+  /**
+   * True while a full-view sequence (the catch) owns the screen. showMessage() already waits it
+   * out; screen-space UI (the desktop HUD) should hold its messages until this turns false.
+   */
+  holdingMessages(): boolean;
   render(): void;
 }
 

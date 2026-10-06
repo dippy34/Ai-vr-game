@@ -17,6 +17,7 @@ function fakes() {
   rig.add(camera);
   camera.position.set(0, 1.6, 0);
   let loop: ((t: number) => void) | null = null;
+  const hold = { messages: false };
   const renderer = {
     ctx: {
       renderer: { setAnimationLoop: (fn: (t: number) => void) => (loop = fn), xr: { isPresenting: false } },
@@ -30,6 +31,7 @@ function fakes() {
     flash: vi.fn(),
     setLocalNoiseLevel: vi.fn(),
     showMessage: vi.fn(),
+    holdingMessages: () => hold.messages,
     render: vi.fn(),
   } as unknown as IGameRenderer;
   const hand = () => ({ tracked: true, position: { x: 0, y: 1.2, z: -0.3 }, rotation: { x: 0, y: 0, z: 0, w: 1 }, curls: [0, 0, 0, 0, 0] as [number, number, number, number, number] });
@@ -63,7 +65,7 @@ function fakes() {
   const frames = (n: number, ms = 1000 / 60) => {
     for (let i = 0; i < n; i++) loop!((t += ms));
   };
-  return { game, renderer, audio, messages, frames, rig };
+  return { game, renderer, audio, messages, frames, rig, hold };
 }
 
 /** A minimal Session around a GameSim, standing in for a client that joined a running round. */
@@ -114,6 +116,27 @@ describe('Game', () => {
     now.mockReturnValue(1_000_000 + 95_000);
     session.callbacks.onEvent({ type: 'phase', phase: 'won' } satisfies SimEvent);
     expect(messages.at(-1)).toMatch(/1:35 in the house/);
+  });
+
+  it('desktop HUD messages wait until the catch sequence lets go of the screen', () => {
+    const { game, messages, frames, hold } = fakes();
+    const sim = new GameSim(createLevel(3));
+    sim.addPlayer('me', 'Me', true);
+    sim.startRound();
+    const session = fakeSession(sim, 'me');
+    game.attach(session);
+    frames(2);
+    const before = messages.length;
+    hold.messages = true;
+    session.callbacks.onEvent({ type: 'phase', phase: 'lost' } satisfies SimEvent);
+    frames(3);
+    expect(messages.length).toBe(before);
+    hold.messages = false;
+    frames(1);
+    expect(messages.length).toBe(before + 1);
+    expect(messages.at(-1)).toMatch(/Nobody made it out/);
+    frames(3);
+    expect(messages.length).toBe(before + 1);
   });
 
   it('attach/detach cycles close sessions and leak nothing per cycle', () => {
