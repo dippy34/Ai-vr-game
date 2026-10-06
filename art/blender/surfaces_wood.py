@@ -26,13 +26,19 @@ def build() -> None:
 # Grain
 # =============================================================================================
 
-def ring_grain(xl, yl, *, pith_y, depth, tilt, spacing, wobble, late=0.25):
+def ring_grain(xl, yl, *, pith_y, depth, tilt, spacing, wobble, late=0.25, texel=None):
     """Flat-sawn growth rings on a board: distance from the (tilted) log axis, banded.
     xl, yl: meters along / across the board. Returns (rings 0..1 latewood, ring coordinate)."""
     z = depth + tilt * xl
     r = np.sqrt((yl - pith_y) ** 2 + z * z) + wobble
     f = (r / spacing) % 1.0
     lw = sstep(1 - late - 0.12, 1 - late, f) * (1 - sstep(0.97, 1.0, f))
+    if texel:
+        # band-limit: where rings get closer than ~3 px, fade them to their average (no aliasing)
+        gy = np.abs(yl - pith_y) / np.maximum(r, 1e-6)
+        cyc = gy * texel / spacing
+        k = sstep(0.42, 0.22, cyc)
+        lw = lw * k + (late * 0.75) * (1 - k)
     return lw.astype(F32), r
 
 
@@ -99,7 +105,7 @@ def wood_floor(n: int = 1024, seed: int = 41) -> dict:
         'pith': rng.uniform(-0.12, 0.2, npieces),
         'depth': rng.uniform(0.01, 0.09, npieces),
         'tilt': rng.normal(0, 0.035, npieces),
-        'spacing': rng.uniform(0.0026, 0.0055, npieces),
+        'spacing': rng.uniform(0.004, 0.008, npieces),
         'cup': rng.uniform(0.0001, 0.0005, npieces),
         'lip': rng.normal(0, 0.00025, npieces),
         'gray': rng.uniform(0, 1, npieces),
@@ -108,7 +114,7 @@ def wood_floor(n: int = 1024, seed: int = 41) -> dict:
 
     wob = (T.fbm(3, 40, octaves=4) * 0.006 + T.fbm(12, 160, octaves=2) * 0.0012).astype(F32)
     late, rr = ring_grain(xl, yl, pith_y=g('pith'), depth=g('depth'), tilt=g('tilt'), spacing=g('spacing'),
-                          wobble=wob)
+                          wobble=wob, texel=T.texel)
     # oak pores: fine dark dashes along the grain, denser in earlywood
     # (lattice periods stay below the pixel Nyquist limit: 512 cells across 1024 px)
     pores = T.perlin(70, 420) * 0.6 + T.perlin(40, 260) * 0.4
@@ -234,7 +240,8 @@ def wood_trim(n: int = 1024, seed: int = 53) -> dict:
     # --- wood underneath: dark stained fir, straight grain along u ---------------------------------
     wob = T.fbm(2, 12, octaves=4) * 0.004 + T.fbm(6, 60, octaves=2) * 0.0006
     yl = T.v * T.size_m
-    lw, _ = ring_grain(T.u * T.size_m, yl, pith_y=-0.05, depth=0.06, tilt=0.01, spacing=0.0028, wobble=wob, late=0.3)
+    lw, _ = ring_grain(T.u * T.size_m, yl, pith_y=-0.05, depth=0.06, tilt=0.01, spacing=0.0028, wobble=wob, late=0.3,
+                       texel=T.texel)
     wood = lerp(T.full(hexc('#4a3322')), T.full(hexc('#2a1b11')), lw)
     wood = wood * (0.9 + 0.15 * (T.perlin(20, 400) * 0.5 + 0.5))[..., None]
 
@@ -245,9 +252,9 @@ def wood_trim(n: int = 1024, seed: int = 53) -> dict:
 
     # brush strokes along u (ridges in the enamel) + orange peel
     brush = T.spectral(beta=1.8, fmin=6, aniso=(14.0, 1.0))
-    brush_fine = T.spectral(beta=1.2, fmin=40, aniso=(10.0, 1.0))
-    L.height += brush * 0.00004 + brush_fine * 0.000015
-    L.multiply(np.clip(brush * 0.2 + 0.5, 0, 1), (0.96, 0.95, 0.93), 0.6)
+    brush_fine = T.spectral(beta=1.2, fmin=40, aniso=(12.0, 1.0))
+    L.height += brush * 0.00005 + brush_fine * 0.00002
+    L.multiply(np.clip(brush * 0.25 + brush_fine * 0.15 + 0.5, 0, 1), (0.93, 0.92, 0.89), 0.7)
     # grain telegraphing through the paint
     L.height += lw * 0.00002
     # yellowing + dirt (nicotine / handling), uneven
@@ -261,33 +268,32 @@ def wood_trim(n: int = 1024, seed: int = 53) -> dict:
     L.paint(crack_line.astype(F32), hexc('#3b3226'), 0.8, rough=0.8)
     L.height += curl * 0.00004 - crack_line * 0.00008
 
-    # --- chips: top coat lost (green shows), deeper chips to bare wood ------------------------------
-    chip_n = T.fbm(14, octaves=5, gain=0.58) + 0.12 * T.fbm(90, octaves=2)
-    chip_zone = sstep(-0.1, 0.6, T.fbm(3, octaves=3))
-    thr1 = 0.42 - 0.3 * chip_zone
-    top_lost = sstep(thr1, thr1 + 0.015, chip_n)
-    thr2 = thr1 + 0.07
-    wood_bare = sstep(thr2, thr2 + 0.015, chip_n) * (0.4 + 0.6 * sstep(0.2, 0.5, F.warp_hi * 0.5 + 0.5))
-    # small knocks along everywhere
-    knocks = T.zeros()
-    for _ in range(90):
-        x, y = rng.random(2) * n
-        r = rng.uniform(2, 9)
-        T.blob(knocks, x, y, r * rng.uniform(1, 2.5), r, rot=rng.normal(0, 0.3), soft=1.0)
-    knocks = knocks * sstep(-0.3, 0.3, F.detail + 0.2)
+    # --- chips: patches where the enamel has let go. Stepped: bare wood in the middle, the old
+    # green coat around it, then the cream top coat with a lifted, light edge -------------------------
+    warp_u = T.fbm(8, octaves=3) * 0.02
+    warp_v = T.fbm(8, octaves=3, ) * 0.02
+    chip_n = T.fbm(9, octaves=6, gain=0.62, u=T.u + warp_u, v=T.v + warp_v)
+    zone = sstep(0.05, 0.6, T.fbm(3, octaves=3) + 0.2 * F.warp_lo)
+    thr1 = 0.5 - 0.42 * zone
+    top_lost = sstep(thr1, thr1 + 0.008, chip_n)
+    wood_bare = sstep(thr1 + 0.035, thr1 + 0.043, chip_n)
+    # a scatter of tiny knocks (irregular) everywhere
+    knock_n = T.fbm(60, octaves=3, gain=0.6)
+    knocks = sstep(0.42, 0.45, knock_n) * sstep(0.1, 0.4, F.detail * 0.5 + 0.5)
     top_lost = np.clip(top_lost + knocks, 0, 1)
-    wood_bare = np.clip(wood_bare + knocks * sstep(0.2, 0.5, F.at(F.detail, 0.3, 0.6)), 0, 1) * top_lost
+    wood_bare = np.clip(wood_bare + knocks * sstep(0.47, 0.5, knock_n), 0, 1) * top_lost
 
     L.color = L.color + (green - L.color) * top_lost[..., None]
-    L.rough = L.rough + (0.6 - L.rough) * top_lost
+    L.rough = L.rough + (0.55 - L.rough) * top_lost
     L.color = L.color + (wood - L.color) * wood_bare[..., None]
     L.rough = L.rough + (0.72 - L.rough) * wood_bare
-    # chip edges: paint thickness steps, light rim on the cream, grime in the step
-    rim = np.clip(T.blur(top_lost, 1.2) - top_lost, 0, 1) * 2.0
-    L.paint(np.clip(rim, 0, 1), hexc('#d3c9ad'), 0.45)
-    L.paint(np.clip(T.blur(top_lost, 2.5) - top_lost, 0, 1) * 0.8, hexc('#5d5240'), 0.35)
-    L.height = L.height - top_lost * 0.00012 - wood_bare * 0.0001
-    L.ao *= 1 - 0.25 * np.clip(T.blur(top_lost, 1.5) - top_lost, 0, 1)
+    # chip edges: paint thickness steps, light lifted rim on the cream, grime in the step
+    rim = np.clip(T.blur(top_lost, 1.0) - top_lost, 0, 1) * 2.2
+    L.paint(np.clip(rim, 0, 1), hexc('#d6ccb0'), 0.5)
+    L.paint(np.clip(T.blur(top_lost, 3.0) - top_lost, 0, 1), hexc('#5d5240'), 0.3)
+    L.paint(np.clip(T.blur(wood_bare, 1.0) - wood_bare, 0, 1) * top_lost, hexc('#3a3a2c'), 0.4)
+    L.height = L.height - top_lost * 0.00012 - wood_bare * 0.0001 + np.clip(rim, 0, 1) * 0.00004
+    L.ao *= 1 - 0.3 * np.clip(T.blur(top_lost, 1.5) - top_lost, 0, 1)
 
     # --- scuffs (shoes, mop, furniture) + specks ---------------------------------------------------
     scuff = np.clip(T.spectral(beta=2.0, fmin=2, aniso=(10.0, 1.0)) * 0.5 - 0.4, 0, 1)
