@@ -112,9 +112,13 @@ fists, open palm "stop", thumbs up/down, counting 1–5, "come here" waves and s
 
 ## Look and sound
 
-- **Visual:** low-poly, near-black, blue-gray moonlight, exponential fog. The flash is blinding
-  white, and afterimages are pale ghostly copies that fade. The monster is very tall and thin, with
-  long arms and no eyes. You see it only in flashes, which is the point.
+- **Visual:** near-black, filmic (AgX) tone curve, cold moonlight pooling through the windows with
+  dusty shafts, height fog that swallows far rooms. The flash is blinding white with real shadows
+  (inverse-square falloff: whatever is close burns out, the far end of the room stays murky) and
+  lights up the haze and dust in the air; afterimages are pale ghostly copies that fade. The monster
+  is very tall and thin, with long arms and no eyes, wet, pale skin that glows red where it's thin.
+  You see it only in flashes, which is the point. Desktop and Quest share one look; the Quest tier
+  only lowers shadow resolution, grain and vignette (`RENDER.quality`).
 - **Audio:** all procedural WebAudio for now (no asset files). Spatialized HRTF voices and monster
   sounds, a low drone, house creaks, a heartbeat. Sound is half of horror, so it gets real effort.
 

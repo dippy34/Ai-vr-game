@@ -56,6 +56,9 @@ export class PerfHud {
     this.draw('perf', 'waiting for frames');
   }
 
+  /** Render quality tier shown in the readout (set by the renderer). */
+  tier = '';
+
   /** Call once per rendered frame, right after renderer.render(). */
   frame(renderer: THREE.WebGLRenderer, scene: THREE.Scene, now: number): void {
     if (this.lastFrame >= 0) this.worstMs = Math.max(this.worstMs, now - this.lastFrame);
@@ -71,7 +74,7 @@ export class PerfHud {
     const fps = (this.frames * 1000) / elapsed;
     const info = renderer.info;
     const xr = renderer.xr.isPresenting ? ' (2 eyes)' : '';
-    const a = `${fps.toFixed(0)} fps  worst ${this.worstMs.toFixed(0)} ms`;
+    const a = `${fps.toFixed(0)} fps  worst ${this.worstMs.toFixed(0)} ms${this.tier ? `  [${this.tier}]` : ''}`;
     const b = `${info.render.calls} calls${xr}  ${(info.render.triangles / 1000).toFixed(0)}k tris  `
       + `${info.memory.textures} tex ~${this.textureMB.toFixed(0)} MB`;
     this.draw(a, b);

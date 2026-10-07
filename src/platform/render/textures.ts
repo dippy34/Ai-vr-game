@@ -329,24 +329,6 @@ export function shaftTexture(): THREE.Texture {
   }, true, false);
 }
 
-/** Moonlight patch on the floor: soft rectangle with the window's mullion cross in shadow. */
-export function moonPatchTexture(): THREE.Texture {
-  return cached('moonpatch', () => {
-    const W = 128, H = 128;
-    const [c, g] = makeCanvas(W, H);
-    g.fillStyle = '#000';
-    g.fillRect(0, 0, W, H);
-    g.filter = 'blur(4px)';
-    g.fillStyle = '#fff';
-    g.fillRect(10, 10, W - 20, H - 20);
-    g.fillStyle = '#000';
-    g.fillRect(W / 2 - 4, 0, 8, H);
-    g.fillRect(0, H / 2 - 4, W, 8);
-    g.filter = 'none';
-    return c;
-  }, true, false);
-}
-
 /** Soft radial glow (white center -> transparent black edge) for additive halos. */
 export function glowTexture(): THREE.Texture {
   return cached('glow', () => {

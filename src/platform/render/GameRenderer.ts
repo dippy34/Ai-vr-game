@@ -28,7 +28,11 @@ import { CameraProp, FilmProp, FuseProp, type HoldStyle, type Prop } from './Pro
 import { AvatarKit, RemoteAvatar } from './RemoteAvatar';
 import { DRESSING_PREFIX } from './Dressing';
 import { setTextureAnisotropy } from './textures';
-import { paint, segmentHitsAabb, setQ, setV } from './util';
+import { paint, rayAabb, segmentHitsAabb, setQ, setV } from './util';
+import { forcedQuality, installShaderFx, pickQuality, setFxFrame, type RenderQuality } from './fx/pipeline';
+import { DustMotes } from './fx/moonlight';
+import { FlashGlare } from './fx/flashGlare';
+import { applyMonsterSkin } from './fx/monsterSkin';
 
 /**
  * three.js's physically based lights divide diffuse by PI, so a hemisphere light of intensity I lights
@@ -41,8 +45,20 @@ const AMBIENT_SCALE = Math.PI;
  * fog can't make things visible at arm's length yet black at 3 m; this does (silhouettes and wet
  * glints on the monster only up close). Local only, so it never reveals hand signs to others.
  */
-const NEAR_LIGHT = { intensity: 0.016, distance: 2.2, decay: 2 };
+const NEAR_LIGHT = { intensity: 0.022, distance: 2.2, decay: 2 };
 const FOG_COLOR = 0x04060b;
+/** `?tm=aces|agx|neutral|none` swaps the tone mapper (look development only). */
+const TONE_MAPPERS: Record<string, THREE.ToneMapping> = {
+  aces: THREE.ACESFilmicToneMapping, agx: THREE.AgXToneMapping, neutral: THREE.NeutralToneMapping, none: THREE.NoToneMapping,
+};
+function toneMapper(): THREE.ToneMapping {
+  const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('tm') : null;
+  return (q ? TONE_MAPPERS[q] : undefined) ?? THREE.CustomToneMapping;
+}
+/** Cast the flash's shadows (every mesh under `root`). */
+function castShadows(root: THREE.Object3D, on = true): void {
+  root.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = on; });
+}
 const AFTERIMAGE_MIN_DOT = 0.1;
 /** GLB models the renderer knows how to use (public/models/<name>.glb). */
 const MODEL_NAMES = [
@@ -63,6 +79,7 @@ const _q = new THREE.Quaternion();
 const _origin = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _col = new THREE.Color();
+const _dbs = new THREE.Vector2();
 const SIDES = ['left', 'right'] as const;
 /** Heights (m) above the monster's feet tested for a flash hit (a partly hidden monster still shows). */
 const MONSTER_PROBES = [0.6, 1.3, 2.0];
@@ -107,15 +124,32 @@ export class GameRenderer implements IGameRenderer {
   private readonly onResize = (): void => this.resize();
   /** `?perf=1`: fps / draw calls / triangles / textures readout (head-locked, works in VR). */
   private readonly perf: PerfHud | null = null;
+  /** Current quality tier (RENDER.quality; 'auto' follows the XR session). */
+  private quality: RenderQuality | null = null;
+  private readonly forcedQuality = forcedQuality();
+  private frameNo = 0;
+  private readonly motes: DustMotes;
+  private readonly glare = new FlashGlare();
+  /** The last flash: who fired it and its beam direction (for the lens glare). */
+  private lastFlashBy: PlayerId | null = null;
+  private readonly lastFlashDir = new THREE.Vector3(0, 0, -1);
+  /** Avatars' shadow casting follows their status (ghosts don't cast). */
+  private readonly avatarCasts = new WeakMap<RemoteAvatar, boolean>();
 
   /** Creates the WebGLRenderer (xr.enabled = true) and appends its canvas to `container`. */
   constructor(container: HTMLElement) {
     this.container = container;
+    // Tone mapping, fog, grain/dither and light-loop changes live in three's shader chunks.
+    installShaderFx();
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, RENDER.maxPixelRatio));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.NoToneMapping;
-    renderer.shadowMap.enabled = false;
+    renderer.toneMapping = toneMapper();
+    renderer.toneMappingExposure = RENDER.exposure;
+    // Only the camera flash casts, and its map is rendered only while it is lit (see render()).
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.shadowMap.autoUpdate = false;
     renderer.setClearColor(0x000000, 1);
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType('local-floor');
@@ -152,6 +186,8 @@ export class GameRenderer implements IGameRenderer {
     this.localLeft = this.hands.create('left', this.localHandMat);
     this.localRight = this.hands.create('right', this.localHandMat);
     this.localLeft.visible = this.localRight.visible = false;
+    castShadows(this.localLeft.mesh);
+    castShadows(this.localRight.mesh);
     this.dynamic.add(this.localLeft.mesh, this.localRight.mesh);
 
     this.ghostMat = new THREE.MeshBasicMaterial({
@@ -160,6 +196,7 @@ export class GameRenderer implements IGameRenderer {
     this.ghostMat.userData.shared = true;
 
     this.monster = new MonsterModel();
+    castShadows(this.monster.object);
     this.dynamic.add(this.monster.object);
 
     this.cameraProp = new CameraProp();
@@ -167,6 +204,9 @@ export class GameRenderer implements IGameRenderer {
     this.dynamic.add(this.cameraProp.group);
 
     this.flashFx = new FlashEffect(scene, camera);
+    scene.add(this.glare.mesh);
+    this.motes = new DustMotes(Math.max(RENDER.tiers.quest.motes, RENDER.tiers.desktop.motes));
+    scene.add(this.motes.points);
     this.jumpscare = new Jumpscare(scene, camera, this.hemi, this.nearLight, this.flashFx, RENDER.jumpscare);
     this.jumpscare.onDeferredMessage = (text, seconds) => this.message.show(text, seconds);
     this.meter = new NoiseMeter();
@@ -199,6 +239,8 @@ export class GameRenderer implements IGameRenderer {
     if (monster && inst) {
       const old = this.monster;
       const next = new SkinnedMonster(monster, inst);
+      // Wet, translucent skin + glossy keratin; casts / receives the flash shadows.
+      applyMonsterSkin(next.object);
       next.setLevel(this.levelData);
       this.dynamic.remove(old.object);
       old.dispose();
@@ -213,6 +255,7 @@ export class GameRenderer implements IGameRenderer {
         const old = side === 'left' ? this.localLeft : this.localRight;
         const next = this.hands.create(side, this.localHandMat);
         next.visible = old.visible;
+        castShadows(next.mesh);
         this.dynamic.remove(old.mesh);
         old.dispose();
         this.dynamic.add(next.mesh);
@@ -267,19 +310,42 @@ export class GameRenderer implements IGameRenderer {
     this.monster.setLevel(level);
     this.level = new LevelView(level, this.models, this.surfaces);
     this.ctx.scene.add(this.level.group);
+    this.motes.setWindows(this.level.moonWindows);
     // Compile every shader now (incl. afterimage + whiteout) so the first flash doesn't hitch.
     this.flashFx.setWarmupVisible(true);
     this.jumpscare.setWarmupVisible(true);
+    this.glare.setWarmupVisible(true);
     const hidden: THREE.Object3D[] = [];
     this.dynamic.traverse((o) => { if (!o.visible) { hidden.push(o); o.visible = true; } });
     try {
       this.ctx.renderer.compile(this.ctx.scene, this.ctx.camera);
+      this.warmShadowPrograms();
     } catch {
       // compile() is an optimization only.
     }
     for (const o of hidden) o.visible = false;
     this.flashFx.setWarmupVisible(false);
     this.jumpscare.setWarmupVisible(false);
+    this.glare.setWarmupVisible(false);
+  }
+
+  /**
+   * compile() doesn't build the shadow pass's depth programs (static / skinned / instanced): render
+   * the flash's shadow map once with every caster in it, so the first flash doesn't compile them.
+   */
+  private warmShadowPrograms(): void {
+    const r = this.ctx.renderer;
+    if (!this.flashFx.spot.castShadow) return;
+    const culled: THREE.Object3D[] = [];
+    this.ctx.scene.traverse((o) => {
+      if (o.castShadow && o.frustumCulled) {
+        culled.push(o);
+        o.frustumCulled = false;
+      }
+    });
+    r.shadowMap.needsUpdate = true;
+    r.shadowMap.render([this.flashFx.spot], this.ctx.scene, this.ctx.camera);
+    for (const o of culled) o.frustumCulled = true;
   }
 
   // -------------------------------------------------------------------------------------------
@@ -314,6 +380,7 @@ export class GameRenderer implements IGameRenderer {
     this.monster.update(state.monster, dt);
     this.updateItems(state, localId, localPose);
     this.flashFx.update(this.time);
+    this.updateFx(localId);
 
     // Noise meter on the inside of the local left wrist.
     setV(_a, localPose.left.position);
@@ -346,6 +413,11 @@ export class GameRenderer implements IGameRenderer {
       this.pendingPoses.delete(id);
       av.setColor(p.color);
       av.setStatus(p.status);
+      const casts = p.status === 'alive';
+      if (this.avatarCasts.get(av) !== casts) {
+        castShadows(av.group, casts);
+        this.avatarCasts.set(av, casts);
+      }
       av.setTarget(p.pose, false, this.time);
       av.update(dt);
     }
@@ -377,6 +449,7 @@ export class GameRenderer implements IGameRenderer {
       let prop = this.items.get(it.id);
       if (!prop) {
         prop = it.kind === 'fuse' ? new FuseProp(this.models) : new FilmProp(this.models);
+        castShadows(prop.group);
         this.items.set(it.id, prop);
         this.dynamic.add(prop.group);
       }
@@ -515,7 +588,12 @@ export class GameRenderer implements IGameRenderer {
         white = 0.05 + 0.85 * Math.pow(aim, 3) * lookK * Math.pow(1 - dist / RENDER.flashRange, 0.6);
       }
     }
-    this.flashFx.fire(this.time, origin, dir, white);
+    // How far the beam's axis travels before it hits a wall (the bounce light sits in that room).
+    let hit: number = RENDER.fogFar;
+    for (const b of blockers) hit = Math.min(hit, rayAabb(origin, dir, b));
+    this.flashFx.fire(this.time, origin, dir, white, hit);
+    this.lastFlashBy = event.by;
+    this.lastFlashDir.copy(dir);
     this.cameraProp.flashed(this.time);
   }
 
@@ -571,7 +649,40 @@ export class GameRenderer implements IGameRenderer {
     return this.readableCache.list;
   }
 
+  /** Quality tier, shared FX uniforms, dust motes and the flash glare (once per frame). */
+  private updateFx(localId: PlayerId): void {
+    const r = this.ctx.renderer;
+    const q = pickQuality(RENDER.quality, r.xr.isPresenting, this.forcedQuality);
+    const tier = RENDER.tiers[q];
+    if (q !== this.quality) {
+      this.quality = q;
+      this.flashFx.setShadowQuality(tier.shadowMapSize, tier.shadowRadius);
+      this.motes.setCount(tier.motes);
+      this.glare.streak = q === 'desktop' ? 1 : 0.35;
+      if (this.perf) this.perf.tier = q;
+    }
+    setFxFrame(this.time, this.frameNo++, tier);
+    // Mote sizes: pixels per meter at 1 m for this view (one eye in XR).
+    const cam = r.xr.isPresenting ? r.xr.getCamera().cameras[0] : null;
+    const h = cam ? cam.viewport.w : r.getDrawingBufferSize(_dbs).y;
+    const proj = (cam ?? this.ctx.camera).projectionMatrix.elements[5];
+    this.motes.setPixelScale(0.5 * h * proj);
+    // Glare on a flash aimed at you (not your own: you're behind the lens).
+    const k = this.flashFx.brightness;
+    if (k > 0 && tier.glare) {
+      const p = this.flashFx.spot.position;
+      _d.subVectors(this.headPos, p);
+      const dist = Math.max(0.05, _d.length());
+      const facing = Math.max(0, this.lastFlashDir.dot(_d) / dist);
+      this.glare.update(p, k, facing, this.lastFlashBy === localId);
+    } else {
+      this.glare.update(this.headPos, 0, 0, true);
+    }
+  }
+
   render(): void {
+    // The flash shadow map is only re-rendered while the flash is lit.
+    this.ctx.renderer.shadowMap.needsUpdate = this.flashFx.needsShadowUpdate();
     this.ctx.renderer.render(this.ctx.scene, this.ctx.camera);
     this.perf?.frame(this.ctx.renderer, this.ctx.scene, performance.now());
   }
@@ -618,6 +729,8 @@ export class GameRenderer implements IGameRenderer {
     this.localHandMat.dispose();
     this.ghostMat.dispose();
     this.flashFx.dispose();
+    this.glare.dispose();
+    this.motes.dispose();
     this.jumpscare.dispose();
     this.meter.dispose();
     this.message.dispose();

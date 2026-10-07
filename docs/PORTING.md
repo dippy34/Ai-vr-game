@@ -41,7 +41,10 @@ When the game needs more performance, better audio, or store features (achieveme
    together during a transition.
 3. **Implement the three platform interfaces** with engine features: XR hand tracking →
    `FingerCurls` (5 numbers per hand), spatial audio for voices and the monster, the flash
-   afterimage effect.
+   afterimage effect. The web look lives in three's shader chunks (`src/platform/render/fx/`:
+   AgX tone curve + look, height fog with flash in-scatter, grain/dither/vignette, room AO
+   field, monster skin): engines do these as post-processing / material graphs, so port the
+   numbers in `RENDER`, not the patching.
 4. Copy `src/config.ts` numbers so the game feels the same.
 
 ### Multiplayer in a native engine
