@@ -46,7 +46,8 @@ export interface StarTiming {
   /**
    * A peer that joined less than this long ago gets this much silence before being dropped
    * instead of peerTimeoutMs: right after joining, a client builds the whole level (models,
-   * merged meshes, shaders), which can freeze its main thread for seconds on a headset.
+   * merged meshes, shaders), which can freeze its main thread for seconds on a headset (the
+   * first frame links every shader program; with the lighting pass that is ~48 programs).
    */
   joinGraceMs?: number;
   /** Frames whose JSON is bigger than this (UTF-8 bytes) are chunked. */
@@ -56,7 +57,7 @@ export interface StarTiming {
 export const DEFAULT_TIMING: StarTiming = {
   pingIntervalMs: 2000,
   peerTimeoutMs: 15000,
-  joinGraceMs: 30000,
+  joinGraceMs: 60000,
   // PeerJS' JSON serializer refuses messages >= 16300 bytes (util.chunkedMTU).
   maxFrameBytes: 16000,
 };
