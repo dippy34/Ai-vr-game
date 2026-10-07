@@ -276,7 +276,11 @@ export const RENDER = {
   exposure: 1.5,
   tonePower: 1.1,
   toneSaturation: 1.15,
-  /** Faint ambient light so the world isn't 100% black (eyes "adjusted to the dark"). */
+  /**
+   * Faint ambient light so the world isn't 100% black (eyes "adjusted to the dark"): fraction of a
+   * surface's colour, scene-linear (before exposure and the tone curve, which crushes the deepest
+   * darks, hence a higher value than without tone mapping).
+   */
   ambientIntensity: 0.08,
   /** Fog makes far things vanish into black: fully fogged by fogFar (the level culls beyond it). */
   fogNear: 1.5,
