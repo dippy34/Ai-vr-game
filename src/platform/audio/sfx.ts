@@ -329,6 +329,66 @@ export function sfxMonsterStep(s: Shot, t: number, weight: number, drag: number)
   if (chance(0.3)) creak(s, t + rand(0.03, 0.08), { dur: rand(0.3, 0.7), rateLo: 9, rateHi: 24, res: rand(380, 700), q: 11, level: 0.4 * W });
 }
 
+/** On all fours: a knuckle / knee knock and a dragging scrape. Climbing: wood knocks and creaks. */
+export function sfxMonsterCrawl(s: Shot, t: number, climbing: boolean): void {
+  thud(s, t, {
+    level: climbing ? 0.3 : 0.2,
+    f0: climbing ? 190 : 120,
+    f1: climbing ? 95 : 58,
+    body: climbing ? 1200 : 600,
+    dur: 0.1,
+    tick: 0.12,
+  });
+  const sc = s.noise('white', t + 0.03, 0.5);
+  const bp = s.filter('bandpass', rand(900, 1600), 0.8);
+  const g = s.gain(0);
+  sc.connect(bp).connect(s.filter('highpass', 400)).connect(g).connect(s.out);
+  swell(g.gain, t + 0.03, 0.06, 0.08, rand(0.05, 0.2), 0.15);
+  if (climbing && chance(0.6)) {
+    creak(s, t + rand(0.05, 0.15), { dur: rand(0.3, 0.6), rateLo: 10, rateHi: 30, res: rand(450, 900), q: 11, level: 0.35 });
+  }
+}
+
+/** Sharp hissing intake: the wind-up tell before a sweep. */
+export function sfxHiss(s: Shot, t: number): void {
+  const n = s.noise('white', t, 0.6);
+  const bp = s.filter('bandpass', 3800, 1.4);
+  bp.frequency.setValueAtTime(2600, t);
+  bp.frequency.linearRampToValueAtTime(5200, t + 0.4);
+  const g = s.gain(0);
+  n.connect(s.filter('highpass', 1500)).connect(bp).connect(g).connect(s.out);
+  swell(g.gain, t, 0.5, 0.25, 0.1, 0.12);
+}
+
+/** Long arms cutting the air (the sweep's strike), with a low body thump. */
+export function sfxWhoosh(s: Shot, t: number, level = 0.8): void {
+  const n = s.noise('pink', t, 0.6);
+  const bp = s.filter('bandpass', 400, 1.6);
+  glide(bp.frequency, t, 380, 2400, 0.16);
+  bp.frequency.exponentialRampToValueAtTime(500, t + 0.4);
+  const g = s.gain(0);
+  n.connect(bp).connect(g).connect(s.out);
+  swell(g.gain, t, level, 0.09, 0.06, 0.25);
+  thud(s, t + 0.12, { level: 0.25 * level, f0: 90, f1: 45, body: 300, dur: 0.15, tick: 0 });
+}
+
+/** Claws feeling over wood and fabric (searching). */
+export function sfxClawScrape(s: Shot, t: number): void {
+  const k = 2 + Math.floor(Math.random() * 3);
+  const times: number[] = [];
+  let x = 0;
+  for (let i = 0; i < k; i++) {
+    times.push(x);
+    x += rand(0.06, 0.16);
+  }
+  clicks(s, t, times, { freq: rand(2800, 4200), q: 3, peak: 0.5, decay: 0.015 });
+  const n = s.noise('white', t, x + 0.3);
+  const bp = s.filter('bandpass', rand(1800, 3000), 1.2);
+  const g = s.gain(0);
+  n.connect(bp).connect(g).connect(s.out);
+  swell(g.gain, t, 0.05, 0.05, x, 0.12);
+}
+
 /** Echolocation-like tongue clicks (investigating / listening). */
 export function sfxMonsterClicks(s: Shot, t: number): void {
   const n = 4 + Math.floor(Math.random() * 5);

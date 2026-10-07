@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { GAME, HEARING, MONSTER, NOISE, PLAYER, PLAYER_COLORS } from '../config';
 import { createLevel, roomAt } from './level';
 import { distXZ, v3 } from './math';
-import { circleBlocked, moveCircle, supportHeight } from './physics';
+import { circleBlocked, distToBox, moveCircle, supportHeight } from './physics';
+import { navGridFor } from './navgrid';
 import { GameSim, makeSpawnPose, SIM_TUNING } from './sim';
-import type { PlayerId, SimEvent, Vec3 } from './types';
+import type { LevelData, MonsterState, PlayerId, SimEvent, Vec3 } from './types';
 
 const SEED = 1234;
 
@@ -53,6 +54,19 @@ function runUntil(sim: GameSim, seconds: number, pred: (ev: SimEvent[]) => boole
 }
 
 const has = (ev: SimEvent[], type: SimEvent['type']) => ev.some((e) => e.type === type);
+
+/**
+ * Does the monster's body overlap geometry it must not? Never walls / tall furniture / the closed
+ * door (with its current radius: smaller on all fours); low furniture only while it is down on
+ * all fours (crawling past or climbing over it).
+ */
+function monsterClips(level: LevelData, m: MonsterState): boolean {
+  const g = navGridFor(level);
+  const r = (m.posture === 'crawl' ? MONSTER.crawlRadius : MONSTER.radius) - 0.02;
+  const { x, z } = m.position;
+  if (g.hard.some((b) => distToBox(b, x, z) < r)) return true;
+  return m.posture !== 'crawl' && g.climb.some((b) => distToBox(b, x, z) < r);
+}
 
 describe('GameSim setup', () => {
   it('constructs a lobby world', () => {
@@ -262,7 +276,7 @@ describe('monster behaviour', () => {
     expect(sim.state.players.p0.status).toBe('caught');
     expect(sim.state.monster.mode).toBe('feeding');
     expect(sim.state.phase).toBe('playing');
-    expect(circleBlocked(level, sim.state.monster.position, SIM_TUNING.monsterRadius - 0.02)).toBe(false);
+    expect(monsterClips(level, sim.state.monster)).toBe(false);
     runUntil(sim, GAME.feedingTime + 0.2);
     expect(sim.state.monster.mode).toBe('wander');
     // Caught players are ignored.
@@ -273,24 +287,41 @@ describe('monster behaviour', () => {
   it('navigates through doorways to investigate a noise in another room', () => {
     const { sim, level } = setup(1);
     place(sim, 'p0', 0.7, 6.6);
-    // Monster starts in the bathroom; a noise in the bedroom next door.
-    talk(sim, null, v3(-9.9, 1.0, -2.4), 0.6);
+    // Monster starts in the bathroom; a noise in the bedroom next door (clearly audible: a faint
+    // one would be stalked at a creep).
+    talk(sim, null, v3(-9.9, 1.0, -2.4), 0.8);
     expect(sim.state.monster.mode).toBe('investigate');
+    expect(sim.monsterDebug().stalk).toBe(false);
     let maxSpeed = 0;
     runUntil(sim, 25, () => {
       maxSpeed = Math.max(maxSpeed, sim.state.monster.speed);
-      expect(circleBlocked(level, sim.state.monster.position, SIM_TUNING.monsterRadius - 0.02)).toBe(false);
+      expect(monsterClips(level, sim.state.monster)).toBe(false);
       return distXZ(sim.state.monster.position, v3(-9.9, 0, -2.4)) < 0.5;
     });
     expect(distXZ(sim.state.monster.position, v3(-9.9, 0, -2.4))).toBeLessThan(0.5);
     expect(maxSpeed).toBeLessThanOrEqual(MONSTER.investigateSpeed + 1e-6);
     expect(maxSpeed).toBeGreaterThan(MONSTER.investigateSpeed * 0.8);
-    // Then it listens for MONSTER.listenTime and goes back to wandering.
-    runUntil(sim, 1);
-    expect(sim.state.monster.mode).toBe('investigate');
-    expect(sim.state.monster.speed).toBe(0);
-    runUntil(sim, MONSTER.listenTime);
-    expect(sim.state.monster.mode).toBe('wander');
+    // Then it stops and listens toward the sound...
+    runUntil(sim, 0.5);
+    const m = sim.state.monster;
+    expect(m.mode).toBe('investigate');
+    expect(m.speed).toBe(0);
+    expect(m.act).toBe('listen');
+    expect(distXZ(m.focus!, v3(-9.9, 0, -2.4))).toBeLessThan(0.01);
+    // ...searches the hiding spots around (moving between them), and goes back to wandering.
+    const acts = new Set<string>();
+    let travelled = 0;
+    let prev = { ...m.position };
+    runUntil(sim, 40, () => {
+      acts.add(m.act);
+      travelled += distXZ(prev, m.position);
+      prev = { ...m.position };
+      expect(monsterClips(level, m)).toBe(false);
+      return m.mode === 'wander';
+    });
+    expect(m.mode).toBe('wander');
+    expect([...acts].filter((a) => a === 'search' || a === 'sniff' || a === 'sweep').length).toBeGreaterThan(0);
+    expect(travelled).toBeGreaterThan(1);
   });
 
   it('gives up a chase after silence and investigates the last spot', () => {
@@ -306,7 +337,8 @@ describe('monster behaviour', () => {
     const ev = runUntil(sim, 0.6);
     expect(sim.state.monster.mode).toBe('investigate');
     expect(ev).toContainEqual(expect.objectContaining({ type: 'monsterAlert', mode: 'investigate' }));
-    runUntil(sim, MONSTER.listenTime + 1);
+    // It searches around the spot (maybe lurks a while) and eventually wanders off again.
+    runUntil(sim, 45, () => sim.state.monster.mode === 'wander');
     expect(sim.state.monster.mode).toBe('wander');
     expect(sim.state.players.p0.status).toBe('alive');
   });
@@ -366,7 +398,7 @@ describe('monster behaviour', () => {
     talk(sim, 'p0', head(-7.4, -4.6), NOISE.shout);
     expect(sim.state.monster.mode).toBe('chase');
     const ev = runUntil(sim, 10, (e) => {
-      expect(circleBlocked(level, sim.state.monster.position, SIM_TUNING.monsterRadius - 0.02)).toBe(false);
+      expect(monsterClips(level, sim.state.monster)).toBe(false);
       return has(e, 'playerCaught');
     });
     expect(ev).toContainEqual(expect.objectContaining({ type: 'playerCaught', id: 'p0' }));
@@ -402,7 +434,7 @@ describe('monster behaviour', () => {
       }
       sim.step(1 / 30);
       const p = sim.state.monster.position;
-      if (circleBlocked(level, p, SIM_TUNING.monsterRadius - 0.02)) {
+      if (monsterClips(level, sim.state.monster)) {
         throw new Error(`monster clipped geometry at ${p.x.toFixed(2)},${p.z.toFixed(2)} t=${sim.state.time}`);
       }
       expect(p.x > b.min.x && p.x < b.max.x && p.z > b.min.z && p.z < 8).toBe(true);

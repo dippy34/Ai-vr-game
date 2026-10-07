@@ -82,7 +82,7 @@ function resolveCircle(p: { x: number; z: number }, r: number, boxes: Box[], ite
 }
 
 /** Boxes whose XZ footprint overlaps the rectangle [minX,maxX] x [minZ,maxZ]. */
-function boxesNear(boxes: Box[], minX: number, minZ: number, maxX: number, maxZ: number): Box[] {
+function boxesNear(boxes: readonly Box[], minX: number, minZ: number, maxX: number, maxZ: number): Box[] {
   const out: Box[] = [];
   for (const b of boxes) {
     if (b.max.x < minX || b.min.x > maxX || b.max.z < minZ || b.min.z > maxZ) continue;
@@ -103,11 +103,16 @@ export function moveCircle(
   radius: number,
   opts?: CollisionOptions,
 ): Vec3 {
+  return moveCircleAmong(solidBoxes(level, opts), from, delta, radius);
+}
+
+/** moveCircle against an explicit list of solid boxes (e.g. the monster, which climbs low furniture). */
+export function moveCircleAmong(solids: readonly Box[], from: Vec3, delta: Vec3, radius: number): Vec3 {
   const r = Math.max(radius, 1e-3);
   const len = Math.hypot(delta.x, delta.z);
   const pad = 2 * r + 0.1;
   const boxes = boxesNear(
-    solidBoxes(level, opts),
+    solids,
     Math.min(from.x, from.x + delta.x) - pad,
     Math.min(from.z, from.z + delta.z) - pad,
     Math.max(from.x, from.x + delta.x) + pad,
@@ -125,6 +130,50 @@ export function moveCircle(
     resolveCircle(p, r, boxes, RESOLVE_ITERATIONS);
   }
   return { x: p.x, y: from.y + delta.y, z: p.z };
+}
+
+/** Distance (XZ) from point (x, z) to the footprint of box `b` (0 inside). */
+export function distToBox(b: Box, x: number, z: number): number {
+  const dx = x < b.min.x ? b.min.x - x : x > b.max.x ? x - b.max.x : 0;
+  const dz = z < b.min.z ? b.min.z - z : z > b.max.z ? z - b.max.z : 0;
+  return Math.sqrt(dx * dx + dz * dz);
+}
+
+/** Squared distance from (px, pz) to segment (ax, az)-(bx, bz). */
+function pointSegDist2(px: number, pz: number, ax: number, az: number, bx: number, bz: number): number {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const l2 = dx * dx + dz * dz;
+  let t = l2 > 1e-12 ? ((px - ax) * dx + (pz - az) * dz) / l2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const ex = ax + dx * t - px;
+  const ez = az + dz * t - pz;
+  return ex * ex + ez * ez;
+}
+
+/**
+ * Exact version of segmentClear against an explicit box list: true when a circle of `radius`
+ * swept from a to b (XZ) touches none of `boxes` (rounded corners, unlike segmentClear).
+ */
+export function capsuleClear(boxes: readonly Box[], a: Vec3, b: Vec3, radius: number): boolean {
+  const r2 = radius * radius;
+  const minX = Math.min(a.x, b.x) - radius;
+  const maxX = Math.max(a.x, b.x) + radius;
+  const minZ = Math.min(a.z, b.z) - radius;
+  const maxZ = Math.max(a.z, b.z) + radius;
+  for (const s of boxes) {
+    if (s.max.x < minX || s.min.x > maxX || s.max.z < minZ || s.min.z > maxZ) continue;
+    if (segmentHitsRect(a.x, a.z, b.x, b.z, s.min.x, s.min.z, s.max.x, s.max.z)) return false;
+    const da = distToBox(s, a.x, a.z);
+    if (da * da < r2) return false;
+    const db = distToBox(s, b.x, b.z);
+    if (db * db < r2) return false;
+    if (pointSegDist2(s.min.x, s.min.z, a.x, a.z, b.x, b.z) < r2) return false;
+    if (pointSegDist2(s.max.x, s.min.z, a.x, a.z, b.x, b.z) < r2) return false;
+    if (pointSegDist2(s.min.x, s.max.z, a.x, a.z, b.x, b.z) < r2) return false;
+    if (pointSegDist2(s.max.x, s.max.z, a.x, a.z, b.x, b.z) < r2) return false;
+  }
+  return true;
 }
 
 /** Like pushOut, but against an explicit list of boxes. Returns the corrected position (y kept). */
