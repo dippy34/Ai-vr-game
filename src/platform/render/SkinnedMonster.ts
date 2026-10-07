@@ -101,6 +101,14 @@ export class SkinnedMonster implements CatchPoser {
           m.frustumCulled = false;
         }
         m.castShadow = m.receiveShadow = false;
+        // COLOR_0 holds shader masks, not colors (R thinness, G wetness, B cavity: see
+        // art/blender/monster.py). GLTFLoader switches vertexColors on for it, which tints the skin.
+        for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+          if (mat?.vertexColors) {
+            mat.vertexColors = false;
+            mat.needsUpdate = true;
+          }
+        }
       }
     });
 
