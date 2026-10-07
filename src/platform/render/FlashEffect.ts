@@ -112,8 +112,10 @@ export class FlashEffect {
       THREE.MathUtils.degToRad(RENDER.flashAngle), RENDER.flashPenumbra, 2);
     this.spot.name = 'flashSpot';
     this.cookie = flashCookie();
-    this.spot.map = this.cookie;
-    this.spot.castShadow = true;
+    // `?shadows=0` (or RENDER.flashShadows = false): a plain spot, no shadow map, no cookie.
+    const shadows = RENDER.flashShadows && (typeof location === 'undefined' || new URLSearchParams(location.search).get('shadows') !== '0');
+    this.spot.map = shadows ? this.cookie : null;
+    this.spot.castShadow = shadows;
     const sh = this.spot.shadow;
     sh.camera.near = SHADOW_NEAR;
     sh.bias = -0.0006;

@@ -335,6 +335,7 @@ export class GameRenderer implements IGameRenderer {
    */
   private warmShadowPrograms(): void {
     const r = this.ctx.renderer;
+    if (!this.flashFx.spot.castShadow) return;
     const culled: THREE.Object3D[] = [];
     this.ctx.scene.traverse((o) => {
       if (o.castShadow && o.frustumCulled) {

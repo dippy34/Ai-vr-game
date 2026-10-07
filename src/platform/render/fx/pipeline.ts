@@ -3,7 +3,7 @@
  * post-processing passes there: three renders each eye straight into the XR framebuffer).
  *
  * installShaderFx() patches three's shared shader chunks once, before anything compiles:
- *  - Filmic tone mapping (CustomToneMapping = AgX with a contrast "look", see TONE below).
+ *  - Filmic tone mapping (CustomToneMapping: AgX-style with a contrast look, see TONE below).
  *  - Fog: the scene's linear THREE.Fog stays the hard limit (fully fogged by fogFar, which the
  *    level's fog culling relies on) and is joined by exponential height fog (denser near the floor)
  *    whose density drifts slowly (cheap analytic noise at the view ray's midpoint; the density is
@@ -53,36 +53,23 @@ varying vec3 vMuteView;
 `;
 
 /**
- * AgX (three's constants) followed by a look in display space: contrast around middle grey with a
- * deeper toe (darkness stays dark), a little saturation back (AgX desaturates), and a shoulder
- * that rolls a burnt-out flash hotspot to white without hue skews. Measured against ACES and plain
- * AgX on the house at night (ACES crushed the dark-adapted range to black and turned flash-lit
- * wood orange; plain AgX lifted the blacks to grey).
+ * Filmic curve: AgX's colour handling (inset / outset matrices: highlights roll to white without
+ * hue skews) around its sigmoid with a contrast look (deeper toe so darkness stays dark), the
+ * sigmoid fitted by a rational function of linear light so it needs no log2 / pow per pixel
+ * (fit to log2 encode -> AgX polynomial -> pow(2.2 * 1.1); within ~2/255 of it over 16 stops).
+ * Then a little saturation back (AgX desaturates). Chosen over ACES, which crushed the
+ * dark-adapted range to black and turned flash-lit wood orange, and plain AgX (grey blacks).
  */
 const TONE = /* glsl */ `
-vec3 muteAgxContrast( vec3 x ) {
-	vec3 x2 = x * x;
-	vec3 x4 = x2 * x2;
-	return + 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
-}
 vec3 CustomToneMapping( vec3 color ) {
-	// AgX inset folded into the sRGB -> Rec.2020 conversion (one matrix).
+	// AgX inset folded into the sRGB -> Rec.2020 conversion; outset folded into Rec.2020 -> sRGB.
 	const mat3 MUTE_AGX_IN = mat3(
 		vec3( 0.544812, 0.140419, 0.088817 ), vec3( 0.373797, 0.754108, 0.178860 ), vec3( 0.081381, 0.105397, 0.732315 ) );
-	const mat3 AgXOutsetMatrix = mat3(
-		vec3( 1.1271005818144368, - 0.1413297634984383, - 0.14132976349843826 ),
-		vec3( - 0.11060664309660323, 1.157823702216272, - 0.11060664309660294 ),
-		vec3( - 0.016493938717834573, - 0.016493938717834257, 1.2519364065950405 ) );
-	const mat3 LINEAR_REC2020_TO_LINEAR_SRGB_M = mat3(
-		vec3( 1.6605, - 0.1246, - 0.0182 ), vec3( - 0.5876, 1.1329, - 0.1006 ), vec3( - 0.0728, - 0.0083, 1.1187 ) );
-	const float AgxMinEv = - 12.47393;
-	const float AgxMaxEv = 4.026069;
-	color = MUTE_AGX_IN * ( color * toneMappingExposure );
-	color = clamp( ( log2( max( color, 1e-10 ) ) - AgxMinEv ) / ( AgxMaxEv - AgxMinEv ), 0.0, 1.0 );
-	color = AgXOutsetMatrix * muteAgxContrast( color );
-	// Linearize with the look's contrast power folded in (power = toe depth / contrast).
-	color = LINEAR_REC2020_TO_LINEAR_SRGB_M * pow( max( color, 0.0 ), vec3( 2.2 * MUTE_TONE_POWER ) );
-	// A little saturation back (AgX desaturates).
+	const mat3 MUTE_AGX_OUT = mat3(
+		vec3( 1.964885, - 0.299376, - 0.164401 ), vec3( - 0.855947, 1.326398, - 0.238200 ), vec3( - 0.108837, - 0.027022, 1.402501 ) );
+	vec3 x = max( MUTE_AGX_IN * ( color * toneMappingExposure ), 0.0 );
+	x = ( x * ( 1.02233 * x + 2.84277e-6 ) ) / ( x * ( x + 0.769380 ) + 0.0158217 );
+	color = MUTE_AGX_OUT * x;
 	float lumaT = dot( color, vec3( 0.2126, 0.7152, 0.0722 ) );
 	return clamp( lumaT + MUTE_TONE_SATURATION * ( color - lumaT ), 0.0, 1.0 );
 }
@@ -142,12 +129,13 @@ const FOG_FRAGMENT = /* glsl */ `
 	#else
 		float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
 	#endif
-	float fogLen = max( length( vMuteView ), 1e-4 );
 	float fogDens = vFogDens;
-	fogFactor = max( fogFactor, 1.0 - exp( - fogDens * fogLen ) );
+	// Extinction over the view depth (like three's own fog: no per-pixel sqrt).
+	fogFactor = max( fogFactor, 1.0 - exp( - fogDens * vFogDepth ) );
 	gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
 	#ifdef OPAQUE
 	if ( muteFx.flashPos.w > 0.0 && fogDens > 0.0 ) {
+		float fogLen = max( length( vMuteView ), 1e-4 );
 		// Single scattering of the flash along the view ray: integral of 1 / dist^2 to the light.
 		// World-space ray camera -> fragment (viewMatrix is orthonormal: inverse rotation = transpose).
 		vec3 fv = ( vec4( vMuteView, 0.0 ) * viewMatrix ).xyz / fogLen;
@@ -247,9 +235,7 @@ export function installShaderFx(): void {
   chunks.fog_fragment = FOG_FRAGMENT;
   chunks.dithering_pars_fragment = DITHERING_PARS_FRAGMENT;
   chunks.dithering_fragment = DITHERING_FRAGMENT;
-  const tone = TONE
-    .replace(/MUTE_TONE_POWER/g, RENDER.tonePower.toFixed(4))
-    .replace(/MUTE_TONE_SATURATION/g, RENDER.toneSaturation.toFixed(4));
+  const tone = TONE.replace(/MUTE_TONE_SATURATION/g, RENDER.toneSaturation.toFixed(4));
   patchChunk('tonemapping_pars_fragment', (s) => s.replace(/vec3 CustomToneMapping\( vec3 color \) \{ return color; \}/, tone));
   // Light loops: no BRDF / shadow / cookie work for lights that don't reach this fragment.
   patchChunk('lights_fragment_begin', (s) => s

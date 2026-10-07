@@ -272,10 +272,9 @@ export const RENDER = {
       glare: true,
     },
   },
-  /** Filmic tone mapping (AgX + look): exposure, toe/contrast power and saturation. */
+  /** Filmic tone mapping (AgX-style curve, fx/pipeline): exposure and saturation. */
   exposure: 1.5,
-  tonePower: 1.1,
-  toneSaturation: 1.08,
+  toneSaturation: 1.15,
   /**
    * Faint ambient light so the world isn't 100% black (eyes "adjusted to the dark"): fraction of a
    * surface's colour, scene-linear (before exposure and the tone curve, which crushes the deepest
@@ -306,6 +305,8 @@ export const RENDER = {
   flashAngle: 56,
   flashPenumbra: 0.75,
   flashBounce: 2.0,
+  /** The flash casts soft shadows (map rendered only while it is lit) through a beam cookie. */
+  flashShadows: true as boolean,
   /**
    * WebXR eye-buffer size relative to the browser's recommended one (Quest: fill rate is the
    * bottleneck with per-pixel lights; 0.9 = 19% fewer pixels, barely visible with MSAA on).
