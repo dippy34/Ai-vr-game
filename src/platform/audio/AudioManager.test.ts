@@ -315,6 +315,14 @@ describe('AudioManager with a strict fake WebAudio', () => {
       st.monster.speed = st.monster.mode === 'chase' ? 3.1 : st.monster.mode === 'feeding' ? 0 : 1.2;
       st.monster.alert = (Math.sin(f / 100) + 1) / 2;
       st.monster.position.x = 10 * Math.cos(f / 300);
+      // Body language: every gait / posture / act (act sounds, crawl knocks, creeping steps).
+      st.monster.gait = (['still', 'creep', 'walk', 'run'] as const)[Math.floor(f / 50) % 4];
+      st.monster.posture = (['tall', 'duck', 'crawl'] as const)[Math.floor(f / 130) % 3];
+      const act = (['none', 'listen', 'sniff', 'search', 'sweep', 'lurk', 'climb'] as const)[Math.floor(f / 90) % 7];
+      if (act !== st.monster.act) {
+        st.monster.act = act;
+        st.monster.actStart = st.time;
+      }
       st.players.a.pose.head.position.x += 2.5 * dt; // walking remote
       st.players.b.pose.head.position.z += 3.3 * dt; // sprinting remote
       if (f === 72 * 10) st.players.a.status = 'caught';
