@@ -155,9 +155,11 @@ const FOG_FRAGMENT = /* glsl */ `
 		float fI = ( atan( ( fogLen + fb ) / fh ) - atan( fb / fh ) ) / fh;
 		// Inside the cone? (tested a little past the ray's closest approach to the flash)
 		vec3 fq = fm + fv * min( clamp( - fb, 0.0, fogLen ) + 0.7, fogLen );
-		float fc = dot( fq, muteFx.flashDir.xyz ) / max( length( fq ), 1e-4 );
-		float cone = smoothstep( muteFx.flashDir.w - 0.2, muteFx.flashDir.w + 0.15, fc );
-		vec3 scatter = muteFx.haze.rgb * ( muteFx.haze.w * muteFx.flashPos.w * fogDens * fI * cone );
+		vec3 fqn = fq / max( length( fq ), 1e-4 );
+		float cone = smoothstep( muteFx.flashDir.w - 0.2, muteFx.flashDir.w + 0.15, dot( fqn, muteFx.flashDir.xyz ) );
+		// Forward-scattering haze (Mie-like): a flash aimed at you glows, your own barely veils.
+		float phase = 0.55 + 1.1 * pow( 0.5 - 0.5 * dot( fqn, fv ), 3.0 );
+		vec3 scatter = muteFx.haze.rgb * ( muteFx.haze.w * muteFx.flashPos.w * fogDens * fI * cone * phase );
 		gl_FragColor.rgb = 1.0 - ( 1.0 - gl_FragColor.rgb ) * exp( - scatter );
 	}
 	#endif

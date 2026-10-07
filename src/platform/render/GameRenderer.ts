@@ -317,6 +317,7 @@ export class GameRenderer implements IGameRenderer {
     this.dynamic.traverse((o) => { if (!o.visible) { hidden.push(o); o.visible = true; } });
     try {
       this.ctx.renderer.compile(this.ctx.scene, this.ctx.camera);
+      this.warmShadowPrograms();
     } catch {
       // compile() is an optimization only.
     }
@@ -324,6 +325,24 @@ export class GameRenderer implements IGameRenderer {
     this.flashFx.setWarmupVisible(false);
     this.jumpscare.setWarmupVisible(false);
     this.glare.setWarmupVisible(false);
+  }
+
+  /**
+   * compile() doesn't build the shadow pass's depth programs (static / skinned / instanced): render
+   * the flash's shadow map once with every caster in it, so the first flash doesn't compile them.
+   */
+  private warmShadowPrograms(): void {
+    const r = this.ctx.renderer;
+    const culled: THREE.Object3D[] = [];
+    this.ctx.scene.traverse((o) => {
+      if (o.castShadow && o.frustumCulled) {
+        culled.push(o);
+        o.frustumCulled = false;
+      }
+    });
+    r.shadowMap.needsUpdate = true;
+    r.shadowMap.render([this.flashFx.spot], this.ctx.scene, this.ctx.camera);
+    for (const o of culled) o.frustumCulled = true;
   }
 
   // -------------------------------------------------------------------------------------------

@@ -150,7 +150,7 @@ export const RENDER = {
       shadowMapSize: 1024,
       shadowRadius: 2.6,
       grain: 0.06,
-      vignette: 0.42,
+      vignette: 0.32,
       fringe: 0.6,
       fogNoise: 0.5,
       motes: 520,
@@ -159,10 +159,10 @@ export const RENDER = {
   },
   /** Filmic tone mapping (AgX + look): exposure, toe/contrast power and saturation. */
   exposure: 1.5,
-  tonePower: 1.12,
+  tonePower: 1.1,
   toneSaturation: 1.15,
   /** Faint ambient light so the world isn't 100% black (eyes "adjusted to the dark"). */
-  ambientIntensity: 0.05,
+  ambientIntensity: 0.08,
   /** Fog makes far things vanish into black: fully fogged by fogFar (the level culls beyond it). */
   fogNear: 1.5,
   fogFar: 11,
@@ -172,7 +172,7 @@ export const RENDER = {
   fogGroundBoost: 1.4,
   /** Flash light scattered by the haze (output-space colour, strength). */
   hazeColor: [0.78, 0.84, 1.0] as readonly [number, number, number],
-  hazeStrength: 0.09,
+  hazeStrength: 0.07,
   /** Seconds the flash light takes to fade. */
   flashDuration: 0.22,
   /** Seconds the frozen afterimages from a flash take to fade. */
@@ -183,10 +183,10 @@ export const RENDER = {
    * Flash spot light: peak intensity (candela-like; inverse-square falloff, decay 2), cone half
    * angle (deg) and penumbra. The omni "bounce" sits where the beam first hits a wall.
    */
-  flashPeak: 34,
+  flashPeak: 40,
   flashAngle: 56,
   flashPenumbra: 0.75,
-  flashBounce: 1.5,
+  flashBounce: 2.0,
   /**
    * WebXR eye-buffer size relative to the browser's recommended one (Quest: fill rate is the
    * bottleneck with per-pixel lights; 0.9 = 19% fewer pixels, barely visible with MSAA on).
