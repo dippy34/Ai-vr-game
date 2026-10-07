@@ -19,3 +19,26 @@ cold light shafts from the ceiling vents. You're on the main catwalk; it waits a
 The catwalk chase: look back, and it's coming.
 
 ![Echo Halls, chase](ch2_echo_halls_chase.jpg)
+
+## Chapter 3: The Nest
+The flooded tunnel. Waist-deep black water, and something pale gliding under the surface ahead.
+
+![Flooded tunnel](ch3_nest_tunnel.jpg)
+
+The heist: it's asleep in its nest of torn coats, surrounded by the recorders it uses as bait and
+the kids' things. The override keycard glows on a crate right beside its head.
+
+![The nest](ch3_nest_den.jpg)
+
+## Chapter 4: The Quiet Room
+The vault door, seen from the control room: "QUIET ROOM", claw marks gouged into the steel.
+
+![Quiet Room vault](ch4_quiet_room_vault.jpg)
+
+The "Feedback" ending: every speaker blasting at once while the Echo fires into it.
+
+![Feedback boss fight](ch4_quiet_room_boss.jpg)
+
+These are 960×540 previews. For full 1920×1080 renders, run each script without `preview` (see
+`art/concept/README.md`). Ideas for a next pass: make the swimming monster in the tunnel shot
+more readable, and give the boss-fight players real character models.
