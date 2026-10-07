@@ -14,7 +14,6 @@ import {
   floorTexture,
   fuseBoxTexture,
   glowTexture,
-  moonPatchTexture,
   shaftTexture,
   wallpaperTexture,
   windowTexture,
@@ -23,7 +22,9 @@ import {
 import { aabbOf, damp, disposeTree, rayAabb, unitCapsule, type Aabb } from './util';
 import type { ModelLibrary } from './assets';
 import type { SurfaceLibrary } from './SurfaceTextures';
-import { roomAt } from '../../core/level';
+import { roomAt, WALL_HEIGHT } from '../../core/level';
+import { moonCookieTexture, moonPatchMaterial, moonShaftMaterial, MOON_ELEVATION, type MoonWindow } from './fx/moonlight';
+import { aoFieldTexture, buildAoField, useAoField } from './fx/roomAO';
 import { StaticBatcher } from './batch';
 import { DecalSet } from './Decals';
 import { DressingSet } from './Dressing';
@@ -940,6 +941,12 @@ const STATIC_CHUNK = 7;
 
 const _cc = new THREE.Vector3();
 
+/** Level meshes that receive the flash's shadows but never cast (floors are below everything). */
+const SHADOW_RECEIVE_ONLY = new Set(['floors', 'floors-tile', 'ceilings', 'trim']);
+
+let cookie: THREE.Texture | null = null;
+const moonCookie = (): THREE.Texture => (cookie ??= moonCookieTexture());
+
 /** Rooms that get the second (striped) wallpaper; the rest get the damask. */
 const WALLPAPER_B_ROOMS = new Set(['hallway', 'foyer', 'study', 'kitchen', 'bathroom', 'storage']);
 /** Rooms with tiled floors (the rest are hardwood). */
@@ -1021,6 +1028,10 @@ export class LevelView {
   readonly decals: DecalSet | null;
   /** Merged static Blender models (chunked; see STATIC_CHUNK). */
   private readonly statics = new THREE.Group();
+  /** Windows the moonlight comes through (for the dust motes). */
+  readonly moonWindows: MoonWindow[] = [];
+  /** Contact / edge AO field of this level (fx/roomAO). */
+  private readonly aoTexture: THREE.DataTexture;
 
   constructor(level: LevelData, models: ModelLibrary | null = null, surfaces: SurfaceLibrary | null = null) {
     this.group.name = 'level';
@@ -1135,7 +1146,7 @@ export class LevelView {
       if (floorBoxes.length && !overFloor(floorBoxes, x, z)) return false;
       return !insideAny(wallBoxes, { x, y: 1, z });
     };
-    const elev = THREE.MathUtils.degToRad(38);
+    const elev = MOON_ELEVATION;
     const radiatorSpots: { wi: number; pane: THREE.Vector3; inward: THREE.Vector3; yaw: number; W: number; H: number }[] = [];
     for (const [wi, win] of level.windows.entries()) {
       // Boarded windows only leak a little light between the planks.
@@ -1185,6 +1196,7 @@ export class LevelView {
       }
       const pg = new THREE.PlaneGeometry(W, H).applyMatrix4(m);
       panes.add(pg, 0xffffff);
+      this.moonWindows.push({ center: pane.clone(), inward: inward.clone(), width: W, height: H, light });
 
       // Shaft: extrude the pane rectangle along the moonlight direction down to the floor.
       const d = inward.clone().multiplyScalar(Math.cos(elev)).add(new THREE.Vector3(0, -Math.sin(elev), 0));
@@ -1285,10 +1297,9 @@ export class LevelView {
       sg.setAttribute('uv', new THREE.Float32BufferAttribute(shaftUv, 2));
       sg.setAttribute('color', new THREE.Float32BufferAttribute(shaftCol, 3));
       sg.setIndex(shaftIdx);
+      sg.computeVertexNormals();
       sg.computeBoundingSphere();
-      const shafts = new THREE.Mesh(sg, new THREE.MeshBasicMaterial({
-        map: shaftTexture(), color: 0x151d30, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
-      }));
+      const shafts = new THREE.Mesh(sg, moonShaftMaterial(shaftTexture(), 0x131a2c));
       shafts.name = 'moonShafts';
       shafts.renderOrder = 2;
       this.group.add(shafts);
@@ -1299,13 +1310,26 @@ export class LevelView {
       pgeo.setIndex(patchIdx);
       pgeo.computeVertexNormals();
       pgeo.computeBoundingSphere();
-      const patches = new THREE.Mesh(pgeo, new THREE.MeshBasicMaterial({
-        map: moonPatchTexture(), color: 0x2f3d5c, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
-      }));
+      const patches = new THREE.Mesh(pgeo, moonPatchMaterial(moonCookie(), 0x34446a));
       patches.name = 'moonPatches';
       patches.renderOrder = 1;
       this.group.add(patches);
     }
+    // The flash's shadows: solid things cast (walls too, so it doesn't light the next room through
+    // them), every lit surface receives; glows, glass, light pools and alpha decals stay out.
+    this.group.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const lit = mats.every((mt) => !(mt instanceof THREE.MeshBasicMaterial));
+      const solid = mats.every((mt) => !mt.transparent);
+      mesh.receiveShadow = lit;
+      mesh.castShadow = lit && solid && !SHADOW_RECEIVE_ONLY.has(mesh.name);
+    });
+    // Corner / contact AO for walls, floors, ceilings.
+    const field = buildAoField(level);
+    this.aoTexture = aoFieldTexture(field);
+    useAoField(this.aoTexture, field, WALL_HEIGHT);
     this.group.updateMatrixWorld(true);
   }
 
@@ -1337,5 +1361,7 @@ export class LevelView {
     this.fuseBox.dispose();
     this.door.dispose();
     disposeTree(this.group);
+    useAoField(null, null, WALL_HEIGHT);
+    this.aoTexture.dispose();
   }
 }

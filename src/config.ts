@@ -122,17 +122,71 @@ export const NET = {
 } as const;
 
 export const RENDER = {
+  /**
+   * Visual quality tier. 'auto' = 'quest' while a WebXR session presents, else 'desktop'
+   * (`?quality=quest` forces a tier for testing). Tiers only change runtime values, never shaders.
+   */
+  quality: 'auto' as 'auto' | 'quest' | 'desktop',
+  tiers: {
+    quest: {
+      /** Flash shadow map (px, square); rendered only while the flash is lit. */
+      shadowMapSize: 512,
+      /** PCF blur radius in shadow-map texels. */
+      shadowRadius: 2.2,
+      /** Film grain amount (0 = none). Kept low in VR: per-eye noise shimmers in stereo. */
+      grain: 0.02,
+      /** Edge darkening (VR lenses already vignette). */
+      vignette: 0.12,
+      /** Lateral colour fringe at the edges (0 = off). */
+      fringe: 0,
+      /** How much the fog density drifts (0..1). */
+      fogNoise: 0.35,
+      /** Dust motes around the viewer (lit by moon shafts and the flash). */
+      motes: 260,
+      /** Lens glare sprite on flashes aimed at you. */
+      glare: true,
+    },
+    desktop: {
+      shadowMapSize: 1024,
+      shadowRadius: 2.6,
+      grain: 0.06,
+      vignette: 0.42,
+      fringe: 0.6,
+      fogNoise: 0.5,
+      motes: 520,
+      glare: true,
+    },
+  },
+  /** Filmic tone mapping (AgX + look): exposure, toe/contrast power and saturation. */
+  exposure: 1.5,
+  tonePower: 1.12,
+  toneSaturation: 1.15,
   /** Faint ambient light so the world isn't 100% black (eyes "adjusted to the dark"). */
-  ambientIntensity: 0.035,
-  /** Fog makes far things vanish into black. */
+  ambientIntensity: 0.05,
+  /** Fog makes far things vanish into black: fully fogged by fogFar (the level culls beyond it). */
   fogNear: 1.5,
   fogFar: 11,
+  /** Exponential height fog on top: base density (1/m), its falloff with height, floor boost. */
+  fogDensity: 0.07,
+  fogHeightFalloff: 1.6,
+  fogGroundBoost: 1.4,
+  /** Flash light scattered by the haze (output-space colour, strength). */
+  hazeColor: [0.78, 0.84, 1.0] as readonly [number, number, number],
+  hazeStrength: 0.09,
   /** Seconds the flash light takes to fade. */
   flashDuration: 0.22,
   /** Seconds the frozen afterimages from a flash take to fade. */
   afterimageDuration: 2.2,
   /** Max distance (m) from the flash at which things get an afterimage. */
   flashRange: 14,
+  /**
+   * Flash spot light: peak intensity (candela-like; inverse-square falloff, decay 2), cone half
+   * angle (deg) and penumbra. The omni "bounce" sits where the beam first hits a wall.
+   */
+  flashPeak: 34,
+  flashAngle: 56,
+  flashPenumbra: 0.75,
+  flashBounce: 1.5,
   /**
    * WebXR eye-buffer size relative to the browser's recommended one (Quest: fill rate is the
    * bottleneck with per-pixel lights; 0.9 = 19% fewer pixels, barely visible with MSAA on).

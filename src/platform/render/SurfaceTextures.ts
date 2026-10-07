@@ -15,6 +15,21 @@
 import * as THREE from 'three';
 import type { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { trimAfterUpload } from './assets';
+import { patchSurfaceMaterial } from './fx/roomAO';
+
+/**
+ * Roughness remap per set (roughness = map * a + b): varnished wood and glazed tiles catch the
+ * flash as highlights, paper and plaster stay matte. Measured map means: wood floor 0.58, tiles
+ * 0.33 (grout ~1), wallpaper 0.79, plaster 0.86, trim 0.44.
+ */
+const ROUGHNESS: Record<string, readonly [number, number]> = {
+  wood_floor: [1.0, -0.2],
+  tile_floor: [0.9, -0.06],
+  wallpaper_a: [1.0, 0.04],
+  wallpaper_b: [1.0, 0.04],
+  plaster_ceiling: [1.0, 0.08],
+  wood_trim: [1.0, -0.1],
+};
 
 export interface SurfaceSet {
   name: string;
@@ -100,7 +115,8 @@ export class SurfaceLibrary {
 
   /**
    * One shared material per set. Vertex colors stay on so the level's per-room tint hints still
-   * add a little variety. roughness/metalness are 1 so the ORM map is used as-is.
+   * add a little variety. roughness/metalness are 1 so the ORM map is used as-is (roughness then
+   * remapped per set, see ROUGHNESS).
    */
   material(name: string): THREE.MeshStandardMaterial | null {
     const cached = this.materials.get(name);
@@ -119,6 +135,8 @@ export class SurfaceLibrary {
     });
     m.name = `surface_${name}`;
     m.userData.shared = true;
+    // Room corner / contact AO + the roughness remap (fx/roomAO).
+    patchSurfaceMaterial(m, ROUGHNESS[name] ?? [1, 0]);
     this.materials.set(name, m);
     return m;
   }
