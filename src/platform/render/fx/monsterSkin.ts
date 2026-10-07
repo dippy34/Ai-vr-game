@@ -1,13 +1,16 @@
 /**
  * The monster's skin and keratin (teeth / claws), made to read as horribly alive under the flash:
- *  - Skin: physically based (MeshPhysicalMaterial) with a wet clearcoat whose wetness is patchy
- *    (procedural mask over the UVs: slick in places, tacky in others), plus a fake subsurface term
- *    added inside the light loop for every light that reaches the pixel:
+ *  - Skin: physically based (MeshPhysicalMaterial) with a wet clearcoat, plus a fake subsurface
+ *    term added inside the light loop for every light that reaches the pixel:
  *      wrap lighting (light bleeding past the terminator, tinted warm like blood under skin) and
- *      translucency (light through the thin parts, from behind: ears, fingers, the jaw flaps),
- *    where "thin" is a per-vertex value computed once from the bind pose (distance from the vertex
- *    to its main bone, so fingers / ears are thin, the torso and skull are not).
+ *      translucency (light through the thin parts, from behind: ear membranes, finger webbing).
  *  - Keratin: glossy, slightly yellowed, a little translucent at the tips.
+ *
+ * Per-vertex masks come from the model's COLOR_0 (art/blender/monster.py; linear 0..1):
+ *   R thinness (drives the subsurface), G wetness (mouth, gums, lips, sores: clearcoat + gloss,
+ *   joined by faint procedural slick patches elsewhere), B cavity (occludes light in creases).
+ * A model without them gets thinness from the bind pose (distance from each vertex to its main
+ * bone: fingers / ears thin, torso and skull not), no wet areas and no cavities.
  *
  * Applied from GameRenderer to the skinned monster instance (its own materials: the library's
  * source materials are left alone). Shadows: the monster casts and receives the flash's shadow.
@@ -38,7 +41,8 @@ const SKIN = {
 
 /** GLSL added to the light loop of these materials (after each light's normal BRDF). */
 const SSS_FUNC = /* glsl */ `
-varying float vThin;
+varying vec3 vSkinMask;
+#define vThin vSkinMask.r
 uniform vec3 skinScatter;
 uniform vec2 skinSss;
 void muteSkinLight( const in IncidentLight L, const in vec3 N, const in vec3 V, const in vec3 albedo, inout ReflectedLight rl ) {
@@ -71,8 +75,8 @@ function patchSkinShader(mat: THREE.MeshPhysicalMaterial, scatter: THREE.Color, 
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float thin;\nvarying float vThin;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvThin = thin;');
+      .replace('#include <common>', '#include <common>\nattribute vec4 skinMask;\nvarying vec3 vSkinMask;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSkinMask = skinMask.rgb;');
     // The light loop with the skin term after each light (three's chunk, already patched by fx/pipeline).
     const loop = THREE.ShaderChunk.lights_fragment_begin.replace(
       /if \( directLight\.visible \) RE_Direct\( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight \);/g,
@@ -81,19 +85,24 @@ function patchSkinShader(mat: THREE.MeshPhysicalMaterial, scatter: THREE.Color, 
     let fs = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${SSS_FUNC}\n${wetUv ? wetMaskGlsl() : ''}`)
       .replace('#include <lights_fragment_begin>', loop);
-    if (wetUv) {
-      // Patchy wetness: slick streaks and dry patches (clearcoat amount and roughness).
-      fs = fs.replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
+    // Wetness: the mask's wet areas, plus faint slick patches over the rest of the skin.
+    fs = fs.replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
 	#ifdef USE_CLEARCOAT
 	{
-		vec2 wq = vMapUv * vec2( 9.0, 23.0 );
-		float wet = muteWetNoise( wq ) * 0.65 + muteWetNoise( wq * 2.7 + 3.1 ) * 0.35;
-		wet = smoothstep( 0.32, 0.75, wet );
-		material.clearcoat *= mix( 0.25, 1.0, wet );
-		material.clearcoatRoughness = mix( 0.42, material.clearcoatRoughness, wet );
+		float wet = vSkinMask.g;
+		${wetUv ? `vec2 wq = vMapUv * vec2( 9.0, 23.0 );
+		float patches = smoothstep( 0.35, 0.78, muteWetNoise( wq ) * 0.65 + muteWetNoise( wq * 2.7 + 3.1 ) * 0.35 );
+		wet = max( wet, patches * 0.55 );` : ''}
+		material.clearcoat *= mix( 0.2, 1.0, wet );
+		material.clearcoatRoughness = mix( 0.4, material.clearcoatRoughness, wet );
+		material.roughness = mix( material.roughness, 0.22, wet * 0.6 );
 	}
-	#endif`);
-    }
+	#endif`)
+      // Cavities (creases, folds, under the ribs) catch less of every light.
+      .replace('#include <aomap_fragment>', `#include <aomap_fragment>
+	reflectedLight.indirectDiffuse *= vSkinMask.b;
+	reflectedLight.directDiffuse *= mix( 1.0, vSkinMask.b, 0.7 );
+	reflectedLight.directSpecular *= vSkinMask.b;`);
     shader.fragmentShader = fs;
   };
   mat.customProgramCacheKey = () => `mute-skin-${wetUv ? 'wet' : 'dry'}`;
@@ -173,8 +182,11 @@ function skinFrom(src: THREE.MeshStandardMaterial): THREE.MeshPhysicalMaterial {
 function keratinFrom(src: THREE.MeshStandardMaterial): THREE.MeshPhysicalMaterial {
   const m = new THREE.MeshPhysicalMaterial({
     map: src.map,
+    normalMap: src.normalMap,
+    normalScale: src.normalScale.clone(),
+    roughnessMap: src.roughnessMap,
     color: src.color.clone().multiply(new THREE.Color(1.0, 0.95, 0.84)),
-    roughness: Math.min(0.3, src.roughness ?? 0.3),
+    roughness: src.roughnessMap ? 0.7 : Math.min(0.3, src.roughness ?? 0.3),
     metalness: 0,
     clearcoat: 0.8,
     clearcoatRoughness: 0.06,
@@ -182,7 +194,7 @@ function keratinFrom(src: THREE.MeshStandardMaterial): THREE.MeshPhysicalMateria
     side: src.side,
   });
   m.name = 'monster_keratin_fx';
-  patchSkinShader(m, new THREE.Color(1.0, 0.72, 0.42), 0.25, 0.9, false);
+  patchSkinShader(m, new THREE.Color(1.0, 0.72, 0.42), 0.25, 1.2, false);
   return m;
 }
 
@@ -209,12 +221,20 @@ export function applyMonsterSkin(root: THREE.Object3D): void {
       made.set(src, next);
     }
     const geo = mesh.geometry;
-    if (!geo.getAttribute('thin')) {
-      const s = new THREE.Vector3().setFromMatrixScale(mesh.matrixWorld);
-      const thin = mesh.isSkinnedMesh ? computeThinness(mesh, (s.x + s.y + s.z) / 3) : new Float32Array(geo.getAttribute('position').count).fill(0.3);
-      // Keratin (teeth / claws) is thin by nature.
-      if (keratin) for (let i = 0; i < thin.length; i++) thin[i] = Math.max(thin[i], 0.6);
-      geo.setAttribute('thin', new THREE.BufferAttribute(thin, 1));
+    if (!geo.getAttribute('skinMask')) {
+      const masks = geo.getAttribute('color');
+      if (masks && masks.itemSize >= 3) {
+        // The model's COLOR_0 masks, read under another name (vertexColors stays off).
+        geo.setAttribute('skinMask', masks);
+      } else {
+        const s = new THREE.Vector3().setFromMatrixScale(mesh.matrixWorld);
+        const n = geo.getAttribute('position').count;
+        const thin = mesh.isSkinnedMesh ? computeThinness(mesh, (s.x + s.y + s.z) / 3) : new Float32Array(n).fill(0.3);
+        const m4 = new Float32Array(n * 4);
+        // Keratin (teeth / claws) is thin by nature; no wet areas, no cavities.
+        for (let i = 0; i < n; i++) m4.set([keratin ? Math.max(thin[i], 0.6) : thin[i], 0, 1, 1], i * 4);
+        geo.setAttribute('skinMask', new THREE.BufferAttribute(m4, 4));
+      }
     }
     mesh.material = next;
   });
