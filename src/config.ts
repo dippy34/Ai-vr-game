@@ -275,7 +275,7 @@ export const RENDER = {
   /** Filmic tone mapping (AgX + look): exposure, toe/contrast power and saturation. */
   exposure: 1.5,
   tonePower: 1.1,
-  toneSaturation: 1.15,
+  toneSaturation: 1.08,
   /**
    * Faint ambient light so the world isn't 100% black (eyes "adjusted to the dark"): fraction of a
    * surface's colour, scene-linear (before exposure and the tone curve, which crushes the deepest

@@ -6,7 +6,8 @@
  *  - Filmic tone mapping (CustomToneMapping = AgX with a contrast "look", see TONE below).
  *  - Fog: the scene's linear THREE.Fog stays the hard limit (fully fogged by fogFar, which the
  *    level's fog culling relies on) and is joined by exponential height fog (denser near the floor)
- *    whose density drifts slowly (cheap analytic noise at the view ray's midpoint). While the camera
+ *    whose density drifts slowly (cheap analytic noise at the view ray's midpoint; the density is
+ *    computed per vertex, only the extinction per pixel). While the camera
  *    flash is lit, the haze along each view ray scatters its light (closed-form single scattering of
  *    a point light, masked by the flash cone): the flash "reveals" the air.
  *  - Finish (last thing every mesh material does): per-eye vignette from the view direction, film
@@ -65,41 +66,40 @@ vec3 muteAgxContrast( vec3 x ) {
 	return + 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
 }
 vec3 CustomToneMapping( vec3 color ) {
-	const mat3 LINEAR_SRGB_TO_LINEAR_REC2020_M = mat3(
-		vec3( 0.6274, 0.0691, 0.0164 ), vec3( 0.3293, 0.9195, 0.0880 ), vec3( 0.0433, 0.0113, 0.8956 ) );
-	const mat3 LINEAR_REC2020_TO_LINEAR_SRGB_M = mat3(
-		vec3( 1.6605, - 0.1246, - 0.0182 ), vec3( - 0.5876, 1.1329, - 0.1006 ), vec3( - 0.0728, - 0.0083, 1.1187 ) );
-	const mat3 AgXInsetMatrix = mat3(
-		vec3( 0.856627153315983, 0.137318972929847, 0.11189821299995 ),
-		vec3( 0.0951212405381588, 0.761241990602591, 0.0767994186031903 ),
-		vec3( 0.0482516061458583, 0.101439036467562, 0.811302368396859 ) );
+	// AgX inset folded into the sRGB -> Rec.2020 conversion (one matrix).
+	const mat3 MUTE_AGX_IN = mat3(
+		vec3( 0.544812, 0.140419, 0.088817 ), vec3( 0.373797, 0.754108, 0.178860 ), vec3( 0.081381, 0.105397, 0.732315 ) );
 	const mat3 AgXOutsetMatrix = mat3(
 		vec3( 1.1271005818144368, - 0.1413297634984383, - 0.14132976349843826 ),
 		vec3( - 0.11060664309660323, 1.157823702216272, - 0.11060664309660294 ),
 		vec3( - 0.016493938717834573, - 0.016493938717834257, 1.2519364065950405 ) );
+	const mat3 LINEAR_REC2020_TO_LINEAR_SRGB_M = mat3(
+		vec3( 1.6605, - 0.1246, - 0.0182 ), vec3( - 0.5876, 1.1329, - 0.1006 ), vec3( - 0.0728, - 0.0083, 1.1187 ) );
 	const float AgxMinEv = - 12.47393;
 	const float AgxMaxEv = 4.026069;
-	color *= toneMappingExposure;
-	color = LINEAR_SRGB_TO_LINEAR_REC2020_M * color;
-	color = AgXInsetMatrix * color;
-	color = max( color, 1e-10 );
-	color = clamp( ( log2( color ) - AgxMinEv ) / ( AgxMaxEv - AgxMinEv ), 0.0, 1.0 );
-	color = muteAgxContrast( color );
-	// Look (display-encoded): power = contrast / toe depth, then saturation.
-	color = pow( max( color, 0.0 ), vec3( MUTE_TONE_POWER ) );
+	color = MUTE_AGX_IN * ( color * toneMappingExposure );
+	color = clamp( ( log2( max( color, 1e-10 ) ) - AgxMinEv ) / ( AgxMaxEv - AgxMinEv ), 0.0, 1.0 );
+	color = AgXOutsetMatrix * muteAgxContrast( color );
+	// Linearize with the look's contrast power folded in (power = toe depth / contrast).
+	color = LINEAR_REC2020_TO_LINEAR_SRGB_M * pow( max( color, 0.0 ), vec3( 2.2 * MUTE_TONE_POWER ) );
+	// A little saturation back (AgX desaturates).
 	float lumaT = dot( color, vec3( 0.2126, 0.7152, 0.0722 ) );
-	color = lumaT + MUTE_TONE_SATURATION * ( color - lumaT );
-	color = AgXOutsetMatrix * color;
-	color = pow( max( vec3( 0.0 ), color ), vec3( 2.2 ) );
-	color = LINEAR_REC2020_TO_LINEAR_SRGB_M * color;
-	return clamp( color, 0.0, 1.0 );
+	return clamp( lumaT + MUTE_TONE_SATURATION * ( color - lumaT ), 0.0, 1.0 );
 }
+`;
+
+const FOG_PARS_VERTEX = /* glsl */ `
+#ifdef USE_FOG
+	varying float vFogDepth;
+	varying float vFogDens;
+#endif
 `;
 
 const FOG_PARS_FRAGMENT = /* glsl */ `
 #ifdef USE_FOG
 	uniform vec3 fogColor;
 	varying float vFogDepth;
+	varying float vFogDens;
 	#ifdef FOG_EXP2
 		uniform float fogDensity;
 	#else
@@ -109,10 +109,28 @@ const FOG_PARS_FRAGMENT = /* glsl */ `
 #endif
 `;
 
+// Height-fog density along the view ray, per vertex (smooth: low frequency in space).
 const FOG_VERTEX = /* glsl */ `
 #ifdef USE_FOG
 	vFogDepth = - mvPosition.z;
 	vMuteView = mvPosition.xyz;
+	vFogDens = 0.0;
+	if ( muteFx.fog.x > 0.0 ) {
+		vec3 fogRayV = ( vec4( mvPosition.xyz, 0.0 ) * viewMatrix ).xyz;
+		// Mean of exp(-k * height) along the ray: analytic integral of the height falloff.
+		float hk = muteFx.fog.y;
+		float y0 = max( cameraPosition.y - muteFx.misc.y, 0.0 );
+		float y1 = max( cameraPosition.y + fogRayV.y - muteFx.misc.y, 0.0 );
+		float e0 = exp( - hk * y0 );
+		float e1 = exp( - hk * y1 );
+		float dy = y1 - y0;
+		float hMean = abs( dy ) > 0.02 ? ( e0 - e1 ) / ( hk * dy ) : 0.5 * ( e0 + e1 );
+		// Slowly drifting density at the ray's midpoint (three sines, no texture).
+		float t = muteFx.misc.x;
+		vec3 q = cameraPosition + fogRayV * 0.5;
+		float nz = sin( q.x * 1.37 + 0.6 * sin( q.z * 0.91 + t * 0.13 ) + t * 0.05 ) * sin( q.z * 1.13 + q.y * 1.9 - t * 0.07 );
+		vFogDens = muteFx.fog.x * ( 1.0 + muteFx.fog.z * hMean ) * ( 1.0 + muteFx.fog.w * nz );
+	}
 #endif
 `;
 
@@ -125,30 +143,14 @@ const FOG_FRAGMENT = /* glsl */ `
 		float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
 	#endif
 	float fogLen = max( length( vMuteView ), 1e-4 );
-	// World-space ray camera -> fragment (viewMatrix is orthonormal: inverse rotation = transpose).
-	vec3 fogRay = ( vec4( vMuteView, 0.0 ) * viewMatrix ).xyz;
-	float fogDens = 0.0;
-	if ( muteFx.fog.x > 0.0 ) {
-		// Mean of exp(-k * height) along the ray: analytic integral of the height falloff.
-		float hk = muteFx.fog.y;
-		float y0 = max( cameraPosition.y - muteFx.misc.y, 0.0 );
-		float y1 = max( cameraPosition.y + fogRay.y - muteFx.misc.y, 0.0 );
-		float e0 = exp( - hk * y0 );
-		float e1 = exp( - hk * y1 );
-		float dy = y1 - y0;
-		float hMean = abs( dy ) > 0.02 ? ( e0 - e1 ) / ( hk * dy ) : 0.5 * ( e0 + e1 );
-		// Slowly drifting density at the ray's midpoint (cheap: three sines, no texture).
-		float t = muteFx.misc.x;
-		vec3 q = cameraPosition + fogRay * 0.5;
-		float nz = sin( q.x * 1.37 + 0.6 * sin( q.z * 0.91 + t * 0.13 ) + t * 0.05 ) * sin( q.z * 1.13 + q.y * 1.9 - t * 0.07 );
-		fogDens = muteFx.fog.x * ( 1.0 + muteFx.fog.z * hMean ) * ( 1.0 + muteFx.fog.w * nz );
-		fogFactor = max( fogFactor, 1.0 - exp( - fogDens * fogLen ) );
-	}
+	float fogDens = vFogDens;
+	fogFactor = max( fogFactor, 1.0 - exp( - fogDens * fogLen ) );
 	gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
 	#ifdef OPAQUE
 	if ( muteFx.flashPos.w > 0.0 && fogDens > 0.0 ) {
 		// Single scattering of the flash along the view ray: integral of 1 / dist^2 to the light.
-		vec3 fv = fogRay / fogLen;
+		// World-space ray camera -> fragment (viewMatrix is orthonormal: inverse rotation = transpose).
+		vec3 fv = ( vec4( vMuteView, 0.0 ) * viewMatrix ).xyz / fogLen;
 		vec3 fm = cameraPosition - muteFx.flashPos.xyz;
 		float fb = dot( fm, fv );
 		float fh = sqrt( max( dot( fm, fm ) - fb * fb, 0.0625 ) );
@@ -187,8 +189,12 @@ const DITHERING_PARS_FRAGMENT = /* glsl */ `
 		float r2 = dot( ta, ta );
 		float vg = muteFx.post.y;
 		float fr = muteFx.post.z;
-		vec3 vig = 1.0 - vg * smoothstep( vec3( 0.05 + 0.14 * fr, 0.05, 0.05 - 0.04 * fr ), vec3( 1.9 + 0.5 * fr, 1.9, 1.9 - 0.45 * fr ), vec3( r2 ) );
-		c *= vig;
+		if ( fr > 0.0 ) {
+			// Lateral-colour fringe: red falls off a little wider, blue a little tighter.
+			c *= 1.0 - vg * smoothstep( vec3( 0.05 + 0.14 * fr, 0.05, 0.05 - 0.04 * fr ), vec3( 1.9 + 0.5 * fr, 1.9, 1.9 - 0.45 * fr ), vec3( r2 ) );
+		} else {
+			c *= 1.0 - vg * smoothstep( 0.05, 1.9, r2 );
+		}
 		vec2 fc = gl_FragCoord.xy + 5.588238 * mod( muteFx.post.w, 64.0 );
 		float n1 = muteIgn( fc );
 		float n2 = muteIgn( fc.yx + vec2( 37.0, 71.0 ) );
@@ -235,6 +241,7 @@ export function installShaderFx(): void {
   const chunks = THREE.ShaderChunk as unknown as Record<string, string>;
   chunks.common = chunks.common + GLSL_FX;
   patchChunk('project_vertex', (s) => `${s}\nvMuteView = mvPosition.xyz;\n`);
+  chunks.fog_pars_vertex = FOG_PARS_VERTEX;
   chunks.fog_vertex = FOG_VERTEX;
   chunks.fog_pars_fragment = FOG_PARS_FRAGMENT;
   chunks.fog_fragment = FOG_FRAGMENT;
