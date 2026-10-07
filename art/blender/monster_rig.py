@@ -1,9 +1,12 @@
 """
 Rig + animations for the Listener (helper for monster.py; build() is a no-op).
 
-Armature built from monster_anatomy.skeleton(); skin = Blender automatic (bone heat) weights,
-then cleaned per body-part label (no arm->thigh or finger->finger bleed), with hand-authored
-weights for the split jaw, the ears, teeth and claws.
+Armature built from monster_anatomy.skeleton(); skin weights are analytic (skin_weights): chain
+blending across bisector joint planes with per-joint, per-side blend widths, smooth root
+partitions at the shoulders and hips, finger-affinity knuckle splits, then hand-authored weights
+for the split jaw and the ears; teeth and nails copy the skin they are rooted in (bind_rigid).
+Stress poses (crawl, deep crouch, reach, grip with twisted wrists) render as previews so the
+deformation the procedural IK will cause can be checked.
 
 Animations are authored procedurally with a tiny FK/IK poser:
   * legs: foot-roll gait planner (planted feet slide back at exactly the locomotion speed, so the
@@ -104,64 +107,177 @@ def build_armature(J, name='monster') -> bpy.types.Object:
 # skinning
 # ---------------------------------------------------------------------------------------------
 
-def allowed_bones(label: str) -> set[str] | None:
-    if label in ('torso',):
-        return {'hips', 'spine_1', 'spine_2', 'spine_3', 'neck', 'shoulder_L', 'shoulder_R', 'upper_arm_L', 'upper_arm_R'}
-    if label == 'pelvis':
-        return {'hips', 'spine_1', 'spine_2', 'thigh_L', 'thigh_R'}
-    if label == 'neck':
-        return {'spine_3', 'neck', 'neck_2', 'head', 'shoulder_L', 'shoulder_R'}
-    if label == 'head':
-        return {'neck', 'neck_2', 'head', 'jaw', 'jaw_L', 'jaw_R', 'ear_L', 'ear_R'}
-    if label.startswith('jaw'):
-        return {'head', 'jaw', 'jaw_L', 'jaw_R'}
-    if label.startswith('ear'):
-        return {'head', label}
-    side = label[-2:]
-    part = label[:-2]
-    if part == 'clav':
-        return {'spine_2', 'spine_3', 'neck', 'shoulder' + side, 'upper_arm' + side}
-    if part == 'upper_arm':
-        return {'spine_3', 'shoulder' + side, 'upper_arm' + side, 'forearm' + side}
-    if part == 'forearm':
-        return {'upper_arm' + side, 'forearm' + side, 'hand' + side}
-    if part == 'hand':
-        return {'forearm' + side, 'hand' + side} | {f'{f}_1{side}' for f in A.FINGERS} | {'thumb_2' + side}
-    if part in A.FINGERS:
-        return {'hand' + side} | {f'{part}_{i}{side}' for i in (1, 2, 3)}
-    if part == 'thigh':
-        return {'hips', 'spine_1', 'thigh' + side, 'shin' + side}
-    if part == 'shin':
-        return {'thigh' + side, 'shin' + side, 'foot' + side}
-    if part == 'foot':
-        return {'shin' + side, 'foot' + side, 'toe' + side}
-    return None
-
-
 def _smooth01(e0, e1, x):
     t = np.clip((x - e0) / (e1 - e0), 0, 1)
     return t * t * (3 - 2 * t)
 
 
+def _nrm(v):
+    v = np.asarray(v, float)
+    return v / max(np.linalg.norm(v), 1e-12)
+
+
+def _plane_t(P, c, n, h):
+    """0 before / 1 past the joint plane through c (normal n), blended over +-h (h may vary)."""
+    return _smooth01(-1.0, 1.0, ((P - np.asarray(c, float)) @ _nrm(n)) / np.maximum(h, 1e-6))
+
+
+def _chain(P, bones, joints, normals, hs) -> dict:
+    """Partition of unity along a bone chain: bone i owns what lies past joint i-1 and before
+    joint i (product form, so it always sums to 1)."""
+    out, acc = {}, np.ones(len(P))
+    for i, b in enumerate(bones):
+        if i < len(joints):
+            t = _plane_t(P, joints[i], normals[i], hs[i])
+            out[b] = acc * (1 - t)
+            acc = acc * t
+        else:
+            out[b] = acc
+    return out
+
+
+def _seg_dist(P, a, b):
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    ab = b - a
+    t = np.clip(((P - a) @ ab) / max(ab @ ab, 1e-12), 0, 1)
+    return np.linalg.norm(P - (a + t[:, None] * ab), axis=1)
+
+
+def _radial(P, c, axis):
+    """Unit direction from the axis line through c to each point (perpendicular to axis)."""
+    q = P - np.asarray(c, float)
+    ax = _nrm(axis)
+    q = q - np.outer(q @ ax, ax)
+    return q / np.maximum(np.linalg.norm(q, axis=1, keepdims=True), 1e-9)
+
+
+def skin_weights(co: np.ndarray, labels: np.ndarray, J) -> dict:
+    """Analytic skin weights (meters, bind pose): chain blending across bisector joint planes,
+    blend widths set per joint and per side (narrow on the inside of a bend, wide over the
+    olecranon / kneecap), smooth root partitions at the shoulders (spine / shoulder blade / arm)
+    and hips, knuckle splits by finger affinity. Returns {bone: weights}."""
+    k = J['scale']
+    nv = len(co)
+    lab = np.array(A.LABEL_NAMES)[labels]
+    Wd: dict = {}
+
+    def add(name, w):
+        Wd[name] = Wd.get(name, 0) + w
+
+    # ---- spine chain (hips .. head) ------------------------------------------------------
+    sj = [J['pelvis'], J['L5'], J['T12'], J['T6'], J['C7'], J['C3'], J['atlas'], J['head_tip']]
+    sb = ['hips', 'spine_1', 'spine_2', 'spine_3', 'neck', 'neck_2', 'head']
+    sd = [_nrm(sj[i + 1] - sj[i]) for i in range(len(sj) - 1)]
+    spine = _chain(co, sb, sj[1:7], [_nrm(sd[i] + sd[i + 1]) for i in range(6)],
+                   [0.055 * k, 0.065 * k, 0.065 * k, 0.045 * k, 0.034 * k, 0.030 * k])
+
+    group = np.full(nv, 'body', dtype=object)
+    for side in ('L', 'R'):
+        arm_l = [f'clav_{side}', f'upper_arm_{side}', f'forearm_{side}', f'hand_{side}'] + [f'{f}_{side}' for f in A.FINGERS]
+        group[np.isin(lab, arm_l)] = 'arm_' + side
+        group[np.isin(lab, [f'thigh_{side}', f'shin_{side}', f'foot_{side}'])] = 'leg_' + side
+    group[np.isin(lab, ['head', 'jaw_L', 'jaw_R', 'ear_L', 'ear_R'])] = 'head'
+
+    body = {b: w.copy() for b, w in spine.items()}          # what the torso does, per vertex
+    total_root = np.zeros(nv)
+    limb_parts = []
+    for side, s_ in (('L', -1), ('R', 1)):
+        R = J[side]
+        S0, E, Wr = R['S'], R['E'], R['W']
+        du, df, ha = R['d_up'], R['d_fo'], R['ha']
+        eb = R['elbow_back']
+        # -- arm chain: upper arm | forearm | hand (+ fingers)
+        c_out = _radial(co, E, du + df) @ eb
+        h_el = 0.032 * k * (1 + 0.55 * c_out)
+        arm = _chain(co, [f'upper_arm_{side}', f'forearm_{side}', f'hand_{side}'], [E, Wr],
+                     [_nrm(du + df), _nrm(df + ha)], [h_el, 0.028 * k])
+        hand_share = arm.pop(f'hand_{side}')
+        fing: dict = {f'hand_{side}': np.zeros(nv)}
+        is_f = {f: lab == f'{f}_{side}' for f in A.FINGERS}
+        is_hand = lab == f'hand_{side}'
+        aff = {}
+        for f in A.FINGERS:
+            pts, rads, dirs = R[f + '_pts'], R[f + '_rad'], R[f + '_dirs']
+            bones = [f'hand_{side}', f'{f}_1_{side}', f'{f}_2_{side}', f'{f}_3_{side}']
+            d_in = ha if f != 'thumb' else _nrm(pts[0] - (Wr + ha * 0.01))
+            nrms = [_nrm(d_in + dirs[0]), _nrm(dirs[0] + dirs[1]), _nrm(dirs[1] + dirs[2])]
+            hs = [rads[0] * (0.95 if f != 'thumb' else 1.4), rads[1] * 0.80, rads[2] * 0.75]
+            ch = _chain(co, bones, pts[:3], nrms, hs)
+            lat = _seg_dist(co, pts[0] - dirs[0] * 0.02 * k, pts[1])
+            aff[f] = np.exp(-(lat / ((0.016 if f != 'thumb' else 0.020) * k)) ** 2)
+            for b, w in ch.items():
+                fing[b] = fing.get(b, 0) + w * is_f[f] * hand_share
+            aff[f + '_ch'] = ch
+        tot_aff = sum(aff[f] for f in A.FINGERS)
+        for f in A.FINGERS:   # palm / webbing: the hand, blending into the finger roots
+            a_f = aff[f] / np.maximum(tot_aff, 1e-6) * np.clip(tot_aff * 4, 0, 1)
+            ch = aff[f + '_ch']
+            for b, w in ch.items():
+                if b == f'hand_{side}':
+                    continue
+                fing[b] = fing.get(b, 0) + w * a_f * is_hand * hand_share
+        fsum = sum(w for b, w in fing.items() if b != f'hand_{side}')
+        fing[f'hand_{side}'] = hand_share - fsum
+        armw = dict(arm)
+        for b, w in fing.items():
+            armw[b] = armw.get(b, 0) + w
+        # -- root partition at the shoulder: torso | shoulder blade + collarbone | arm
+        lateral = np.array([s_, 0.0, 0.0])
+        t_arm = _plane_t(co, S0, lateral + du, 0.032 * k)
+        prox = 1 - _smooth01(0.065 * k, 0.135 * k, np.linalg.norm(co - S0, axis=1))
+        scap = np.array([0.094 * s_, -0.07, 1.685]) * k
+        t_sh = np.maximum(1 - _smooth01(0.045 * k, 0.10 * k, _seg_dist(co, R['clav_in'], S0)),
+                          0.75 * (1 - _smooth01(0.040 * k, 0.095 * k, np.linalg.norm(co - scap, axis=1))))
+        t_sh *= _smooth01(J['T6'][2] - 0.02 * k, J['T6'][2] + 0.07 * k, co[:, 2])
+        t_sh *= _smooth01(0.010 * k, 0.040 * k, co[:, 0] * s_)          # not across the midline
+        in_arm = group == 'arm_' + side
+        ta = np.where(in_arm, t_arm, t_arm * prox * (group == 'body'))
+        # body share near this shoulder belongs partly to the shoulder bone
+        for b in list(body.keys()):
+            body[b] = body[b] * (1 - t_sh * (group != 'head'))
+        body[f'shoulder_{side}'] = body.get(f'shoulder_{side}', 0) + t_sh * (group != 'head')
+        limb_parts.append((ta, armw))
+        total_root += ta
+        # -- leg chain: thigh | shin | foot | toe
+        H, K, Ak = R['H'], R['K'], R['A']
+        ld, sdn = _nrm(K - H), _nrm(Ak - K)
+        fd, td = _nrm(R['ball'] - Ak), _nrm(R['toe_tip'] - R['ball'])
+        kfwd = _nrm(_nrm(np.array([0, 1.0, 0]) - ld * ld[1]) + _nrm(np.array([0, 1.0, 0]) - sdn * sdn[1]))
+        c_front = _radial(co, K, ld + sdn) @ kfwd
+        h_kn = 0.034 * k * (1 + 0.45 * c_front)
+        leg = _chain(co, [f'thigh_{side}', f'shin_{side}', f'foot_{side}', f'toe_{side}'], [K, Ak, R['ball']],
+                     [_nrm(ld + sdn), _nrm(sdn + fd), _nrm(fd + td)], [h_kn, 0.030 * k, 0.016 * k])
+        hip_n = _nrm(ld + np.array([0, 0, -1.0]))
+        c_back = _radial(co, H, hip_n) @ np.array([0, -1.0, 0])
+        t_leg = _plane_t(co, H + np.array([0, 0, 0.012 * k]), hip_n, 0.050 * k * (1 + 0.30 * c_back))
+        side_ok = _smooth01(-0.012 * k, 0.012 * k, co[:, 0] * s_)          # crotch: own side only
+        proxl = 1 - _smooth01(0.10 * k, 0.17 * k, np.linalg.norm(co - H, axis=1))
+        in_leg = group == 'leg_' + side
+        tl = np.where(in_leg, t_leg, t_leg * proxl * side_ok * (group == 'body'))
+        limb_parts.append((tl, leg))
+        total_root += tl
+    total_root = np.clip(total_root, 0, 1)
+    scale_body = 1 - total_root
+    for b, w in body.items():
+        add(b, w * scale_body)
+    for t, part in limb_parts:
+        for b, w in part.items():
+            add(b, w * t)
+    return Wd
+
+
 def skin(mesh: bpy.types.Object, arm: bpy.types.Object, labels: np.ndarray, J, extra_fix=None) -> None:
-    """Automatic weights, then label-based cleanup + hand-authored jaw/ear weights."""
+    """Analytic chain weights (skin_weights) + hand-authored jaw/ear weights, smoothed a little,
+    pruned to 4 influences."""
     with bpy.context.temp_override(active_object=arm, selected_objects=[mesh, arm], selected_editable_objects=[mesh, arm]):
-        bpy.ops.object.parent_set(type='ARMATURE_AUTO')
+        bpy.ops.object.parent_set(type='ARMATURE_NAME')
     me = mesh.data
     nv = len(me.vertices)
     names = [b.name for b in arm.data.bones if b.use_deform]
     col = {n: i for i, n in enumerate(names)}
-    W = np.zeros((nv, len(names)))
-    gi2name = {g.index: g.name for g in mesh.vertex_groups}
-    for v in me.vertices:
-        for g in v.groups:
-            n = gi2name[g.group]
-            if n in col:
-                W[v.index, col[n]] = g.weight
     co = np.array([v.co[:] for v in me.vertices])
-
-    # adjacency for smoothing
     E = np.array([e.vertices[:] for e in me.edges])
+
     def smooth_w(W, iters, mask=None):
         deg = np.bincount(E.ravel(), minlength=nv).astype(float)
         for _ in range(iters):
@@ -169,49 +285,12 @@ def skin(mesh: bpy.types.Object, arm: bpy.types.Object, labels: np.ndarray, J, e
             np.add.at(acc, E[:, 0], W[E[:, 1]])
             np.add.at(acc, E[:, 1], W[E[:, 0]])
             avg = acc / np.maximum(deg, 1)[:, None]
-            if mask is None:
-                W = 0.5 * W + 0.5 * avg
-            else:
-                W = np.where(mask[:, None], 0.5 * W + 0.5 * avg, W)
+            W = np.where(mask[:, None], 0.5 * W + 0.5 * avg, W) if mask is not None else 0.5 * W + 0.5 * avg
         return W
 
-    # vertices that got nothing: nearest bone of their label
-    lab_names = [A.LABEL_NAMES[l] for l in labels]
-    allowed = np.ones((nv, len(names)), bool)
-    for li, ln in enumerate(A.LABEL_NAMES):
-        sel = labels == li
-        if not sel.any():
-            continue
-        al = allowed_bones(ln)
-        if al is None:
-            continue
-        m = np.array([n in al for n in names])
-        allowed[sel] = m[None, :]
-    # widen allowed sets by one ring so region borders blend
-    for _ in range(2):
-        acc = np.zeros(allowed.shape, bool)
-        np.logical_or.at(acc, E[:, 0], allowed[E[:, 1]])
-        np.logical_or.at(acc, E[:, 1], allowed[E[:, 0]])
-        allowed = allowed | acc
-    W = W * allowed
-    # fallback: distance to allowed bone segments
-    heads = {b.name: np.array(b.head_local) for b in arm.data.bones}
-    tails = {b.name: np.array(b.tail_local) for b in arm.data.bones}
-    empty = W.sum(1) < 1e-4
-    if empty.any():
-        for vi in np.nonzero(empty)[0]:
-            best, bd = None, 1e9
-            for n in names:
-                if not allowed[vi, col[n]]:
-                    continue
-                a, b = heads[n], tails[n]
-                ab = b - a
-                t = np.clip(np.dot(co[vi] - a, ab) / max(np.dot(ab, ab), 1e-9), 0, 1)
-                d = np.linalg.norm(co[vi] - (a + t * ab))
-                if d < bd:
-                    best, bd = n, d
-            if best:
-                W[vi, col[best]] = 1.0
+    W = np.zeros((nv, len(names)))
+    for b, w in skin_weights(co, labels, J).items():
+        W[:, col[b]] += np.clip(w, 0, None)
     W = W / np.maximum(W.sum(1, keepdims=True), 1e-9)
 
     # --- hand-authored: split jaw -----------------------------------------------------------
@@ -221,24 +300,6 @@ def skin(mesh: bpy.types.Object, arm: bpy.types.Object, labels: np.ndarray, J, e
     f_jaw *= _smooth01(0.050, 0.032, np.abs(x))
     side_L = _smooth01(-0.0005, -0.0045, x)
     side_R = _smooth01(0.0005, 0.0045, x)
-    # arm/shoulder bones may only pull torso skin near the armpit/shoulder (no rib "skirt")
-    torso_like = np.isin(labels, [A.LAB['torso'], A.LAB['neck']])
-    k_ = J['scale']
-    for side in ('L', 'R'):
-        Sj = np.asarray(J[side]['S'], float)
-        dS = np.linalg.norm(co - Sj, axis=1)
-        f_arm = np.where(torso_like, _smooth01(0.16 * k_, 0.07 * k_, dS), 1.0)
-        f_sh = np.where(torso_like, _smooth01(0.24 * k_, 0.12 * k_, dS), 1.0)
-        for bn, f in (('upper_arm_' + side, f_arm), ('shoulder_' + side, f_sh)):
-            lost = W[:, col[bn]] * (1 - f)
-            W[:, col[bn]] *= f
-            hi_ = co[:, 2] > np.asarray(J['T6'])[2]
-            W[:, col['spine_3']] += lost * hi_
-            W[:, col['spine_2']] += lost * ~hi_
-    # bone-heat weight that landed on jaw/ear bones outside their regions goes back to the head
-    for bn in ('jaw', 'jaw_L', 'jaw_R', 'ear_L', 'ear_R'):
-        W[:, col['head']] += W[:, col[bn]]
-        W[:, col[bn]] = 0
     wj = np.zeros((nv, len(names)))
     wj[:, col['jaw_L']] = f_jaw * side_L
     wj[:, col['jaw_R']] = f_jaw * side_R
@@ -251,9 +312,8 @@ def skin(mesh: bpy.types.Object, arm: bpy.types.Object, labels: np.ndarray, J, e
         f = _smooth01(-0.004, 0.030, along) * (labels == A.LAB['ear_' + side])
         W = W * (1 - f)[:, None]
         W[:, col['ear_' + side]] += f
-    # final cleanup: smooth a little, prune to 4 influences, normalize
-    W = smooth_w(W, 2)
-    W = W * allowed
+    # final cleanup: smooth a little (not across the mouth slit), prune to 4 influences, normalize
+    W = smooth_w(W, 2, mask=f_jaw < 0.02)
     idx = np.argsort(-W, axis=1)[:, :4]
     W4 = np.zeros_like(W)
     rows = np.arange(nv)[:, None]
@@ -262,21 +322,22 @@ def skin(mesh: bpy.types.Object, arm: bpy.types.Object, labels: np.ndarray, J, e
     dead = W4.sum(1) < 1e-6
     if dead.any():   # never leave a vertex unweighted (the exporter would bind it to a neutral bone)
         for vi in np.nonzero(dead)[0]:
-            j = int(np.argmax(W[vi])) if W[vi].max() > 0 else col['head' if co[vi, 2] > 1.95 else 'spine_2']
+            j = int(np.argmax(W[vi])) if W[vi].max() > 0 else col['head' if co[vi, 2] > 1.95 * J['scale'] else 'spine_2']
             W4[vi, j] = 1.0
         print(f'[rig] fixed {int(dead.sum())} unweighted vertices')
     W4 = W4 / np.maximum(W4.sum(1, keepdims=True), 1e-9)
     if extra_fix:
         W4 = extra_fix(W4, col, co, labels)
-    # write back
     for g in list(mesh.vertex_groups):
         mesh.vertex_groups.remove(g)
     for n in names:
         g = mesh.vertex_groups.new(name=n)
         c = W4[:, col[n]]
-        nz = np.nonzero(c > 0)[0]
-        for vi in nz:
+        for vi in np.nonzero(c > 0)[0]:
             g.add([int(vi)], float(c[vi]), 'REPLACE')
+    if not any(m.type == 'ARMATURE' for m in mesh.modifiers):
+        mod = mesh.modifiers.new('Armature', 'ARMATURE')
+        mod.object = arm
 
 
 # ---------------------------------------------------------------------------------------------
@@ -881,6 +942,143 @@ def make_actions(arm: bpy.types.Object, J, step: int = 1) -> dict:
         made[name] = act
         arm.animation_data.action = None
     return made
+
+
+def bind_rigid(kera: bpy.types.Object, roots, skin_mesh: bpy.types.Object, arm: bpy.types.Object) -> None:
+    """Teeth and nails: every piece copies (rigidly) the weights of the skin vertex nearest to
+    its root, so it moves exactly with the gum / fingertip it grows from."""
+    from mathutils import kdtree
+    me = skin_mesh.data
+    t = kdtree.KDTree(len(me.vertices))
+    for v in me.vertices:
+        t.insert(skin_mesh.matrix_world @ v.co, v.index)
+    t.balance()
+    gname = {g.index: g.name for g in skin_mesh.vertex_groups}
+    for b in arm.data.bones:
+        if b.use_deform and b.name not in kera.vertex_groups:
+            kera.vertex_groups.new(name=b.name)
+    for verts, root in roots:
+        # average a few nearest skin vertices (smoother than a single one)
+        acc: dict = {}
+        near = t.find_n(Vector(tuple(root)), 4)
+        for co, idx, d in near:
+            for g in me.vertices[idx].groups:
+                acc[gname[g.group]] = acc.get(gname[g.group], 0.0) + g.weight / len(near)
+        top = sorted(acc.items(), key=lambda kv: -kv[1])[:4]
+        tot = sum(w for _, w in top) or 1.0
+        for name, w in top:
+            kera.vertex_groups[name].add(list(verts), w / tot, 'REPLACE')
+
+
+# ---- stress poses (previews only): what the procedural IK will do to the mesh ----------------
+
+def _stress_crawl(P: Poser, J):
+    """On all fours under a low gap: torso level, palms planted ahead, knees deep, head up."""
+    k = J['scale']
+    P.reset()
+    _hips(P, (0.0, 0.10 * k, -0.52 * k), pitch=62)
+    _spine(P, pitch=(10, 10, 4))
+    _neck_head(P, neck=(-28, 0, 0), neck2=(-18, 0, 0), head=(-22, 0, 0))
+    _jaw(P, open_=6)
+    _shoulders(P, L=(14, 0, 0), R=(14, 0, 0))
+    for side, s in (('L', -1), ('R', 1)):
+        tgt = Vector((s * 0.30, 0.95, 0.06)) * k
+
+        def hand_fn(side=side, s=s):
+            _hand_world(P, J, side, Vector((s * 0.25, 1.0, -0.05)), Vector((0, 0, -1)))
+            _fingers(P, side, curl=14, spread=8)
+        _arm_floor(P, J, side, tgt, Vector((s * 1.0, -0.4, 0.3)), hand_fn, clearance=0.004)
+    _plant(P, J, 'L', -1, dy=-0.12 * k, dx=0.06, knee_out=0.35, pitch=-25)
+    _plant(P, J, 'R', 1, dy=-0.12 * k, dx=0.06, knee_out=0.35, pitch=-25)
+
+
+def _stress_crouch(P: Poser, J):
+    """Deepest crouch: pelvis near the heels, knees splayed, torso folded over the thighs."""
+    k = J['scale']
+    P.reset()
+    _hips(P, (0.0, -0.10 * k, -0.78 * k), pitch=28)
+    _spine(P, pitch=(18, 16, 12))
+    _neck_head(P, neck=(-6, 0, 0), neck2=(-6, 0, 0), head=(-30, 0, 0))
+    for side, s in (('L', -1), ('R', 1)):
+        tgt = Vector((s * 0.16, 0.42, 0.05)) * k
+
+        def hand_fn(side=side, s=s):
+            _hand_world(P, J, side, Vector((s * 0.1, 1.0, -0.4)), Vector((0, 0.2, -1)))
+            _fingers(P, side, curl=25, spread=6)
+        _arm_floor(P, J, side, tgt, Vector((s * 1.0, 0.0, 0.2)), hand_fn, clearance=0.004)
+    _plant(P, J, 'L', -1, dy=0.0, dx=0.10, knee_out=0.7, pitch=-12)
+    _plant(P, J, 'R', 1, dy=0.0, dx=0.10, knee_out=0.7, pitch=-12)
+
+
+def _stress_reach(P: Poser, J):
+    """Left arm straight up over the head, right arm straight forward at shoulder height."""
+    k = J['scale']
+    P.reset()
+    _hips(P, (0, 0, -0.02 * k), pitch=-2)
+    _spine(P, pitch=(-2, -4, -6))
+    _neck_head(P, neck=(6, 0, 0), neck2=(2, 0, 0), head=(-40, 0, 0))
+    _shoulders(P, L=(-6, 0, -18), R=(-4, 0, 6))
+    P.fk()
+    for side, s, d, pole in (('L', -1, Vector((-0.10, 0.12, 1.0)), Vector((-0.6, -0.6, 0.0))),
+                             ('R', 1, Vector((0.08, 1.0, 0.06)), Vector((0.5, 0.0, -1.0)))):
+        S0 = P.unposed('upper_arm_' + side).translation
+        reach = P.length['upper_arm_' + side] + P.length['forearm_' + side]
+        P.limb_ik('upper_arm_' + side, 'forearm_' + side, S0 + d.normalized() * reach * 0.985, pole)
+        _hand(P, side, rx=-10)
+        _fingers(P, side, curl=-6, spread=18)
+    _plant(P, J, 'L', -1, dy=0.04 * k, dx=0.03)
+    _plant(P, J, 'R', 1, dy=-0.04 * k, dx=0.03)
+
+
+def _stress_grip(P: Poser, J):
+    """Gripping a door frame: right arm up and out at head height, fist closed and the wrist
+    twisted 75 degrees; left elbow folded shut (hand at the shoulder), wrist twisted the other way."""
+    k = J['scale']
+    P.reset()
+    _hips(P, (0.0, 0.0, -0.10 * k), pitch=10, yaw=-8)
+    _spine(P, pitch=(4, 8, 14), yaw=(-4, -6, -8))
+    _neck_head(P, neck=(10, -10, 0), neck2=(4, -6, 0), head=(-44, 0, 6))
+    _shoulders(P, L=(4, 0, 4), R=(-8, 0, -14))
+    P.fk()
+    S0 = P.unposed('upper_arm_R').translation
+    reach = P.length['upper_arm_R'] + P.length['forearm_R']
+    P.limb_ik('upper_arm_R', 'forearm_R', S0 + Vector((0.70, 0.45, 0.55)).normalized() * reach * 0.88,
+              Vector((0.3, -0.6, -1.0)))
+    _hand(P, 'R', rx=-20, ry=75)
+    _fingers(P, 'R', curl=78, spread=0)
+    S1 = P.unposed('upper_arm_L').translation
+    P.limb_ik('upper_arm_L', 'forearm_L', S1 + Vector((0.10, 0.30, -0.08)) * k, Vector((-0.4, 0.2, -1.0)))
+    _hand(P, 'L', rx=30, ry=70)
+    _fingers(P, 'L', curl=40, spread=10)
+    _plant(P, J, 'L', -1, dy=0.10 * k, dx=0.06, knee_out=0.3)
+    _plant(P, J, 'R', 1, dy=-0.10 * k, dx=0.04, knee_out=0.3, pitch=-15)
+
+
+STRESS = {'crawl': _stress_crawl, 'crouch': _stress_crouch, 'reach': _stress_reach, 'grip': _stress_grip}
+# (tag, yaw, pitch, focus bone or None for the whole body, half-size of the close-up in m)
+STRESS_VIEWS = [('crawl', 55, 12, None, 0), ('crawl_back', 160, 35, 'spine_3', 0.42),
+                ('crouch', 35, 8, None, 0), ('crouch_knee', 75, 5, 'shin_R', 0.24),
+                ('reach', 40, 4, None, 0), ('reach_armpit', -55, 5, 'upper_arm_L', 0.30),
+                ('grip', -30, 6, None, 0), ('grip_hand', 55, 10, 'hand_R', 0.17), ('grip_elbow', -60, 0, 'forearm_L', 0.22)]
+
+
+def apply_stress(arm: bpy.types.Object, J, tag: str):
+    P = Poser(arm)
+    STRESS[tag.split('_')[0]](P, J)
+    _apply(arm, P)
+    return P
+
+
+def _apply(arm, P):
+    for n in P.order:
+        if n == 'root':
+            continue
+        pb = arm.pose.bones[n]
+        loc, q, sc = P.basis[n].decompose()
+        pb.rotation_quaternion = q
+        pb.location = loc if n == 'hips' else Vector((0, 0, 0))
+        pb.scale = sc
+    bpy.context.view_layer.update()
 
 
 def apply_pose(arm: bpy.types.Object, J, name: str, t: float):
