@@ -58,16 +58,8 @@ async function setup({ width = 960, height = 540, base = 'http://localhost:5302/
     };
 
     // Monster brain on/off (frozen = it stands where it's put and ignores every sound).
-    window.__freeze = (on) => {
-      if (on) {
-        sim.updateMonster = function () { /* frozen: state is whatever cmd.mon sets */ };
-        sim.react = function () {};
-      } else {
-        delete sim.updateMonster;
-        delete sim.react;
-        sim.enterWander();
-      }
-    };
+    // Frozen = it stays wherever cmd.mon puts it, hears nothing, catches no one (sim test hook).
+    window.__freeze = (on) => sim.setMonsterFrozen(on);
     window.__freeze(true);
 
     // Captions.

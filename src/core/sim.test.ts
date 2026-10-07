@@ -263,6 +263,19 @@ describe('hearing', () => {
 });
 
 describe('monster behaviour', () => {
+  it('a frozen monster (dev / test hook) stays put, hears nothing and catches no one', () => {
+    const { sim } = setup(1);
+    sim.setMonsterFrozen(true);
+    placeMonster(sim, 0, 0);
+    place(sim, 'p0', 0.3, 0.3);
+    talk(sim, 'p0', head(0.3, 0.3), NOISE.shout);
+    const ev = runUntil(sim, 3);
+    expect(has(ev, 'playerCaught')).toBe(false);
+    expect(sim.state.monster.position).toEqual(v3(0, 0, 0));
+    sim.setMonsterFrozen(false);
+    expect(has(runUntil(sim, 2, (e) => has(e, 'playerCaught')), 'playerCaught')).toBe(true);
+  });
+
   it('walks to a noise and catches a silent player standing there, feeds, then wanders', () => {
     const { sim, level } = setup(2);
     placeMonster(sim, -3.45, 0);

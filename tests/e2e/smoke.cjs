@@ -125,6 +125,8 @@ async function monsterAway(page, x, z, d = 4) {
   await sleep(1500);
 
   // Desktop reading: aim at the tutorial note on the same table, E leans in over it, E stands up.
+  // (Notes come with the models, which stream in after the round starts.)
+  await page.waitForFunction(() => window.__mute.renderer.readables().length > 0, null, { timeout: 180000 }).catch(() => {});
   const note = await page.evaluate(([x, z]) => {
     const notes = window.__mute.renderer.readables();
     let best = null;
@@ -205,6 +207,13 @@ async function monsterAway(page, x, z, d = 4) {
   await page.waitForSelector('text=Start round', { state: 'visible' });
   await page.click('text=Start round');
   s = await waitState(page, (s) => s.st.phase === 'playing' && s.st.fusesInserted === 0, null, 'second round start');
+  // This part tests carrying, not survival: the (good) monster would hunt the robot down while it
+  // teleports between fuses, so park it frozen in the far corner.
+  await page.evaluate(() => {
+    const s = window.__mute.game.current;
+    s.sim.setMonsterFrozen(true);
+    s.state.monster.position = { x: 10.2, y: 0, z: -7.2 };
+  });
   const box = { x: 1.5, z: 7.3 }; // stand here facing +Z (yaw 180): both desktop hands are at the fuse box
   let inserted = 0;
   for (let k = 0; k < s.st.fusesRequired; k++) {

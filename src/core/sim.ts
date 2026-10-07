@@ -151,6 +151,8 @@ export class GameSim {
   private spawnOf: Record<PlayerId, number> = {};
   private pending: SimEvent[] = [];
   private ai: MonsterBrain;
+  /** setMonsterFrozen() (dev / tests only). */
+  private monsterFrozen = false;
   private readonly host: MonsterHost;
   /** Per remote player: how far (m) their head may still move right now, and when that was. */
   private moveBudget: Record<PlayerId, { left: number; time: number }> = {};
@@ -651,13 +653,21 @@ export class GameSim {
       if (!src || src.status !== 'alive') return;
     }
     const m = s.monster;
-    if (m.mode === 'feeding') return;
+    if (m.mode === 'feeding' || this.monsterFrozen) return;
     const ratio = this.hearingRatio(noise.position, loudness);
     if (ratio <= 0) return;
     s.lastHeard = { position: copy3(noise.position), loudness, time: s.time };
     const t = clamp((ratio - 1) / (HEARING.chaseRatio - 1), 0, 1);
     m.alert = Math.max(m.alert, 0.25 + 0.75 * t);
     this.ai.onHeard(noise.position, pid, ratio, out);
+  }
+
+  /**
+   * Dev / test hook (capture harness, robot playtest; never set in play): a frozen monster stays
+   * exactly where its state is put, hears nothing and catches no one. Survives new rounds.
+   */
+  setMonsterFrozen(frozen: boolean): void {
+    this.monsterFrozen = frozen === true;
   }
 
   // ---- per-tick rules -------------------------------------------------------------------------
@@ -667,8 +677,10 @@ export class GameSim {
     s.time += dt;
     s.monster.alert = Math.max(0, s.monster.alert - dt / SIM_TUNING.alertDecaySeconds);
     this.checkFuses(out);
-    this.ai.update(dt, out);
-    this.checkContacts(out);
+    if (!this.monsterFrozen) {
+      this.ai.update(dt, out);
+      this.checkContacts(out);
+    }
     this.checkEscapes(out);
     this.checkEnd(out);
   }
