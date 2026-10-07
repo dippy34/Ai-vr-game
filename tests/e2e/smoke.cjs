@@ -100,7 +100,7 @@ async function monsterAway(page, x, z, d = 4) {
   await ctx.grantPermissions(['microphone']);
 
   // ------------------------------------------------------------ solo
-  // E2E_ONLY=multi skips the solo part (handy on slow machines when debugging multiplayer).
+  // E2E_ONLY=multi skips the solo part, E2E_ONLY=solo the multiplayer part (handy on slow machines).
   if (process.env.E2E_ONLY !== 'multi') {
   const page = await ctx.newPage();
   watch(page, 'solo');
@@ -231,6 +231,15 @@ async function monsterAway(page, x, z, d = 4) {
     await page.keyboard.press('e');
     const held = await waitState(page, (s) => s.st.items.some((i) => i.kind === 'fuse' && i.where === 'held' && i.holder === s.id),
       null, 'fuse grabbed', 30000).catch((e) => (console.log(e.message, 'at', spot, 'fuse', fuse.position), null));
+    if (!held) console.log('why:', JSON.stringify(await page.evaluate(() => {
+      const m = window.__mute, g = m.game, s = g.current, st = s.state, me = st.players[s.localId];
+      const look = g.lookDirection();
+      return {
+        phase: st.phase, status: me.status, held: me.held, paused: g.paused, reading: !!g.reading, leaning: m.input.leaning,
+        enabled: m.input.enabled, target: g.desktopUseTarget(st, me.held, look), head: g.localPose.head.position, look,
+        aim: document.querySelector('.hud .aim')?.textContent, menuOpen: !!document.querySelector('.screen:not([hidden])'),
+      };
+    })));
     if (!held) break;
     await monsterAway(page, box.x, box.z);
     await page.evaluate(() => { window.__mute.input.pitch = 0; });
@@ -248,6 +257,13 @@ async function monsterAway(page, x, z, d = 4) {
   check(!!s && s.st.phase === 'won' && s.st.players[s.id].status === 'escaped', `walking out the open door wins (${s && s.st.phase})`);
   await page.screenshot({ path: `${out}/g-escaped.png` });
   await page.close();
+  }
+
+  if (process.env.E2E_ONLY === 'solo') {
+    await browser.close();
+    console.log(`\n${failures} failures, ${errors.length} console errors`);
+    for (const e of errors.slice(0, 30)) console.log(e);
+    process.exit(failures ? 1 : 0);
   }
 
   // ------------------------------------------------------------ two tabs, local transport
