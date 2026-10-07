@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PLAYER, RENDER } from '../../config';
+import { PLAYER, PLAYER_COLORS, RENDER } from '../../config';
 import type {
   FlashEvent,
   Handedness,
@@ -93,6 +93,8 @@ export class GameRenderer implements IGameRenderer {
   private level: LevelView | null = null;
   /** readables() for the current level view (rebuilt with it). */
   private readableCache: { view: LevelView; list: Readable[] } | null = null;
+  /** Hidden stand-in avatars that keep the avatar programs compiled (see loadLevel). */
+  private warmAvatars: RemoteAvatar[] = [];
   private levelData: LevelData | null = null;
   private readonly localHandMat: THREE.MeshLambertMaterial;
   private localLeft: Hand;
@@ -317,6 +319,19 @@ export class GameRenderer implements IGameRenderer {
     this.glare.setWarmupVisible(true);
     const hidden: THREE.Object3D[] = [];
     this.dynamic.traverse((o) => { if (!o.visible) { hidden.push(o); o.visible = true; } });
+    // Other players' avatars only appear when someone joins (or is caught): stand-ins compile their
+    // programs here instead of as a hitch mid-round. They stay (hidden, never drawn) until the next
+    // level, since disposing them would let three.js free those programs again.
+    for (const w of this.warmAvatars) {
+      w.group.removeFromParent();
+      w.dispose();
+    }
+    this.warmAvatars = [false, true].map((ghost) => {
+      const w = new RemoteAvatar(ghost ? 'warm-ghost' : 'warm', PLAYER_COLORS[1], this.ghostMat, this.hands, this.avatarKit);
+      if (ghost) w.setStatus('caught');
+      this.dynamic.add(w.group);
+      return w;
+    });
     try {
       this.ctx.renderer.compile(this.ctx.scene, this.ctx.camera);
       this.warmShadowPrograms();
@@ -324,6 +339,7 @@ export class GameRenderer implements IGameRenderer {
       // compile() is an optimization only.
     }
     for (const o of hidden) o.visible = false;
+    for (const w of this.warmAvatars) w.group.visible = false;
     this.flashFx.setWarmupVisible(false);
     this.jumpscare.setWarmupVisible(false);
     this.glare.setWarmupVisible(false);
