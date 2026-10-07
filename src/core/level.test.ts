@@ -81,14 +81,12 @@ describe('createLevel', () => {
 
   it('places items on surfaces across many rooms', () => {
     expect(level.fuseSpawns.length).toBeGreaterThanOrEqual(6);
-    expect(level.filmSpawns.length).toBeGreaterThanOrEqual(4);
     const fuseRooms = new Set(level.fuseSpawns.map((p) => roomAt(p.x, p.z)));
     expect(fuseRooms.size).toBeGreaterThanOrEqual(6);
     expect(fuseRooms.has(null)).toBe(false);
-    for (const p of [...level.fuseSpawns, ...level.filmSpawns, level.cameraSpawn.position]) {
+    for (const p of level.fuseSpawns) {
       expect(supportHeight(level, p.x, p.z)).toBeCloseTo(p.y, 6);
     }
-    expect(roomAt(level.cameraSpawn.position.x, level.cameraSpawn.position.z)).toBe('foyer');
   });
 
   it('has the fuse box beside the front door and the exit zone just outside it', () => {

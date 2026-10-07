@@ -6,8 +6,8 @@
  */
 
 import * as THREE from 'three';
-import { GAME, NET, NOISE, PLAYER } from '../config';
-import { add3, dist3, forwardFromYaw, rotate3, v3, yawFromQuat } from '../core/math';
+import { GAME, LIGHT, NET, NOISE, PLAYER } from '../config';
+import { add3, dist3, forwardFromYaw, v3, yawFromQuat } from '../core/math';
 import { moveCircle, pushOut, wallsBetween } from '../core/physics';
 import type {
   Handedness,
@@ -83,7 +83,16 @@ export class Game {
   private roundEndedAt = -1;
   /** For the end-of-round summary. */
   private roundStartedAt = -1;
-  private roundFlashes = 0;
+  /** Times the local player wound their light this round (for the round summary). */
+  private roundWinds = 0;
+  /**
+   * Local prediction of the Crank Light: the switch you just flipped (until the host's state
+   * agrees, or a second passes) and whether you are winding, so the beam reacts instantly.
+   */
+  private lightWant: { on: boolean; at: number } | null = null;
+  private cranking = false;
+  /** The "your light is dying" hint was shown (once per charge-up). */
+  private lowLightHinted = false;
   private paused = false;
   /** Desktop: the note we are leaning in over (READ), else null. */
   private reading: Readable | null = null;
@@ -130,7 +139,9 @@ export class Game {
     const phase = session.state.phase;
     this.roundStartedAt = phase === 'playing' ? now : -1;
     this.roundEndedAt = phase === 'won' || phase === 'lost' ? now : -1;
-    this.roundFlashes = 0;
+    this.roundWinds = 0;
+    this.lightWant = null;
+    this.cranking = false;
     this.lastPhase = '';
 
     session.callbacks = {
@@ -197,6 +208,7 @@ export class Game {
     if (!this.paused) this.locomote(frame, dt, state);
     this.footsteps(frame, dt, state, me);
     if (!this.paused) this.interact(frame, state, me);
+    this.updateLight(this.paused ? null : frame, state, me);
 
     // network
     session.sendPose(this.localPose);
@@ -213,6 +225,7 @@ export class Game {
     this.updateHud(session.state, session.state.players[session.localId]);
 
     this.renderer.setLocalNoiseLevel(micLevel);
+    this.renderer.setLocalLight(this.localLightOn(me), this.cranking);
     this.renderer.update(session.state, session.localId, this.localPose, dt);
     this.flushHeldMessage();
     this.audio.update(session.state, session.localId, this.localPose.head, dt);
@@ -300,14 +313,8 @@ export class Game {
         if (canPlay && frame.gripReleased[hand] && held[hand]) {
           session.sendAction({ type: 'release', hand, position: hp.position });
         }
-        if (frame.triggerPressed[hand]) {
-          if (canPlay && held[hand]?.kind === 'camera') {
-            const dir = rotate3(hp.rotation, v3(0, 0, -1));
-            session.sendAction({ type: 'flash', hand, position: hp.position, direction: dir });
-          } else {
-            this.maybeStartRound(state);
-          }
-        }
+        // (During play the left trigger is the light switch, see updateLight.)
+        if (frame.triggerPressed[hand] && !canPlay) this.maybeStartRound(state);
       }
       return;
     }
@@ -317,18 +324,44 @@ export class Game {
     const target = canPlay ? this.desktopUseTarget(state, held, look) : null;
     this.ui.hud.setAim(this.reading ? 'E · stand up' : target?.kind === 'read' ? 'E · read' : '', !!this.reading);
     if (frame.usePressed && canPlay) this.desktopUse(target);
-    if (frame.triggerPressed.left || frame.triggerPressed.right) {
-      const camHand: Handedness | null =
-        held.left?.kind === 'camera' ? 'left' : held.right?.kind === 'camera' ? 'right' : null;
-      if (canPlay && camHand) {
-        session.sendAction({ type: 'flash', hand: camHand, position: pose[camHand].position, direction: look });
-      } else {
-        this.maybeStartRound(state);
-      }
+    if ((frame.triggerPressed.left || frame.triggerPressed.right) && !canPlay) this.maybeStartRound(state);
+  }
+
+  /** The Crank Light: switch it, wind it (sent to the host), hint when it's dying. */
+  private updateLight(frame: InputFrame | null, state: WorldState, me: PlayerState | undefined): void {
+    const session = this.session!;
+    const canPlay = state.phase === 'playing' && me?.status === 'alive';
+    const crank = canPlay && !!frame?.crank;
+    if (crank !== this.cranking) {
+      this.cranking = crank;
+      if (canPlay || !crank) session.sendAction({ type: 'crank', on: crank });
+      if (crank) this.roundWinds++;
+    }
+    if (!canPlay || !me) {
+      this.lightWant = null;
+      return;
+    }
+    const now = performance.now() / 1000;
+    if (this.lightWant && (this.lightWant.on === me.light.on || now - this.lightWant.at > 1)) this.lightWant = null;
+    if (frame?.lightPressed) {
+      const on = !this.localLightOn(me);
+      this.lightWant = { on, at: now };
+      session.sendAction({ type: 'light', on });
+    }
+    if (me.light.charge >= 0.5) this.lowLightHinted = false;
+    else if (!this.lowLightHinted && me.light.charge < LIGHT.lowCharge && me.light.on && !this.cranking) {
+      this.lowLightHinted = true;
+      this.message(this.input.mode === 'xr' ? 'Your light is dying. Hold X (or shake it) to wind it. Winding is LOUD.' : 'Your light is dying. Hold R to wind it. Winding is LOUD.', 5);
     }
   }
 
-  /** Host: trigger/click with nothing to flash starts the round (lobby) or the next one (after an ending). */
+  /** Is the local light on (your latest flip of the switch wins until the host catches up)? */
+  private localLightOn(me: PlayerState | undefined): boolean {
+    if (!me || me.status !== 'alive') return false;
+    return this.lightWant ? this.lightWant.on : me.light.on;
+  }
+
+  /** Host: trigger/click outside play starts the round (lobby) or the next one (after an ending). */
   private maybeStartRound(state: WorldState): void {
     const session = this.session!;
     if (!session.isHost) return;
@@ -357,7 +390,6 @@ export class Game {
         nearestAt = p;
       }
     };
-    if (!state.camera.holder) consider(state.camera.position);
     for (const item of state.items) if (item.where === 'world') consider(item.position);
     // The left hand carries things on desktop; the right hand does the signing.
     const free: Handedness | null = !held.left ? 'left' : !held.right ? 'right' : null;
@@ -458,21 +490,8 @@ export class Game {
     this.audio.playEvent(e, localId);
 
     switch (e.type) {
-      case 'flash':
-        this.roundFlashes++;
-        this.renderer.flash(e, session.state, localId, this.localPose);
-        break;
-      case 'dryFire':
-        if (e.by === localId) this.message(session.state.camera.film <= 0 ? 'Out of film.' : '…');
-        break;
       case 'pickup':
-        if (e.by === localId) {
-          if (e.what === 'camera') this.message(`Camera. Trigger to flash. Film: ${session.state.camera.film}`);
-          else if (e.what === 'fuse') this.message('A fuse. Take it to the fuse box by the front door.');
-        }
-        break;
-      case 'filmLoaded':
-        if (e.by === localId) this.message(`+${e.amount} film (${e.total} shots)`);
+        if (e.by === localId && e.what === 'fuse') this.message('A fuse. Take it to the fuse box by the front door.');
         break;
       case 'fuseInserted':
         this.message(`Fuse ${e.count} of ${e.required}`);
@@ -491,8 +510,15 @@ export class Game {
         if (e.phase === 'playing') {
           this.roundEndedAt = -1;
           this.roundStartedAt = performance.now() / 1000;
-          this.roundFlashes = 0;
-          this.message('Find the fuses. Stay quiet.', 4);
+          this.roundWinds = 0;
+          this.lightWant = null;
+          this.lowLightHinted = false;
+          this.message(
+            this.input.mode === 'xr'
+              ? 'Find the fuses. Stay quiet.\nLeft trigger: light · hold X or shake it: wind it (loud)'
+              : 'Find the fuses. Stay quiet.\nF: light · hold R: wind it (loud)',
+            6,
+          );
         } else if (e.phase === 'won' || e.phase === 'lost') {
           this.roundEndedAt = performance.now() / 1000;
           this.message(`${e.phase === 'won' ? 'You escaped.' : 'Nobody made it out.'}\n${this.roundSummary(session.state)}`, 6);
@@ -539,7 +565,7 @@ export class Game {
     const time = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
     const players = Object.values(state.players);
     const out = players.filter((p) => p.status === 'escaped').length;
-    return `${time} in the house · ${state.fusesInserted}/${state.fusesRequired} fuses · ${this.roundFlashes} flashes · ${out}/${players.length} got out`;
+    return `${time} in the house · ${state.fusesInserted}/${state.fusesRequired} fuses · wound the light ${this.roundWinds}× · ${out}/${players.length} got out`;
   }
 
   /** VR menu button: there are no menus in the headset, so show where things stand. */
@@ -552,7 +578,7 @@ export class Game {
       lines.push(session.isHost ? 'Pull the trigger to start.' : 'Waiting for the host to start.');
     } else if (state.phase === 'playing') {
       lines.push(state.exitOpen ? 'The front door is OPEN.' : `Fuses ${state.fusesInserted} of ${state.fusesRequired}`);
-      lines.push(`Film: ${state.camera.film} shots`);
+      if (me?.status === 'alive') lines.push(`Light: ${Math.round(me.light.charge * 100)}%${me.light.on ? '' : ' (off)'}`);
       if (me?.status === 'caught') lines.push('You were caught. Spectating.');
     } else {
       lines.push(state.phase === 'won' ? 'Someone got out.' : 'Nobody got out.');
@@ -608,7 +634,7 @@ export class Game {
       if (me?.status === 'escaped') lines.push('You escaped · waiting for the others');
     } else lines.push(state.phase === 'won' ? 'Escaped!' : 'Nobody made it out');
     this.ui.hud.setStatus(lines);
-    const holdsCamera = me?.held.left?.kind === 'camera' || me?.held.right?.kind === 'camera';
-    this.ui.hud.setFilm(holdsCamera ? state.camera.film : null);
+    const alive = state.phase === 'playing' && me?.status === 'alive';
+    this.ui.hud.setLight(alive && me ? { charge: me.light.charge, on: this.localLightOn(me), cranking: this.cranking } : null);
   }
 }

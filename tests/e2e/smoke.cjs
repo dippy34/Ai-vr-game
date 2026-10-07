@@ -117,10 +117,11 @@ async function monsterAway(page, x, z, d = 4) {
   await page.click('text=Start round');
   s = await waitState(page, (s) => s.st.phase === 'playing', null, 'round start');
   check(true, 'round started');
-  const cam = s.st.camera.position;
-  console.log('camera at', cam, 'monster at', s.st.monster.position, 'mode', s.st.monster.mode);
+  const cam = await page.evaluate(() => window.__mute.game.current.level.tutorialSpot);
+  console.log('tutorial table at', cam, 'monster at', s.st.monster.position, 'mode', s.st.monster.mode);
+  check(s.st.players[s.id].light.on === true && s.st.players[s.id].light.charge > 0.9, 'the Crank Light starts (nearly) full and switched on');
 
-  // stand next to the camera table, facing it (camera is at -X of the foyer)
+  // stand next to the foyer table with the tutorial note, facing it (at -X of the foyer)
   await teleport(page, cam.x + 0.9, cam.z, 90);
   await sleep(1500);
 
@@ -139,7 +140,8 @@ async function monsterAway(page, x, z, d = 4) {
     const dz = note.position.z - at.z;
     await teleport(page, at.x, at.z, (Math.atan2(-dx, -dz) * 180) / Math.PI);
     await page.evaluate(([y, h]) => { window.__mute.input.pitch = Math.atan2(y - 1.6, h); }, [note.position.y, Math.hypot(dx, dz)]);
-    await sleep(1200);
+    // At software-GL frame rates the HUD can take a few seconds to catch up with the new view.
+    await page.waitForFunction(() => document.querySelector('.hud .aim')?.textContent === 'E · read', null, { timeout: 60000 }).catch(() => {});
     const aim = await page.textContent('.hud .aim');
     await page.keyboard.press('e');
     const leaned = await page.waitForFunction(() => {
@@ -149,7 +151,7 @@ async function monsterAway(page, x, z, d = 4) {
     await sleep(800);
     await page.screenshot({ path: `${out}/a0-reading-note.png` });
     s = await state(page);
-    check(aim === 'E · read' && leaned && s.st.camera.holder === null, `desktop E reads the tutorial note (aim "${aim}", leaned ${leaned})`);
+    check(aim === 'E · read' && leaned, `desktop E reads the tutorial note (aim "${aim}", leaned ${leaned})`);
     await page.keyboard.press('e');
     const up = await page.waitForFunction(() => !window.__mute.input.leaning, null, { timeout: 60000 }).then(() => true, () => false);
     check(up, 'E again stands back up');
@@ -160,19 +162,21 @@ async function monsterAway(page, x, z, d = 4) {
     check(false, 'the tutorial note is placed');
   }
 
-  await page.keyboard.press('e');
-  s = await waitState(page, (s) => s.st.camera.holder === s.id, null, 'camera grabbed', 60000).catch((e) => (console.log(e.message), null));
-  check(!!s, 'desktop E grabs the camera');
-
-  if (s) {
-    const film0 = s.st.camera.film;
-    await page.mouse.click(320, 200);
-    s = await waitState(page, (s, f) => s.st.camera.film === f - 1, film0, 'flash uses film', 60000).catch((e) => (console.log(e.message), null));
-    check(!!s, 'click flashes the camera (film decremented)');
-    await page.screenshot({ path: `${out}/a-flash.png` });
-    await sleep(800);
-    await page.screenshot({ path: `${out}/b-afterimage.png` });
-  }
+  // The Crank Light: F switches it, holding R winds it (loud: the host hears it).
+  await page.screenshot({ path: `${out}/a-light-on.png` });
+  await page.keyboard.press('f');
+  s = await waitState(page, (s) => s.st.players[s.id].light.on === false, null, 'light off', 60000).catch((e) => (console.log(e.message), null));
+  check(!!s, 'F switches the light off');
+  await page.screenshot({ path: `${out}/b-light-off.png` });
+  await page.keyboard.press('f');
+  s = await waitState(page, (s) => s.st.players[s.id].light.on === true, null, 'light on', 60000).catch((e) => (console.log(e.message), null));
+  check(!!s, 'F switches it back on');
+  await page.keyboard.down('r');
+  s = await waitState(page, (s) => s.st.players[s.id].light.cranking === true, null, 'winding', 60000).catch((e) => (console.log(e.message), null));
+  check(!!s, 'holding R winds the light');
+  await page.keyboard.up('r');
+  s = await waitState(page, (s) => s.st.players[s.id].light.cranking === false, null, 'stopped winding', 60000).catch((e) => (console.log(e.message), null));
+  check(!!s, 'letting go of R stops winding');
 
   // a hand sign
   await page.keyboard.down('2');

@@ -18,8 +18,8 @@ import type {
   WorldState,
 } from '../core/types';
 
-/** Bump when messages or the state change shape (2: monster body language). */
-export const PROTOCOL_VERSION = 2;
+/** Bump when messages or the state change shape (2: monster body language, 3: Crank Light). */
+export const PROTOCOL_VERSION = 3;
 
 export interface LobbyPlayer {
   id: PlayerId;

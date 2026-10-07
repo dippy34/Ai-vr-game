@@ -142,53 +142,49 @@ describe('GameSim vs hostile poses', () => {
 
 describe('GameSim vs hostile actions', () => {
   it('cannot grab things far from the head (probe or reach pushed out)', () => {
-    const { sim, level } = setup();
-    const cam = level.cameraSpawn.position;
+    const { sim } = setup();
+    // A fuse on the foyer table.
+    const fuse = sim.state.items[0];
+    const cam = v3(-2.6, 0.75, 6.5);
+    fuse.position = { ...cam };
     const at = v3(cam.x, cam.y + 0.05, cam.z);
-    // Stand 3 m from the camera table (clear line of sight across the foyer), claiming the
-    // hand is right on the camera.
+    // Stand 3 m from the table (clear line of sight across the foyer), claiming the hand is right
+    // on the fuse.
     sim.setPlayerPose('p0', pose(cam.x + 3, cam.z));
     expect(sim.handleAction('p0', { type: 'grab', hand: 'right', position: at, reach: PLAYER.vrGrabReach })).toEqual([]);
     expect(sim.handleAction('p0', { type: 'grab', hand: 'left', position: at, reach: 1e9 })).toEqual([]);
-    expect(sim.state.camera.holder).toBeNull();
+    expect(fuse.holder).toBeNull();
     // Hands nobody has, unknown actions, garbage reach: ignored.
     for (const bad of [
       { type: 'grab', hand: 'tail', position: at, reach: 0.35 },
       { type: 'grab', hand: '__proto__', position: at, reach: 0.35 },
       { type: 'teleport', hand: 'left', position: at },
       { type: 'grab', hand: 'left', position: at, reach: '1e9' },
-      { type: 'flash', hand: 'left', position: at, direction: 'up' },
+      { type: 'light', on: 'off' },
+      { type: 'crank', on: 1 },
+      { type: 'light' },
     ]) {
       expect(sim.handleAction('p0', bad as unknown as PlayerAction)).toEqual([]);
     }
+    expect(sim.state.players.p0.light.on).toBe(true);
+    expect(sim.state.players.p0.light.cranking).toBe(false);
     expect(sim.state.players.p0.held).toEqual({ left: null, right: null });
     // Desktop reach from a probe half a meter in front of the eyes still works.
     sim.setPlayerPose('p0', pose(cam.x + 1.8, cam.z));
     const head = sim.state.players.p0.pose.head.position;
     const probe = v3(head.x - 0.45, head.y - 0.2, head.z);
     expect(sim.handleAction('p0', { type: 'grab', hand: 'left', position: probe, reach: PLAYER.desktopGrabReach })).not.toEqual([]);
-    expect(sim.state.camera.holder).toBe('p0');
+    expect(fuse.holder).toBe('p0');
   });
 
-  it('cannot place items or flashes far away from the player', () => {
-    const { sim, level } = setup();
+  it('cannot place items far away from the player', () => {
+    const { sim } = setup();
     const fuse = holdFuse(sim);
     const head = sim.state.players.p0.pose.head.position;
     sim.handleAction('p0', { type: 'release', hand: 'right', position: v3(head.x + 30, 1, head.z) });
     expect(fuse.where).toBe('world');
     expect(dist3(fuse.position, head)).toBeLessThanOrEqual(LIMITS.handReach + 1.7);
-
-    const cam = level.cameraSpawn.position;
-    sim.setPlayerPose('p0', pose(-1.5, 6.5, v3(cam.x, cam.y + 0.1, cam.z)));
-    sim.handleAction('p0', { type: 'grab', hand: 'right', position: v3(cam.x, cam.y + 0.1, cam.z), reach: PLAYER.vrGrabReach });
-    expect(sim.state.camera.holder).toBe('p0');
-    const ev = sim.handleAction('p0', { type: 'flash', hand: 'right', position: v3(-9, 1, -7), direction: v3(0, 0, -1) });
-    const flash = ev.find((e) => e.type === 'flash');
-    expect(flash).toBeTruthy();
-    expect(dist3(flash!.type === 'flash' ? flash!.position : v3(), sim.state.players.p0.pose.head.position)).toBeLessThanOrEqual(
-      LIMITS.handReach + 1e-9,
-    );
-    expect(isFiniteVec3(sim.state.camera.position)).toBe(true);
+    expect(isFiniteVec3(fuse.position)).toBe(true);
   });
 });
 
@@ -201,12 +197,14 @@ describe('client-side sanitizers vs a legit host', () => {
       expect(sanitizeWorldState(snap, level.bounds)).toEqual(snap);
     };
     check();
-    // Play: grab the camera, flash, pick up fuses, insert them, walk out; the monster roams.
-    const cam = level.cameraSpawn.position;
-    sim.setPlayerPose('p0', pose(-1.5, 6.5, v3(cam.x, cam.y + 0.1, cam.z)));
-    events.push(...sim.handleAction('p0', { type: 'grab', hand: 'right', position: v3(cam.x, cam.y + 0.1, cam.z), reach: 0.35 }));
-    events.push(...sim.handleAction('p0', { type: 'flash', hand: 'right', position: v3(cam.x, cam.y + 0.1, cam.z), direction: v3(0, 0, -1) }));
-    events.push(...sim.handleAction('p0', { type: 'flash', hand: 'right', position: v3(cam.x, cam.y + 0.1, cam.z), direction: v3(0, 0, -1) }));
+    // Play: switch the light, wind it, pick up fuses, insert them, walk out; the monster roams.
+    sim.setPlayerPose('p0', pose(-1.5, 6.5));
+    events.push(...sim.handleAction('p0', { type: 'light', on: false }));
+    events.push(...sim.handleAction('p0', { type: 'light', on: true }));
+    events.push(...sim.handleAction('p0', { type: 'crank', on: true }));
+    events.push(...sim.step(0.5));
+    check();
+    events.push(...sim.handleAction('p0', { type: 'crank', on: false }));
     sim.reportNoise({ source: 'voice', position: v3(0, 1.6, 5), loudness: 0.95, playerId: 'p1' });
     const box = level.fuseBox.position;
     for (const fuse of sim.state.items.filter((i) => i.kind === 'fuse')) {
@@ -232,7 +230,7 @@ describe('client-side sanitizers vs a legit host', () => {
     for (let i = 0; i < 5; i++) events.push(...sim.step(1 / 30));
     check();
     const types = new Set(events.map((e) => (e as { type: string }).type));
-    for (const t of ['pickup', 'flash', 'dryFire', 'fuseInserted', 'exitOpened', 'monsterAlert', 'playerEscaped', 'playerCaught', 'phase']) {
+    for (const t of ['pickup', 'light', 'fuseInserted', 'exitOpened', 'monsterAlert', 'playerEscaped', 'playerCaught', 'phase']) {
       expect(types).toContain(t);
     }
     for (const e of events) {

@@ -3,21 +3,21 @@
 > A co-op VR horror game. The monster is blind, but it hears **everything**, including your real voice.
 > You *can* talk. You just probably shouldn't. Your hands do the talking.
 
-> **Direction update (Oct 2026):** this doc describes the game as it plays today (one house). The
-> agreed future, a chapter-based story game with big maps and chases, the **Crank Light**
-> replacing the camera flash (and no more afterimages), the **Echo** gadget and near-impossible
-> difficulty, is in [`STORY.md`](STORY.md). The build plan is in [`HANDOFF.md`](HANDOFF.md).
+> **Direction update (Oct 2026):** this doc describes the game as it plays today (one house, now
+> with the **Crank Light** instead of the old camera flash). The agreed future, a chapter-based
+> story game with big maps and chases, the **Echo** gadget and near-impossible difficulty, is in
+> [`STORY.md`](STORY.md). The build plan is in [`HANDOFF.md`](HANDOFF.md).
 
 ## Pitch
 
 1–4 players wake up in a dark, abandoned house. Something tall and eyeless lives here. It can't see
-you, but it hears your footsteps, the click of your camera and **your real microphone**. Whisper and
-it might not notice. Talk normally and it comes to check. Scream and it charges.
+you, but it hears your footsteps, your light winding and **your real microphone**. Whisper and it
+might not notice. Talk normally and it comes to check. Scream and it charges.
 
-The house is almost pitch black. The only real light is **an old camera with a flash** that the team
-passes around. Every flash lights up the room for a split second and leaves **frozen afterimages**
-of everyone's hands in the air. That's how you read each other's hand signs in the dark. But every
-flash makes a *click*, and film is limited.
+The house is pitch black. The only real light is each player's **Crank Light**, a wind-up
+flashlight strapped to the left wrist (desktop: held low on the right). Shine it on your hands so
+your friends can read your signs. The light itself is safe, because the monster is blind. But the
+battery lasts about a minute, and winding it back up makes a loud ratcheting *whirr*.
 
 **Goal:** find the fuses, put them in the fuse box to power the exit door, and get out. Opening the
 door makes a huge noise, so the last sprint is always a chase.
@@ -28,7 +28,8 @@ door makes a huge noise, so the last sprint is always a chase.
    players hear you from where you stand. The monster hears whatever your mic picks up, scaled by
    distance and walls (see `HEARING` in `src/config.ts`).
 2. **It's dark.** You can barely see silhouettes up close. You can't read a hand sign unless it's lit.
-3. **Light costs noise.** Each flash is a click the monster can hear, and film runs out.
+3. **Light costs noise.** The beam is silent, but it runs flat, and winding it is loud. Wind it
+   somewhere it can't hear you, or in a hurry when you have no choice.
 
 ## Moment-to-moment
 
@@ -38,8 +39,9 @@ door makes a huge noise, so the last sprint is always a chase.
 - Hold still and quiet, and it walks right past you (unless it bumps into you).
 - It remembers where it heard things. Keep making noise in one room and it starts patrolling there
   (the memory fades after a minute or two).
-- Sign to a teammate ("it's there", "3 fuses left", "run", "stop", "come here"), then flash so
-  they can see it. The afterimage hangs in the air for ~2 seconds.
+- Sign to a teammate ("it's there", "3 fuses left", "run", "stop", "come here") inside the beam
+  of a light so they can see it. Point your light at them and you blind them (lens glare).
+- Your light dims and flickers when the battery is low. Switch it off to save it, and listen.
 - Caught players become spectators. The monster ignores them.
 
 ## How the monster thinks
@@ -95,8 +97,7 @@ fists, open palm "stop", thumbs up/down, counting 1–5, "come here" waves and s
 
 | Thing | What it does |
 |---|---|
-| **Camera** | One per round. Grab it, trigger to flash. Shows its film count on its back. Starts with 6 shots. |
-| **Film roll** | Touch/grab to load +3 film into the camera (whoever holds it). |
+| **Crank Light** | Everyone has one (it never takes up a hand). Starts full and on. Lasts ~60 s lit; winding fills it in ~6 s and is heard ~11 m away in the open (`LIGHT`, `NOISE.crank` in `src/config.ts`). A small battery bar on the light (desktop: HUD bottom right). |
 | **Fuse** | Carry it to the fuse box. It inserts automatically when held close. |
 | **Fuse box** | Next to the exit. One light per fuse. All lit = the exit door unlocks *loudly*. |
 | **Exit door** | Walk through once it's open to escape. Round is won if anyone escapes. |
@@ -111,25 +112,28 @@ fists, open palm "stop", thumbs up/down, counting 1–5, "come here" waves and s
 | Sprint (loud) | Click left stick | Shift |
 | Grab / drop | Grip near item | E |
 | Read a note | Lean in close | Aim at it, E (leans in; E again or move to stand up) |
-| Flash | Trigger while holding camera | Left click while holding camera |
+| Light on / off | Left trigger (hand tracking: right pinch) | F |
+| Wind the light (loud) | Hold X, or shake your left hand | Hold R |
 | Hand signs | Your actual hands / fingers | Keys 1–6 |
 | Talk | Just talk (mic is always on) | Just talk |
 
 ## Look and sound
 
 - **Visual:** near-black, filmic (AgX) tone curve, cold moonlight pooling through the windows with
-  dusty shafts, height fog that swallows far rooms. The flash is blinding white with real shadows
-  (inverse-square falloff: whatever is close burns out, the far end of the room stays murky) and
-  lights up the haze and dust in the air; afterimages are pale ghostly copies that fade. The monster
-  is very tall and thin, with long arms and no eyes, wet, pale skin that glows red where it's thin.
-  You see it only in flashes, which is the point. Desktop and Quest share one look; the Quest tier
-  only lowers shadow resolution, grain and vignette (`RENDER.quality`).
+  dusty shafts, height fog that swallows far rooms. Without your Crank Light you barely make out a
+  doorway. Its warm incandescent beam (hot centre, reflector ring, dim spill) casts real soft
+  shadows, lights the dust in the air and bounces faintly off what it hits; it browns out and
+  flickers when the battery is low and surges while you wind. Other players' beams glare when
+  pointed at you. The monster is very tall and thin, with long arms and no eyes, wet, pale skin
+  that glows red where it's thin. You see it only when your beam finds it, which is the point.
+  Desktop and Quest share one look; the Quest tier only lowers shadow resolution, grain and
+  vignette (`RENDER.quality`). Only your own beam casts shadows (`?shadows=0` turns them off).
 - **Audio:** all procedural WebAudio for now (no asset files). Spatialized HRTF voices and monster
   sounds, a low drone, house creaks, a heartbeat. Sound is half of horror, so it gets real effort.
 
 ## Why it can sell
 
-- The core twist (**talk with your hands, read signs by camera flash**) only works in VR. We found
+- The core twist (**talk with your hands, read signs by flashlight**) only works in VR. We found
   no other game built around it.
 - Monster-hears-your-mic games are proven streamer bait, and silent signing makes for funny,
   panicky clips.

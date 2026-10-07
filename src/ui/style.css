@@ -320,11 +320,56 @@ details[open] summary {
   bottom: 74px;
 }
 
-.hud .film {
+.hud .light {
   position: absolute;
   right: 16px;
   bottom: 16px;
-  font-size: 18px;
+  width: min(160px, 32vw);
+}
+
+.hud .light .label {
+  font-size: 12px;
+  opacity: 0.7;
+  margin-bottom: 4px;
+  text-align: right;
+}
+
+.hud .light .bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.hud .light .fill {
+  height: 100%;
+  width: 100%;
+  background: #f1e6c8;
+  transition: width 0.2s linear;
+}
+
+.hud .light.off .fill {
+  background: rgba(241, 230, 200, 0.35);
+}
+
+.hud .light.low .fill {
+  background: #e8794f;
+  animation: light-low 0.9s ease-in-out infinite;
+}
+
+.hud .light.winding .fill {
+  background: #ffd36b;
+}
+
+.hud .light.winding .label {
+  color: #ffd36b;
+  opacity: 1;
+}
+
+@keyframes light-low {
+  50% {
+    opacity: 0.35;
+  }
 }
 
 .hud .mic {

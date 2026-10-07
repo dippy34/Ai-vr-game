@@ -7,14 +7,14 @@
  *  - Fog: the scene's linear THREE.Fog stays the hard limit (fully fogged by fogFar, which the
  *    level's fog culling relies on) and is joined by exponential height fog (denser near the floor)
  *    whose density drifts slowly (cheap analytic noise at the view ray's midpoint; the density is
- *    computed per vertex, only the extinction per pixel). While the camera
- *    flash is lit, the haze along each view ray scatters its light (closed-form single scattering of
- *    a point light, masked by the flash cone): the flash "reveals" the air.
+ *    computed per vertex, only the extinction per pixel). While your Crank
+ *    Light is on, the haze along each view ray scatters its light (closed-form single scattering of
+ *    a point light, masked by the beam cone; the uniforms keep their old "flash" names).
  *  - Finish (last thing every mesh material does): per-eye vignette from the view direction, film
  *    grain (multiplicative, so black stays black) and +-1 LSB triangular dither against banding in
  *    the dark gradients, plus an optional lateral-colour fringe at the edges (desktop).
  *  - Light loops skip the BRDF (and shadow / cookie lookups) for lights that don't reach the
- *    fragment: the flash lights are at intensity 0 almost all the time, and the near light only
+ *    fragment: idle Crank Light beams sit at intensity 0, and the near light only
  *    reaches ~2 m, so idle frames pay almost nothing for them.
  *
  * Every built-in material shares ONE uniform struct (`muteFx`, the FX object below): its value is
@@ -32,15 +32,15 @@ export type RenderQuality = 'quest' | 'desktop';
 
 /** Shared `muteFx` uniform struct (vec4 members, see GLSL_FX). */
 export const FX = {
-  /** xyz = flash position, w = flash brightness 0..1. */
+  /** xyz = the local Crank Light beam's position, w = its haze brightness (0 = off). */
   flashPos: new THREE.Vector4(0, -1000, 0, 0),
-  /** xyz = flash direction, w = cos of the cone's half angle. */
+  /** xyz = the beam's direction, w = cos of the cone's half angle. */
   flashDir: new THREE.Vector4(0, 0, -1, 0.5),
   /** x = base density (1/m), y = height falloff (1/m), z = extra density at the floor, w = noise. */
   fog: new THREE.Vector4(0, 1, 0, 0),
   /** x = grain, y = vignette, z = fringe, w = frame counter (temporal noise). */
   post: new THREE.Vector4(0, 0, 0, 0),
-  /** rgb = flash in-scatter colour (output space), w = strength. */
+  /** rgb = beam in-scatter colour (output space), w = strength. */
   haze: new THREE.Vector4(1, 1, 1, 0),
   /** x = time (s), y = floor height, z/w spare. */
   misc: new THREE.Vector4(0, 0, 0, 0),
@@ -268,7 +268,7 @@ export function pickQuality(setting: string, presenting: boolean, forced: Render
   return presenting ? 'quest' : 'desktop';
 }
 
-/** Per-frame FX values that don't come from the flash. */
+/** Per-frame FX values that don't come from the Crank Light. */
 export function setFxFrame(time: number, frame: number, tier: TierSettings): void {
   FX.misc.x = time;
   FX.post.set(tier.grain, tier.vignette, tier.fringe, frame);

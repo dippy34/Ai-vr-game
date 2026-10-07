@@ -361,7 +361,7 @@ const FURNITURE: Record<PropStyle, (f: FurnitureCtx) => void> = {
     // Lower panel, pedals.
     f.put(f.wood, -w / 2 + 0.05, 0.06, z0 + caseD, w / 2 - 0.05, keysY - 0.12, z0 + caseD + 0.02, darker(c, 1.15));
     for (const px of [-0.06, 0, 0.06]) f.put(f.plain, px - 0.012, 0.04, z0 + caseD, px + 0.012, 0.055, z0 + caseD + 0.1, 0x8a7a50);
-    // Candle holder sconces (a nice silhouette in the flash).
+    // Candle holder sconces (a nice silhouette in a flashlight beam).
     for (const sx of [-1, 1]) f.put(f.plain, sx * (w / 2 - 0.12) - 0.012, keysY + 0.32, z0 + caseD, sx * (w / 2 - 0.12) + 0.012, keysY + 0.4, z0 + caseD + 0.05, 0x8a7a50);
   },
 };
@@ -675,7 +675,7 @@ class FuseBoxView {
         halos.setMatrixAt(lit++, _lampM);
       }
       _lampC.copy(LAMP_OFF).lerp(LAMP_ON, k);
-      // Self-lit like an indicator bulb; the dark base keeps a glossy glass look under the flash.
+      // Self-lit like an indicator bulb; the dark base keeps a glossy glass look in a flashlight beam.
       l.mat.emissive.copy(_lampC);
       l.mat.color.copy(_lampC).multiplyScalar(0.25);
     }
@@ -941,7 +941,7 @@ const STATIC_CHUNK = 7;
 
 const _cc = new THREE.Vector3();
 
-/** Level meshes that receive the flash's shadows but never cast (floors are below everything). */
+/** Level meshes that receive the Crank Light's shadows but never cast (floors are below everything). */
 const SHADOW_RECEIVE_ONLY = new Set(['floors', 'floors-tile', 'ceilings', 'trim']);
 
 let cookie: THREE.Texture | null = null;
@@ -1014,7 +1014,7 @@ function wallFaceSegments(b: Box, face: number, maxLen = 1.0): ReturnType<typeof
 
 export class LevelView {
   readonly group = new THREE.Group();
-  /** Wall boxes for line-of-sight tests (flash afterimages). */
+  /** Wall boxes for line-of-sight tests (beam bounce, jumpscare). */
   readonly walls: Aabb[] = [];
   private readonly fuseBox: FuseBoxView;
   private readonly door: DoorView;
@@ -1299,7 +1299,7 @@ export class LevelView {
       sg.setIndex(shaftIdx);
       sg.computeVertexNormals();
       sg.computeBoundingSphere();
-      const shafts = new THREE.Mesh(sg, moonShaftMaterial(shaftTexture(), 0x131a2c));
+      const shafts = new THREE.Mesh(sg, moonShaftMaterial(shaftTexture(), 0x0f1524));
       shafts.name = 'moonShafts';
       shafts.renderOrder = 2;
       this.group.add(shafts);
@@ -1310,12 +1310,12 @@ export class LevelView {
       pgeo.setIndex(patchIdx);
       pgeo.computeVertexNormals();
       pgeo.computeBoundingSphere();
-      const patches = new THREE.Mesh(pgeo, moonPatchMaterial(moonCookie(), 0x34446a));
+      const patches = new THREE.Mesh(pgeo, moonPatchMaterial(moonCookie(), 0x28344f));
       patches.name = 'moonPatches';
       patches.renderOrder = 1;
       this.group.add(patches);
     }
-    // The flash's shadows: solid things cast (walls too, so it doesn't light the next room through
+    // The Crank Light's shadows: solid things cast (walls too, so it doesn't light the next room through
     // them), every lit surface receives; glows, glass, light pools and alpha decals stay out.
     this.group.traverse((o) => {
       const mesh = o as THREE.Mesh;

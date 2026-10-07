@@ -34,7 +34,7 @@ NORMAL_TEX = 512
 NOTES = {
     'tutorial': dict(
         text="If you can read this,\ndon't say a word.\nIt can't see you.\nIt *HEARS* you.\nThree fuses.\n"
-             "Box by the front door.\nThe camera shows it.\nTalk with your hands.",
+             "Box by the front door.\nWinding is *LOUD*.\nTalk with your hands.",
         paper='notebook', size=(0.2, 0.26), placement='surface', ink='262a4e', pen=('ballpoint', 5.6),
         hand=dict(slant=0.16, messy=0.45, seed=31), xh=40, rule=(3, 4), left=0.145, right=0.995,
         folds=[('h', 0.5, 1)], curl=0.006, stains=['thumb', 'ring'], seed=11),
@@ -48,8 +48,8 @@ NOTES = {
         paper='letter', size=(0.16, 0.21), placement='wall', ink='1c2444', pen=('fountain', 7.5),
         hand=dict(slant=0.24, messy=0.2, seed=33), xh=50, top=0.2, line=2.75, left=0.1, right=0.98,
         folds=[('h', 0.34, 1), ('h', 0.67, -1)], curl=0.008, stains=['water'], seed=13),
-    'flash': dict(
-        text="The flash doesn't\nhurt it, but you'll\nsee where it is.\n*Count* your film.",
+    'light': dict(
+        text="The light doesn't\nbother it. It's blind.\nBut it hears you\n*wind* it.",
         paper='notepad', size=(0.13, 0.19), placement='surface', ink='18181e', pen=('ballpoint', 5.6),
         hand=dict(slant=0.08, messy=0.35, seed=34), xh=42, rule=(4, 2), left=0.07, right=0.99,
         folds=[], curl=0.01, stains=['ring', 'dirt'], header='OCT 30', seed=14),

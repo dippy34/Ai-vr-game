@@ -9,6 +9,7 @@
  */
 
 import type {
+  CrankLightState,
   FingerCurls,
   GamePhase,
   Handedness,
@@ -182,7 +183,6 @@ export function sanitizePose(x: unknown, bounds: Bounds): PlayerPose | null {
 function readHeld(x: unknown): HeldRef | null {
   if (!isObj(x)) return null;
   const kind = own(x, 'kind');
-  if (kind === 'camera') return { kind: 'camera' };
   if (kind === 'item') {
     const itemId = readInt(own(x, 'itemId'), -1e9, 1e12);
     return itemId === null ? null : { kind: 'item', itemId };
@@ -208,13 +208,19 @@ function readPlayer(id: string, x: unknown, bounds: Bounds): PlayerState | null 
     spawnYaw: readNum(own(x, 'spawnYaw')) ?? 0,
     pose,
     held: { left: readHeld(own(held, 'left')), right: readHeld(own(held, 'right')) },
+    light: readLight(own(x, 'light')),
   };
+}
+
+function readLight(x: unknown): CrankLightState {
+  if (!isObj(x)) return { on: false, charge: 0, cranking: false };
+  return { on: own(x, 'on') === true, charge: clampN(readNum(own(x, 'charge')) ?? 0, 0, 1), cranking: own(x, 'cranking') === true };
 }
 
 function readItem(x: unknown, bounds: Bounds): ItemState | null {
   if (!isObj(x)) return null;
   const id = readInt(own(x, 'id'), -1e9, 1e12);
-  const kind = oneOf(own(x, 'kind'), ['fuse', 'film'] as const);
+  const kind = oneOf(own(x, 'kind'), ['fuse'] as const);
   const where = oneOf(own(x, 'where'), ['world', 'held', 'used'] as const);
   const position = readVec3(own(x, 'position'));
   if (id === null || !kind || !where || !position) return null;
@@ -238,13 +244,11 @@ export function sanitizeWorldState(x: unknown, bounds: Bounds): WorldState | nul
   const phase = oneOf(own(x, 'phase'), PHASES);
   const time = readNum(own(x, 'time'));
   const m = own(x, 'monster');
-  const c = own(x, 'camera');
-  if (!phase || time === null || !isObj(m) || !isObj(c)) return null;
+  if (!phase || time === null || !isObj(m)) return null;
 
   const mPos = readVec3(own(m, 'position'));
   const mode = oneOf(own(m, 'mode'), MODES);
-  const cPos = readVec3(own(c, 'position'));
-  if (!mPos || !mode || !cPos) return null;
+  if (!mPos || !mode) return null;
   const target = readVec3(own(m, 'target'));
   const focus = readVec3(own(m, 'focus'));
 
@@ -288,14 +292,6 @@ export function sanitizeWorldState(x: unknown, bounds: Bounds): WorldState | nul
       focus: focus ? clampToBounds(focus, bounds, LIMITS.worldMargin) : null,
     },
     items,
-    camera: {
-      holder: readStr(own(c, 'holder')),
-      hand: oneOf(own(c, 'hand'), HANDS),
-      position: clampToBounds(cPos, bounds, LIMITS.worldMargin),
-      yaw: readNum(own(c, 'yaw')) ?? 0,
-      film: readInt(own(c, 'film'), 0, 9999) ?? 0,
-      lastFlashTime: readNum(own(c, 'lastFlashTime')) ?? -1e9,
-    },
     fusesInserted: readInt(own(x, 'fusesInserted'), 0, 999) ?? 0,
     fusesRequired: readInt(own(x, 'fusesRequired'), 0, 999) ?? 0,
     exitOpen: own(x, 'exitOpen') === true,
@@ -319,28 +315,15 @@ export function sanitizeSimEvent(x: unknown, bounds: Bounds): SimEvent | null {
   const id = readStr(own(x, 'id'));
   const count = (k: string): number | null => readInt(own(x, k), 0, 9999);
   switch (own(x, 'type')) {
-    case 'flash': {
-      const d = readVec3(own(x, 'direction'));
-      const l = d ? Math.hypot(d.x, d.y, d.z) : 0;
-      const time = readNum(own(x, 'time'));
-      if (!by || !position || time === null) return null;
-      const direction = d && l > 1e-6 ? { x: d.x / l, y: d.y / l, z: d.z / l } : { x: 0, y: 0, z: -1 };
-      return { type: 'flash', by, position, direction, time };
+    case 'light': {
+      const on = own(x, 'on');
+      return by && position && typeof on === 'boolean' ? { type: 'light', by, on, position } : null;
     }
-    case 'dryFire':
-      return by && position ? { type: 'dryFire', by, position } : null;
     case 'pickup':
     case 'drop': {
-      const what = oneOf(own(x, 'what'), ['camera', 'fuse', 'film'] as const);
+      const what = oneOf(own(x, 'what'), ['fuse'] as const);
       if (!by || !position || !what) return null;
       return own(x, 'type') === 'pickup' ? { type: 'pickup', by, what, position } : { type: 'drop', by, what, position };
-    }
-    case 'filmLoaded': {
-      const amount = count('amount');
-      const total = count('total');
-      return by && position && amount !== null && total !== null
-        ? { type: 'filmLoaded', by, amount, total, position }
-        : null;
     }
     case 'fuseInserted': {
       const n = count('count');

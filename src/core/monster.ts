@@ -91,6 +91,15 @@ export const BRAIN_TUNING = {
   earshotMove: 0.8,
   /** Staleness (s) at which a room counts as completely unheard. */
   earshotStale: 90,
+  /**
+   * Hunch: the longer it goes without hearing anyone, the more its roaming drifts toward the
+   * rooms the living players are in (it can feel heartbeats and breathing it can't place yet).
+   * Full strength after `hunchBuild` s of silence; `hunchPull` = weight boost for the players'
+   * room, fading with distance over `hunchRange` m. It never reveals where exactly you are.
+   */
+  hunchPull: 6,
+  hunchBuild: 30,
+  hunchRange: 6,
 } as const;
 
 /** What the sim gives the brain. */
@@ -199,10 +208,13 @@ export class MonsterBrain {
   // Escalation.
   private readonly roundStart: number;
   private frenzy = false;
+  /** When it last heard anything (drives the hunch); the round start counts as hearing. */
+  private lastHeardAt: number;
 
   constructor(private readonly host: MonsterHost) {
     this.g = navGridFor(host.level);
     this.roundStart = host.state.time;
+    this.lastHeardAt = host.state.time;
     this.lastPos = copy3(host.state.monster.position);
     this.stuckRef = copy3(host.state.monster.position);
     this.heardAt = new Float64Array(this.g.listen.n).fill(this.roundStart - BRAIN_TUNING.earshotStale);
@@ -261,6 +273,7 @@ export class MonsterBrain {
   onHeard(pos: Vec3, pid: PlayerId | null, ratio: number, out: SimEvent[]): void {
     const m = this.m;
     if (m.mode === 'feeding') return;
+    this.lastHeardAt = this.now;
     this.remember(pos, ratio);
     const chaseR = this.chaseRatio();
     const cur = this.currentStim();
@@ -617,6 +630,18 @@ export class MonsterBrain {
     return items[items.length - 1];
   }
 
+  /** 0..1: how close the nearest living player is to `p` (1 = right there). */
+  private nearPlayers(p: Vec3): number {
+    let best = 0;
+    const s = this.host.state;
+    for (const id of Object.keys(s.players)) {
+      const pl = s.players[id];
+      if (pl.status !== 'alive') continue;
+      best = Math.max(best, Math.exp(-distXZ(pl.pose.head.position, p) / BRAIN_TUNING.hunchRange));
+    }
+    return best;
+  }
+
   private choosePatrolGoal(): void {
     const m = this.m;
     const g = this.g;
@@ -632,6 +657,7 @@ export class MonsterBrain {
       const exitR = this.exitRegion;
       const cands = g.regions.filter((r) => r.patrol.length > 0);
       const stale = this.staleness();
+      const hunch = clamp((this.now - this.lastHeardAt) / BRAIN_TUNING.hunchBuild, 0, 1);
       const reg = this.weightedPick(cands, (r) => {
         // Rooms it has not listened to lately, rooms where it heard things (noise memory), the
         // room players must go to, nearer rooms first; staying put is less likely.
@@ -640,6 +666,7 @@ export class MonsterBrain {
         if (r.id === objective) w *= BRAIN_TUNING.objectiveBias;
         if (this.frenzy && (r.id === exitR || r.id === objective)) w *= 4;
         if (r.id === cur) w *= 0.4;
+        w *= 1 + hunch * BRAIN_TUNING.hunchPull * this.nearPlayers(r.center);
         return w / (1 + distXZ(r.center, m.position) / 10);
       });
       if (!reg) {

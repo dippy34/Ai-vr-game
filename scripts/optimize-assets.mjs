@@ -63,7 +63,7 @@ const ENCODINGS = {
 };
 
 /** Models (by name) and surface sets whose normal maps get UASTC: hero assets and the walls/floors. */
-const UASTC_NORMALS = /^(monster|hand_left|hand_right|camera|surface:.*)$/;
+const UASTC_NORMALS = /^(monster|hand_left|hand_right|surface:.*)$/;
 
 /**
  * Max texture size (px, longest side) by asset name + texture kind. Everything else keeps its
@@ -75,7 +75,7 @@ const MAX_SIZE = [
   // The monster's roughness/AO doesn't need 2048 (its color + normal keep it).
   { name: /^monster$/, kind: /^data$/, max: 1024 },
   // Small hand-held / floor props.
-  { name: /^(fuse|film)$/, kind: /.*/, max: 512 },
+  { name: /^fuse$/, kind: /.*/, max: 512 },
 ];
 
 // ---------------------------------------------------------------------------------------------

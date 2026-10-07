@@ -26,21 +26,22 @@ import { MonsterAudio } from './monster';
 import { RemotePlayers } from './remote';
 import {
   sfxCaughtSting,
+  sfxCrankTick,
   sfxDrop,
-  sfxDryFire,
   sfxExitDoor,
   sfxFuse,
+  sfxLightSwitch,
   sfxLose,
   sfxPickup,
-  sfxRatchet,
   sfxRelief,
   sfxRoundStart,
   sfxScream,
-  sfxShutter,
   sfxWin,
   sfxWoodStep,
 } from './sfx';
 
+/** Seconds between ratchet teeth while someone winds their Crank Light. */
+const CRANK_TICK = 0.085;
 /** Ghost hearing: world bus lowpass (Hz) and gain while the local player is caught. */
 const GHOST = { worldLp: 650, worldGain: 0.42, voiceLp: 2800, voiceGain: 0.85 } as const;
 
@@ -60,6 +61,8 @@ export class AudioManager implements IAudioManager {
   private ambience: Ambience | null = null;
   private heart: Heartbeat | null = null;
   private remotes: RemotePlayers | null = null;
+  /** Per player: seconds until their winding ratchets again. */
+  private readonly crankIn = new Map<PlayerId, number>();
   private readonly mic = new MicInput();
   private readonly pendingVoices = new Map<PlayerId, MediaStream>();
   private unlocking: Promise<void> | null = null;
@@ -237,9 +240,34 @@ export class AudioManager implements IAudioManager {
       this.monster?.update(state, step, now);
       this.heart?.update(state.phase === 'playing' && status === 'alive' && !this.ghost, fear, step, now);
       this.remotes?.update(state, localId, this.listener, step, now, this.ghost, wallsTo);
+      this.crankTicks(state, step, now);
       this.ambience?.update(this.listener, now, fear);
     } catch (err) {
       this.warn('update failed', err);
+    }
+  }
+
+  /** Everyone winding a Crank Light ratchets away from where their light is (VR: left wrist). */
+  private crankTicks(state: WorldState, step: number, now: number): void {
+    const e = this.live();
+    if (!e || state.phase !== 'playing') {
+      this.crankIn.clear();
+      return;
+    }
+    for (const id of Object.keys(state.players)) {
+      const p = state.players[id];
+      if (!p.light?.cranking || p.status !== 'alive') {
+        this.crankIn.delete(id);
+        continue;
+      }
+      let left = (this.crankIn.get(id) ?? 0) - step;
+      if (left <= 0) {
+        const at = p.isDesktop ? p.pose.head.position : p.pose.left.position;
+        const s = e.pool.spatial(at, SPATIAL.prop, 1);
+        if (s) sfxCrankTick(s, now + 0.01, 0.94 + Math.random() * 0.12);
+        left += CRANK_TICK * (0.9 + Math.random() * 0.2);
+      }
+      this.crankIn.set(id, Math.max(-CRANK_TICK, left));
     }
   }
 
@@ -254,14 +282,9 @@ export class AudioManager implements IAudioManager {
       const t = e.ctx.currentTime + 0.01;
       const pool = e.pool;
       switch (event.type) {
-        case 'flash': {
-          const s = pool.spatial(event.position, SPATIAL.prop, 2);
-          if (s) sfxShutter(s, t);
-          break;
-        }
-        case 'dryFire': {
+        case 'light': {
           const s = pool.spatial(event.position, SPATIAL.prop, 1);
-          if (s) sfxDryFire(s, t);
+          if (s) sfxLightSwitch(s, t, event.on);
           break;
         }
         case 'pickup': {
@@ -272,11 +295,6 @@ export class AudioManager implements IAudioManager {
         case 'drop': {
           const s = pool.spatial(event.position, SPATIAL.prop, 1);
           if (s) sfxDrop(s, t, event.what);
-          break;
-        }
-        case 'filmLoaded': {
-          const s = pool.spatial(event.position, SPATIAL.prop, 1);
-          if (s) sfxRatchet(s, t);
           break;
         }
         case 'fuseInserted': {

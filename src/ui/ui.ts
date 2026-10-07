@@ -88,7 +88,8 @@ const CONTROLS: [string, string, string][] = [
   ['Sneak (quiet)', 'Crouch for real', 'Hold C'],
   ['Run (loud)', 'Click left stick', 'Shift'],
   ['Grab / drop', 'Grip near it', 'E'],
-  ['Flash camera', 'Trigger', 'Left click'],
+  ['Light on / off', 'Left trigger', 'F'],
+  ['Wind the light (loud)', 'Hold X, or shake your left hand', 'Hold R'],
   ['Hand signs', 'Your real hands', '1–6'],
   ['Talk', 'Just talk (careful)', 'Just talk'],
 ];
@@ -107,13 +108,13 @@ function howToPlay(): HTMLElement {
   return el('details', {}, [
     el('summary', {}, ['How to play']),
     el('p', { class: 'muted' }, [
-      'Something lives in this house. It is blind, but it hears everything: footsteps, the camera, ',
+      'Something lives in this house. It is blind, but it hears everything: footsteps, your light winding, ',
       'and your real voice through your microphone. Whisper and it may not notice. Scream and it charges.',
     ]),
     el('p', { class: 'muted' }, [
-      'Find the fuses, put them in the fuse box by the front door, and escape. It is dark: use your hands ',
-      'to sign to each other, then FLASH the camera so everyone sees your sign frozen in the air. ',
-      'Every flash clicks. Film is limited.',
+      'Find the fuses, put them in the fuse box by the front door, and escape. It is pitch dark: everyone has ',
+      'a wind-up Crank Light. Shine it on your hands to sign to each other. The light is safe (it is blind), ',
+      'but the battery runs out, and winding it back up is LOUD.',
     ]),
     controlsTable(),
     el('p', { class: 'muted' }, ['Desktop signs: 1 point · 2 stop · 3 thumbs up · 4 fist · 5 three · 6 come here']),
@@ -436,7 +437,7 @@ export class UI {
 export class Hud {
   readonly root: HTMLElement;
   private readonly status: HTMLElement;
-  private readonly film: HTMLElement;
+  private readonly light: { root: HTMLElement; fill: HTMLElement; label: HTMLElement };
   private readonly meter: { root: HTMLElement; fill: HTMLElement };
   private readonly toast: HTMLElement;
   /** Small prompt under the crosshair ("E · read"). */
@@ -446,7 +447,9 @@ export class Hud {
 
   constructor() {
     this.status = el('div', { class: 'status' });
-    this.film = el('div', { class: 'film' });
+    const fill = el('div', { class: 'fill' });
+    const label = el('div', { class: 'label' }, ['light']);
+    this.light = { root: el('div', { class: 'light', hidden: '' }, [label, el('div', { class: 'bar' }, [fill])]), fill, label };
     this.meter = micMeter();
     this.toast = el('div', { class: 'toast' });
     this.aim = el('div', { class: 'aim' });
@@ -454,10 +457,10 @@ export class Hud {
       el('div', { class: 'crosshair' }),
       this.aim,
       this.status,
-      this.film,
+      this.light.root,
       el('div', { class: 'mic' }, [el('div', { class: 'label' }, ['your noise']), this.meter.root]),
       el('div', { class: 'hint' }, [
-        'E grab/read · Click flash · 1–6 signs · Shift run · C sneak · Esc menu',
+        'E grab/read · F light · hold R wind (loud) · 1–6 signs · Shift run · C sneak · Esc menu',
       ]),
       this.toast,
     ]);
@@ -481,9 +484,19 @@ export class Hud {
     this.root.classList.toggle('reading', reading);
   }
 
-  setFilm(film: number | null): void {
-    const text = film === null ? '' : `📷 ${film}`;
-    if (this.film.textContent !== text) this.film.textContent = text;
+  /** The Crank Light's battery (null hides it: not playing or not alive). */
+  setLight(light: { charge: number; on: boolean; cranking: boolean } | null): void {
+    const L = this.light;
+    L.root.hidden = !light;
+    if (!light) return;
+    const pct = Math.round(Math.min(1, Math.max(0, light.charge)) * 100);
+    const width = `${pct}%`;
+    if (L.fill.style.width !== width) L.fill.style.width = width;
+    const text = light.cranking ? 'winding…' : !light.on ? 'light off' : pct === 0 ? 'dead · hold R' : 'light';
+    if (L.label.textContent !== text) L.label.textContent = text;
+    L.root.classList.toggle('low', pct < 20);
+    L.root.classList.toggle('off', !light.on);
+    L.root.classList.toggle('winding', light.cranking);
   }
 
   setMicLevel(level: number): void {

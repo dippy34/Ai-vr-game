@@ -2,9 +2,10 @@
 
 **A co-op VR horror game. The monster is blind, but it hears everything, including your real voice.**
 
-You *can* talk. It's just a really bad idea. It's pitch dark, so you talk with your **hands** and
-flash an old camera so your friends can read your hand signs, frozen in the air for a moment.
-Every flash clicks. Film runs out. Find the fuses, open the front door, get out.
+You *can* talk. It's just a really bad idea. It's pitch dark, so you talk with your **hands**,
+lit by a wind-up **Crank Light** strapped to your wrist. The light is safe (it's blind). The
+battery isn't: it runs out, and winding it back up is loud. Find the fuses, open the front door,
+get out.
 
 - 1–4 players, online (WebRTC) or solo
 - Meta Quest browser (controllers **and** hand tracking), or desktop keyboard + mouse
@@ -26,14 +27,16 @@ map, known traps and the next steps. The future story, chapters, tools and diffi
 | Run (loud) | Click left stick | Shift |
 | Grab / drop | Grip near the thing | E |
 | Read a note | Lean in close | Look at it, E (E again to stand up) |
-| Flash the camera | Trigger while holding it | Left click while holding it |
+| Light on / off | Left trigger | F |
+| Wind the light (loud!) | Hold X, or shake your left hand | Hold R |
 | Hand signs | Your real hands | Keys 1–6 |
 | Talk | Just talk (it hears you) | Just talk |
 
 The host starts a round with the trigger (VR) or a click (desktop).
 
 **Hand tracking (no controllers):** pinch your left thumb and index finger and *hold* to walk where
-your left hand points. Make a fist near something to grab it, and pinch to flash the camera.
+your left hand points. Make a fist near something to grab it, pinch your right hand to switch the
+light, and shake your left hand to wind it.
 
 ## Run it locally
 

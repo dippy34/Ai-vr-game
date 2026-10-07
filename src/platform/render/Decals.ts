@@ -268,10 +268,10 @@ export class DecalSet {
     const second = ['dining', 'kitchen', 'living'][Math.floor(rnd() * 3)];
     this.wallPiece('decal_handprints', { rooms: [second], y: 1.0, yJitter: 0.08, score: () => rnd(), slack: 1 }, true);
 
-    // 8. The notes: the tutorial by the camera (everyone reads it first), the study desk note about
-    //    the flash, Tom's in the living room.
+    // 8. The notes: the tutorial on the foyer table by the spawn (everyone reads it first), the
+    //    study desk note about the Crank Light, Tom's in the living room.
     this.tutorialNote();
-    this.surfaceNote('note_flash', 'study', ['table'], { x: 2.55, z: -1.9 });
+    this.surfaceNote('note_light', 'study', ['table'], { x: 2.55, z: -1.9 });
     const lv = center('living');
     const chair = this.input.furniture.find((b) => b.style === 'couch' && roomAt(b.min.x, b.min.z) === 'living' && b.max.x - b.min.x < 1.2);
     const tomSpots = chair
@@ -592,16 +592,16 @@ export class DecalSet {
   // -------------------------------------------------------------------------------------------
 
   private items(): Vec3[] {
-    return [this.level.cameraSpawn.position, ...this.level.fuseSpawns, ...this.level.filmSpawns];
+    return [...this.level.fuseSpawns];
   }
 
-  /** The tutorial note on the furniture the camera lies on (next to it), else on the floor in front of the spawns. */
+  /** The tutorial note on the furniture at the level's tutorialSpot, else on the floor in front of the spawns. */
   private tutorialNote(): void {
     const name = 'note_tutorial';
     const p = this.pieces.get(name);
     if (!p) return;
-    const cam = this.level.cameraSpawn.position;
     const sp = this.spawnCenter();
+    const cam = this.level.tutorialSpot ?? { x: sp.x, y: -1, z: sp.z };
     const table = this.input.furniture.find((f) => cam.x >= f.min.x - 0.02 && cam.x <= f.max.x + 0.02 && cam.z >= f.min.z - 0.02 && cam.z <= f.max.z + 0.02 && Math.abs(f.max.y - cam.y) < 0.08);
     if (table && this.noteOnTop(p, roomAt(cam.x, cam.z) ?? '?', table, sp, 0.1, true, 0.12)) return;
     // Fallback: on the floor right in front of the spawn points.
@@ -633,7 +633,7 @@ export class DecalSet {
     const rnd = this.rng(`top-${p.name}`);
     const r = Math.hypot(p.w, p.h) / 2;
     const cands: { x: number; z: number; yaw: number; score: number }[] = [];
-    const cam = this.level.cameraSpawn.position;
+    const cam = this.level.tutorialSpot ?? this.spawnCenter();
     for (let k = 0; k < 400; k++) {
       const x = top.min.x + (top.max.x - top.min.x) * (0.08 + 0.84 * rnd());
       const z = top.min.z + (top.max.z - top.min.z) * (0.08 + 0.84 * rnd());

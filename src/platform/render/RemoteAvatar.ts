@@ -157,7 +157,7 @@ class ModelPart implements AvatarPart {
 
 /**
  * Makes avatar heads/bodies: GLB ones after `use(lib)` finds them, procedural ones otherwise.
- * Also bakes the head into flash afterimages (no live avatar needed, e.g. for the local player).
+ * Also bakes a head into world-space geometry (no live avatar needed).
  */
 export class AvatarKit {
   private lib: ModelLibrary | null = null;
@@ -239,7 +239,7 @@ export class RemoteAvatar {
     this.group.name = `avatar-${id}`;
     this.head = kit.head(color);
     this.torso = kit.body(color);
-    // Gloves tinted toward the player's color so you can tell who is signing in the flash.
+    // Gloves tinted toward the player's color so you can tell who is signing in the beam.
     const glove = new THREE.Color(0x7d6e63).lerp(new THREE.Color(color), 0.3);
     this.handMat = new THREE.MeshLambertMaterial({ color: glove });
     this.left = hands.create('left', this.handMat);

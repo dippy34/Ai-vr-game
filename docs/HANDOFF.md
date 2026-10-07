@@ -15,8 +15,8 @@ today) and `docs/STORY.md` (the agreed future direction: story, chapters, tools,
   the front door, escape. The monster hunts you by sound.
 - **Where it's going:** a Poppy Playtime-style chapter game with big maps, chase scenes, a
   signature gadget (the Echo) and near-impossible difficulty. See `docs/STORY.md`.
-- **Next job:** replace the camera flash with the **Crank Light**, make the world truly dark, and
-  remove the flash afterimage (§6, step 1).
+- **Done:** the **Crank Light** replaced the camera flash, and the house is truly dark again
+  (§6, step 1). **Next job:** the **Echo** gadget (§6, step 2).
 
 ## 2. Run, test, ship
 
@@ -55,10 +55,10 @@ there and run only on the host. Platform code sits behind interfaces in `src/pla
 
 | Folder / file | What's in it |
 |---|---|
-| `src/config.ts` | **All tunables** (timing, hearing, monster speeds, film, lighting, quality tiers). Tune here, not with magic numbers. |
+| `src/config.ts` | **All tunables** (timing, hearing, monster speeds, the Crank Light `LIGHT`, lighting and beam `RENDER.beam*`, quality tiers). Tune here, not with magic numbers. |
 | `src/core/types.ts` | Shared types. `MonsterState` is the "body-language contract" the renderer animates from: `gait` (still/creep/walk/run), `posture` (tall/duck/crawl), `act` (none/listen/sniff/search/sweep/lurk/climb), `actStart`, `focus`; `position.y > 0` while climbing. `HandPose` documents the canonical hand frame. |
-| `src/core/sim.ts` | `GameSim`: host-authoritative rules (rounds, items, fuses, catching, noise events). `setMonsterFrozen(on)` is a test hook. |
-| `src/core/monster.ts` | `MonsterBrain`: the AI (stalk, search, sweep attack with a 0.5 s wind-up and 1.6 m reach, lurk, predictive chase, escalation, frenzy, sound memory). Explained in `DESIGN.md` → "How the monster thinks". |
+| `src/core/sim.ts` | `GameSim`: host-authoritative rules (rounds, items, fuses, catching, noise events, every player's Crank Light: drain, winding, crank noise). `setMonsterFrozen(on)` is a test hook. |
+| `src/core/monster.ts` | `MonsterBrain`: the AI (stalk, search, sweep attack with a 0.5 s wind-up and 1.6 m reach, lurk, predictive chase, escalation, frenzy, sound memory, and a "hunch": the longer it hears nothing, the more its roaming drifts toward the rooms players are in). Explained in `DESIGN.md` → "How the monster thinks". |
 | `src/core/navgrid.ts` | 0.2 m navigation grid, A* + string pulling, with duck/crawl/climb cells so it can squeeze through door frames and climb over furniture. Rebuilt each round (`sim.ai`). |
 | `src/core/validate.ts` | Sanitizers for every network message (never trust guests). |
 | `src/core/deadspots.test.ts` | Proves there are no spots where the monster can't reach you (an 899-spot scan: 0 unreachable within 60 s). |
@@ -68,7 +68,8 @@ there and run only on the host. Platform code sits behind interfaces in `src/pla
 | `src/platform/render/GameRenderer.ts` | three.js renderer: level, props, avatars, flash, decals, readable notes (`readables()`), avatar shader warm-up. |
 | `src/platform/render/SkinnedMonster.ts` + `monster/` | The monster's **procedural animation**: rig, IK, footstep planning (`steps`), world probing and affordances (door frames, low gaps, furniture to climb), body, motion, gait, springs. Every step is computed live from the world, so no two walks look the same. Authored clips are kept only for the jumpscare (Attack) and Feed. |
 | `src/platform/render/fx/` | Lighting look: `pipeline.ts` (AgX-style tone curve, grain, dither, vignette), `roomAO.ts`, `moonlight.ts`, `monsterSkin.ts` (custom skin shader), `flashGlare.ts`. Height fog. |
-| `src/platform/render/FlashEffect.ts` | The camera flash: PCF shadows rendered only while it's lit, plus the afterimages. **To be replaced by the Crank Light.** |
+| `src/platform/render/CrankLights.ts` | The Crank Light: one spot light per player made at load (slot 0 = yours: PCF shadows + lens cookie + bounce + haze), `beamBrightness()` (low-battery flicker, winding surge), and `LightProp`, the flashlight model. `GameRenderer.updateLights()` aims them (VR: left wrist; desktop: low right, aimed at the view centre). |
+| `src/platform/render/Afterimages.ts` | Pale burned-in ghosts; only the jumpscare's face uses them now. |
 | `src/platform/audio/` | All-procedural WebAudio: HRTF voices, monster sounds, ambience, heartbeat, mic loudness. |
 | `src/platform/input/` | `InputManager` (VR controllers, hand tracking, desktop; `setLean()` for reading notes), `signs.ts` (hand-sign recognition), `handMath.ts`. |
 | `src/ui/` | HUD, menus, toasts (`hud.setAim(text, reading)`). |
@@ -90,8 +91,9 @@ there and run only on the host. Platform code sits behind interfaces in `src/pla
   mid-game will cause a hitch: warm it up at level load.
 - **Light count changes recompile every shader in three.js.** For the Crank Light, create every
   player's light once at level load and toggle `intensity`, never add or remove lights at runtime.
-- **The house got too bright** after the lighting pass (`exposure`, `ambientIntensity`,
-  moonlight). That's why the flash felt useless. Darkness is a gameplay rule, not a style choice.
+- **The house got too bright** after the lighting pass, which made the old flash useless. Fixed:
+  `ambientIntensity` is 0.02 and the moon shafts are dimmer. Darkness is a gameplay rule, not a
+  style choice: check any lighting change with your light **off**.
 - **e2e flakiness = CPU load.** Rerun on a quiet machine before believing a failure.
 - **GitHub Pages "Deploy from a branch" serves raw source** (blank page). It must be "GitHub
   Actions".
@@ -109,34 +111,26 @@ there and run only on the host. Platform code sits behind interfaces in `src/pla
 - Monster model v2 (27.8k triangles, Blender-generated, wet skin shader).
 - Lighting: tone curve, room AO, moonlight shafts, height fog, flash shadows, quality tiers.
 - Desktop parity: every VR feature works on desktop (keys 1–6 for signs, E to grab/read with a
-  lean-in camera, mouse look).
+  lean-in camera, F/R for the light, mouse look).
+- **The Crank Light** (every player, VR wrist / desktop hand): F or left trigger switches it, hold R
+  / X or shake the hand to wind it (loud, the monster hears it). Battery HUD, low-battery flicker,
+  shadows, other players' beams glare. The camera, film and flash afterimages are gone.
+- **Real darkness:** with your light off you barely see a doorway.
 - Multiplayer (PeerJS star + voice mesh), 60 s join grace.
 - Notes and decals that tell the story; a tutorial note.
 - Deploy pipeline, unit tests, e2e playtest, capture tools.
 
 ## 6. What to build next (in this order)
 
-### Step 1: the Crank Light + real darkness (small, ships fast)
-Spec in `docs/STORY.md` → "Tool 1". Suggested plan:
-1. `src/config.ts`: add `CRANK_LIGHT` tunables (battery seconds ~60, crank rate, flicker
-   threshold, crank noise loudness, beam angle/intensity/range). Lower `ambientIntensity`, the
-   moonlight strength and/or `exposure` until the house is truly dark without a light. Set
-   `afterimageDuration` to 0 and delete the afterimage code.
-2. `src/core/types.ts` + `sim.ts`: per-player `light: { on, battery }` instead of the single
-   camera with film. Cranking emits a noise event the monster hears (reuse the noise/hearing
-   path that footsteps and the flash click use). Battery drains while on. Remove the camera and
-   film pickups from the level (or keep the camera as a rare bonus item).
-3. `src/net/protocol.ts` + `validate.ts`: new actions (`lightToggle`, `crank` start/stop);
-   sanitize them; bump `PROTOCOL_VERSION` to 3.
-4. `src/platform/input/InputManager.ts`: desktop **F** = toggle, **hold R** = crank. VR: a
-   controller button toggles, and shaking the light hand (controller velocity) cranks. Hand
-   tracking: a gesture of your choice.
-5. Renderer: one `SpotLight` per player created at level load (see trap above), attached to the
-   holding hand (VR) or the camera (desktop). Only the local player's light casts shadows on Quest
-   (`RENDER.quality`). Flicker when low. A small battery meter on the light model or HUD.
-6. Update the tutorial and flash notes (`art/blender/decals_notes.py`, then `npm run assets`),
-   the README/DESIGN controls tables, unit tests that use film/flash, and `tests/e2e/smoke.cjs`.
-7. `npm test && npm run build && npm run test:e2e`, then push (it deploys).
+### Step 1: the Crank Light + real darkness ✅ (done)
+Built as specced in `docs/STORY.md` → "Tool 1": `LIGHT` in `src/config.ts`; `CrankLightState` on
+every player (`src/core/types.ts`); `light` / `crank` actions and the crank noise in `sim.ts`;
+protocol v3; F / hold R on desktop, left trigger / hold X / shake on VR controllers, right pinch /
+shake with hand tracking (`InputManager`); HUD battery bar; `CrankLights.ts` for the beams and the
+model; switch click and ratchet sounds; the tutorial note now says "Winding is LOUD" and the study
+note (`note_light`) explains the light. Not yet checked on a real Quest: VR wrist placement, shake
+feel and the frame cost of the beam shadows. Tune `WRIST_LENS` / `DESK_LENS` in `GameRenderer.ts`
+and `SHAKE_*` in `InputManager.ts`.
 
 ### Step 2: the Echo, v1 (Record / Throw)
 A held gadget: aim at a sound source (phone, radio, a teammate whispering) to record it, then fire

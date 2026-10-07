@@ -1,6 +1,7 @@
-import { GAME, HEARING, MONSTER, NOISE, PLAYER, PLAYER_COLORS } from '../config';
+import { GAME, HEARING, LIGHT, MONSTER, NOISE, PLAYER, PLAYER_COLORS } from '../config';
 import type {
   Box,
+  CrankLightState,
   Handedness,
   HandPose,
   ItemKind,
@@ -27,7 +28,6 @@ import {
   lerp3,
   makeRng,
   mixSeed,
-  normalize3,
   quatFromYaw,
   rotate3,
   v3,
@@ -48,7 +48,6 @@ import { clampToward, hasOwn, LIMITS, sanitizePose } from './validate';
 
 export interface SimOptions {
   fusesRequired?: number;
-  startingFilm?: number;
   /** The monster remembers where it heard things and patrols there more (default true). */
   noiseMemory?: boolean;
   /**
@@ -74,8 +73,6 @@ export const SIM_TUNING = {
   chaseReplanInterval: BRAIN_TUNING.chaseReplanInterval,
   /** The sim advances in ticks of at most this many seconds. */
   maxTick: 1 / 30,
-  /** Loudness of a dry trigger click. */
-  dryFireLoudness: NOISE.cameraClick * 0.25,
   /** Radius used to keep dropped things out of walls. */
   itemRadius: 0.05,
   /**
@@ -100,7 +97,9 @@ export const SIM_TUNING = {
 } as const;
 
 const HANDS: readonly Handedness[] = ['left', 'right'];
-const NEVER = -1e9;
+
+/** A full, switched-on Crank Light (every player's at the start of a round). */
+export const freshLight = (): CrankLightState => ({ on: LIGHT.startOn, charge: LIGHT.startCharge, cranking: false });
 
 /** Default (untracked) pose for a player standing at `feet` facing `yaw`. */
 export function makeSpawnPose(feet: Vec3, yaw: number): PlayerPose {
@@ -156,6 +155,8 @@ export class GameSim {
   private readonly host: MonsterHost;
   /** Per remote player: how far (m) their head may still move right now, and when that was. */
   private moveBudget: Record<PlayerId, { left: number; time: number }> = {};
+  /** Per player: seconds until their winding is heard again. */
+  private crankNoiseIn: Record<PlayerId, number> = {};
 
   constructor(level: LevelData, opts: SimOptions = {}) {
     this.level = level;
@@ -177,14 +178,6 @@ export class GameSim {
       players: {},
       monster: freshMonster(flat(level.monsterSpawn), 0),
       items: [],
-      camera: {
-        holder: null,
-        hand: null,
-        position: copy3(level.cameraSpawn.position),
-        yaw: level.cameraSpawn.yaw,
-        film: this.startingFilm(),
-        lastFlashTime: NEVER,
-      },
       fusesInserted: 0,
       fusesRequired: this.fusesRequired(),
       exitOpen: false,
@@ -219,6 +212,7 @@ export class GameSim {
       spawnYaw: sp.yaw,
       pose: makeSpawnPose(sp.position, sp.yaw),
       held: { left: null, right: null },
+      light: freshLight(),
     };
     this.state.players[id] = player;
     this.spawnOf[id] = spawnIdx;
@@ -236,6 +230,7 @@ export class GameSim {
     delete this.state.players[id];
     delete this.spawnOf[id];
     delete this.moveBudget[id];
+    delete this.crankNoiseIn[id];
     this.joinOrder = this.joinOrder.filter((j) => j !== id);
     if (this.state.monster.targetPlayer === id) this.state.monster.targetPlayer = null;
     this.checkEnd(out);
@@ -262,7 +257,7 @@ export class GameSim {
   // -------------------------------------------------------------------------------------------
 
   /**
-   * Start (or restart) a round: resets monster, items, camera, fuses, statuses; assigns spawns.
+   * Start (or restart) a round: resets monster, items, lights, fuses, statuses; assigns spawns.
    * Sets phase 'playing'. Returns events (including { type: 'phase', phase: 'playing' }).
    */
   startRound(): SimEvent[] {
@@ -277,6 +272,7 @@ export class GameSim {
       this.spawnOf[id] = idx;
       p.status = 'alive';
       p.held = { left: null, right: null };
+      p.light = freshLight();
       p.spawn = copy3(spawns[idx].position);
       p.spawnYaw = spawns[idx].yaw;
       p.pose = makeSpawnPose(spawns[idx].position, spawns[idx].yaw);
@@ -305,8 +301,14 @@ export class GameSim {
     const s = this.state;
     const p = playerOf(s, id);
     const out: SimEvent[] = [];
-    if (!p || p.status !== 'alive' || s.phase !== 'playing') return out;
-    if (!action || !isHand(action.hand) || !isFiniteVec3(action.position)) return out;
+    if (!p || p.status !== 'alive' || s.phase !== 'playing' || !action) return out;
+    if (action.type === 'light' || action.type === 'crank') {
+      if (typeof action.on !== 'boolean') return out;
+      if (action.type === 'light') this.switchLight(p, action.on, out);
+      else p.light.cranking = action.on;
+      return out;
+    }
+    if (!isHand(action.hand) || !isFiniteVec3(action.position)) return out;
     // Hands are never farther than an arm from the eyes (actions come off the network).
     const at = clampToward(p.pose.head.position, copy3(action.position), LIMITS.handReach);
     switch (action.type) {
@@ -315,9 +317,6 @@ export class GameSim {
         break;
       case 'release':
         this.release(p, action.hand, at, out);
-        break;
-      case 'flash':
-        this.flash(p, action.hand, at, action.direction, out);
         break;
     }
     return out;
@@ -352,10 +351,6 @@ export class GameSim {
   // ===========================================================================================
   // Internals
   // ===========================================================================================
-
-  private startingFilm(): number {
-    return Math.max(0, Math.floor(this.opts.startingFilm ?? GAME.startingFilm));
-  }
 
   private fusesRequired(): number {
     return clamp(Math.floor(this.opts.fusesRequired ?? GAME.fusesRequired), 0, this.level.fuseSpawns.length);
@@ -411,7 +406,7 @@ export class GameSim {
     return far[Math.floor(this.rng() * far.length) % far.length].position;
   }
 
-  /** Reset monster, items, camera and objective for a new round (players handled by caller). */
+  /** Reset monster, items and objective for a new round (players handled by caller). */
   private resetWorld(): void {
     const s = this.state;
     const L = this.level;
@@ -422,7 +417,7 @@ export class GameSim {
     s.exitOpen = s.fusesRequired === 0;
     s.lastHeard = null;
 
-    // Pick fuse spots with a seeded shuffle; a film roll on every film spot.
+    // Pick fuse spots with a seeded shuffle.
     const order = L.fuseSpawns.map((_, i) => i);
     for (let i = order.length - 1; i > 0; i--) {
       const j = Math.floor(this.rng() * (i + 1));
@@ -439,17 +434,7 @@ export class GameSim {
       hand: null,
     });
     for (let k = 0; k < s.fusesRequired; k++) items.push(make('fuse', L.fuseSpawns[order[k]]));
-    for (const f of L.filmSpawns) items.push(make('film', f));
     s.items = items;
-
-    s.camera = {
-      holder: null,
-      hand: null,
-      position: copy3(L.cameraSpawn.position),
-      yaw: L.cameraSpawn.yaw,
-      film: this.startingFilm(),
-      lastFlashTime: NEVER,
-    };
 
     const yaw = this.rng() * Math.PI * 2 - Math.PI;
     s.monster = freshMonster(flat(this.pickMonsterSpawn()), yaw);
@@ -463,14 +448,8 @@ export class GameSim {
     for (const hand of HANDS) {
       const h = p.held[hand];
       if (!h) continue;
-      const hp = p.pose[hand];
-      if (h.kind === 'camera') {
-        s.camera.position = copy3(hp.position);
-        s.camera.yaw = yawFromQuat(hp.rotation);
-      } else {
-        const it = s.items.find((i) => i.id === h.itemId);
-        if (it) it.position = copy3(hp.position);
-      }
+      const it = s.items.find((i) => i.id === h.itemId);
+      if (it) it.position = copy3(p.pose[hand].position);
     }
   }
 
@@ -509,25 +488,14 @@ export class GameSim {
     if (!h) return;
     p.held[hand] = null;
     const pos = this.restPoint(at, p.pose.head.position);
-    const yaw = yawFromQuat(p.pose[hand].rotation);
-    let what: 'camera' | ItemKind;
-    if (h.kind === 'camera') {
-      s.camera.holder = null;
-      s.camera.hand = null;
-      s.camera.position = pos;
-      s.camera.yaw = yaw;
-      what = 'camera';
-    } else {
-      const it = s.items.find((i) => i.id === h.itemId);
-      if (!it) return;
-      it.where = 'world';
-      it.holder = null;
-      it.hand = null;
-      it.position = pos;
-      it.yaw = yaw;
-      what = it.kind;
-    }
-    out.push({ type: 'drop', by: p.id, what, position: copy3(pos) });
+    const it = s.items.find((i) => i.id === h.itemId);
+    if (!it) return;
+    it.where = 'world';
+    it.holder = null;
+    it.hand = null;
+    it.position = pos;
+    it.yaw = yawFromQuat(p.pose[hand].rotation);
+    out.push({ type: 'drop', by: p.id, what: it.kind, position: copy3(pos) });
     if (noisy) this.hear({ source: 'item', position: pos, loudness: NOISE.itemDrop, playerId: p.id }, out);
   }
 
@@ -542,7 +510,7 @@ export class GameSim {
     if (p.held[hand]) return;
     const r = clamp(Number.isFinite(reach) ? reach : 0, 0, Math.max(PLAYER.desktopGrabReach, PLAYER.vrGrabReach));
     const opts = this.coll();
-    let best: { kind: 'camera' } | { kind: 'item'; item: ItemState } | null = null;
+    let best: ItemState | null = null;
     let bestD = Infinity;
     const consider = (pos: Vec3): number => {
       const d = dist3(at, pos);
@@ -552,46 +520,16 @@ export class GameSim {
       if (wallsBetween(this.level, p.pose.head.position, pos, opts) > 0) return Infinity;
       return d;
     };
-    if (s.camera.holder === null) {
-      const d = consider(s.camera.position);
-      if (d < bestD) {
-        bestD = d;
-        best = { kind: 'camera' };
-      }
-    }
     for (const it of s.items) {
       if (it.where !== 'world') continue;
       const d = consider(it.position);
       if (d < bestD) {
         bestD = d;
-        best = { kind: 'item', item: it };
+        best = it;
       }
     }
     if (!best) return;
-
-    if (best.kind === 'camera') {
-      s.camera.holder = p.id;
-      s.camera.hand = hand;
-      s.camera.position = copy3(at);
-      p.held[hand] = { kind: 'camera' };
-      out.push({ type: 'pickup', by: p.id, what: 'camera', position: copy3(s.camera.position) });
-      this.hear({ source: 'item', position: s.camera.position, loudness: NOISE.itemPickup, playerId: p.id }, out);
-      return;
-    }
-    const it = best.item;
-    if (it.kind === 'film') {
-      it.where = 'used';
-      s.camera.film += GAME.filmPerRoll;
-      out.push({
-        type: 'filmLoaded',
-        by: p.id,
-        amount: GAME.filmPerRoll,
-        total: s.camera.film,
-        position: copy3(it.position),
-      });
-      this.hear({ source: 'item', position: it.position, loudness: NOISE.itemPickup, playerId: p.id }, out);
-      return;
-    }
+    const it: ItemState = best;
     it.where = 'held';
     it.holder = p.id;
     it.hand = hand;
@@ -607,20 +545,43 @@ export class GameSim {
     this.dropHand(p, hand, at, out, true);
   }
 
-  private flash(p: PlayerState, hand: Handedness, at: Vec3, direction: Vec3, out: SimEvent[]): void {
-    const s = this.state;
-    const cam = s.camera;
-    if (cam.holder !== p.id || cam.hand !== hand) return;
-    const pos = copy3(at);
-    if (cam.film > 0 && s.time - cam.lastFlashTime >= GAME.flashCooldown) {
-      cam.film--;
-      cam.lastFlashTime = s.time;
-      const dir = isFiniteVec3(direction) ? normalize3(direction) : v3(0, 0, -1);
-      out.push({ type: 'flash', by: p.id, position: pos, direction: dir, time: s.time });
-      this.hear({ source: 'camera', position: pos, loudness: NOISE.cameraClick, playerId: p.id }, out);
-    } else {
-      out.push({ type: 'dryFire', by: p.id, position: pos });
-      this.hear({ source: 'camera', position: pos, loudness: SIM_TUNING.dryFireLoudness, playerId: p.id }, out);
+  // ---- the Crank Light -----------------------------------------------------------------------
+
+  /** Where a player's Crank Light is (its clicks and winding are heard from there). */
+  lightPosition(p: PlayerState): Vec3 {
+    return copy3(p.isDesktop ? p.pose.head.position : p.pose.left.position);
+  }
+
+  private switchLight(p: PlayerState, on: boolean, out: SimEvent[]): void {
+    if (p.light.on === on) return;
+    p.light.on = on;
+    const position = this.lightPosition(p);
+    out.push({ type: 'light', by: p.id, on, position });
+    this.hear({ source: 'light', position, loudness: NOISE.lightClick, playerId: p.id }, out);
+  }
+
+  /** Drain lit batteries, charge wound ones; winding is loud. */
+  private updateLights(dt: number, out: SimEvent[]): void {
+    for (const p of Object.values(this.state.players)) {
+      const L = p.light;
+      if (p.status !== 'alive') {
+        L.cranking = false;
+        continue;
+      }
+      if (L.on) L.charge = Math.max(0, L.charge - dt / LIGHT.batterySeconds);
+      if (!L.cranking) {
+        this.crankNoiseIn[p.id] = 0;
+        continue;
+      }
+      L.charge = Math.min(1, L.charge + dt / LIGHT.crankSecondsToFull);
+      // The first ratchet is heard straight away, then one every crankNoiseInterval.
+      const left = (this.crankNoiseIn[p.id] ?? 0) - dt;
+      if (left > 0) {
+        this.crankNoiseIn[p.id] = left;
+        continue;
+      }
+      this.crankNoiseIn[p.id] = left + LIGHT.crankNoiseInterval;
+      this.hear({ source: 'light', position: this.lightPosition(p), loudness: NOISE.crank, playerId: p.id }, out);
     }
   }
 
@@ -677,6 +638,7 @@ export class GameSim {
     s.time += dt;
     s.monster.alert = Math.max(0, s.monster.alert - dt / SIM_TUNING.alertDecaySeconds);
     this.checkFuses(out);
+    this.updateLights(dt, out);
     if (!this.monsterFrozen) {
       this.ai.update(dt, out);
       this.checkContacts(out);
@@ -748,6 +710,8 @@ export class GameSim {
 
   private catchPlayer(p: PlayerState, out: SimEvent[]): void {
     p.status = 'caught';
+    p.light.on = false;
+    p.light.cranking = false;
     this.dropAll(p, out, false);
     out.push({ type: 'playerCaught', id: p.id, position: copy3(p.pose.head.position) });
     this.ai.onCaught(p.pose.head.position);

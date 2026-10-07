@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { PLAYER, PLAYER_COLORS, RENDER } from '../../config';
 import type {
-  FlashEvent,
   Handedness,
   LevelData,
   PlayerId,
@@ -11,7 +10,8 @@ import type {
 } from '../../core/types';
 import type { IGameRenderer, Readable, RenderContext } from '../types';
 import { NOTE_PREFIX } from './Decals';
-import { FlashEffect } from './FlashEffect';
+import { Afterimages } from './Afterimages';
+import { beamBrightness, CrankLights, LightProp } from './CrankLights';
 import { HandFactory, type Hand } from './hands';
 import { Jumpscare } from './Jumpscare';
 import { LevelView } from './LevelView';
@@ -24,11 +24,11 @@ import { SurfaceLibrary } from './SurfaceTextures';
 import { SkinnedMonster } from './SkinnedMonster';
 import { FURNITURE_MODEL_NAMES } from './FurnitureModels';
 import { NoiseMeter } from './NoiseMeter';
-import { CameraProp, FilmProp, FuseProp, type HoldStyle, type Prop } from './Props';
+import { FuseProp, type HoldStyle, type Prop } from './Props';
 import { AvatarKit, RemoteAvatar } from './RemoteAvatar';
 import { DRESSING_PREFIX } from './Dressing';
 import { setTextureAnisotropy } from './textures';
-import { paint, rayAabb, segmentHitsAabb, setQ, setV } from './util';
+import { rayAabb, setQ, setV } from './util';
 import { forcedQuality, installShaderFx, pickQuality, setFxFrame, type RenderQuality } from './fx/pipeline';
 import { DustMotes } from './fx/moonlight';
 import { FlashGlare } from './fx/flashGlare';
@@ -55,15 +55,14 @@ function toneMapper(): THREE.ToneMapping {
   const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('tm') : null;
   return (q ? TONE_MAPPERS[q] : undefined) ?? THREE.CustomToneMapping;
 }
-/** Cast the flash's shadows (every mesh under `root`). */
+/** Cast the Crank Light's shadows (every mesh under `root`). */
 function castShadows(root: THREE.Object3D, on = true): void {
   root.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = on; });
 }
-const AFTERIMAGE_MIN_DOT = 0.1;
 /** GLB models the renderer knows how to use (public/models/<name>.glb). */
 const MODEL_NAMES = [
   'monster', 'hand_left', 'hand_right', 'avatar_head', 'avatar_body',
-  'camera', 'fuse', 'film', 'fusebox', 'door', 'window_frame', 'doorway_casing', 'radiator',
+  'fuse', 'fusebox', 'door', 'window_frame', 'doorway_casing', 'radiator',
   ...FURNITURE_MODEL_NAMES,
 ];
 /** Every GLB in the manifest with one of these prefixes is loaded too (set dressing). */
@@ -76,13 +75,24 @@ const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _q = new THREE.Quaternion();
-const _origin = new THREE.Vector3();
-const _dir = new THREE.Vector3();
-const _col = new THREE.Color();
+const _m4 = new THREE.Matrix4();
 const _dbs = new THREE.Vector2();
-const SIDES = ['left', 'right'] as const;
-/** Heights (m) above the monster's feet tested for a flash hit (a partly hidden monster still shows). */
-const MONSTER_PROBES = [0.6, 1.3, 2.0];
+const _up = new THREE.Vector3();
+const _glarePos = new THREE.Vector3();
+/**
+ * Where the Crank Light sits. VR: strapped on the back of the left wrist (canonical hand frame:
+ * +Y out of the back of the hand), lens just behind the knuckles, shining where the fingers point.
+ * Desktop: held low on the right, aimed at a point straight ahead of the eyes.
+ */
+const WRIST_LENS = new THREE.Vector3(0, 0.045, -0.075);
+const DESK_LENS = new THREE.Vector3(0.13, -0.25, -0.42);
+const DESK_AIM = 7;
+/** A per-player phase so flickers and winding surges never line up between players. */
+const seedOf = (id: string): number => {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 1000;
+  return h;
+};
 
 /** three.js renderer for MUTE. */
 export class GameRenderer implements IGameRenderer {
@@ -113,8 +123,14 @@ export class GameRenderer implements IGameRenderer {
   readonly surfaces = new SurfaceLibrary(8);
   private readonly items = new Map<number, Prop>();
   private readonly seenItems = new Set<number>();
-  private cameraProp: CameraProp;
-  private readonly flashFx: FlashEffect;
+  /** Every player's Crank Light beam (slot 0 = local), and their flashlight models. */
+  private readonly lights: CrankLights;
+  private readonly lightProps = new Map<PlayerId, LightProp>();
+  private readonly beamSlot = new Map<PlayerId, number>();
+  /** The local player's light as the game predicts it (switch flips show instantly). */
+  private readonly localLight = { on: true, cranking: false };
+  /** The jumpscare's burned-in face. */
+  private readonly afterimages: Afterimages;
   /** Catch sequence (local jumpscare, others being grabbed) + the ghost look while caught. */
   private readonly jumpscare: Jumpscare;
   private readonly meter: NoiseMeter;
@@ -131,10 +147,10 @@ export class GameRenderer implements IGameRenderer {
   private readonly forcedQuality = forcedQuality();
   private frameNo = 0;
   private readonly motes: DustMotes;
+  /** Lens glare on another player's beam aimed at you (the strongest one). */
   private readonly glare = new FlashGlare();
-  /** The last flash: who fired it and its beam direction (for the lens glare). */
-  private lastFlashBy: PlayerId | null = null;
-  private readonly lastFlashDir = new THREE.Vector3(0, 0, -1);
+  private glareK = 0;
+  private glareFacing = 0;
   /** Avatars' shadow casting follows their status (ghosts don't cast). */
   private readonly avatarCasts = new WeakMap<RemoteAvatar, boolean>();
 
@@ -148,7 +164,7 @@ export class GameRenderer implements IGameRenderer {
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = toneMapper();
     renderer.toneMappingExposure = RENDER.exposure;
-    // Only the camera flash casts, and its map is rendered only while it is lit (see render()).
+    // Only your Crank Light casts, and its map is rendered only while it is on (see render()).
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.shadowMap.autoUpdate = false;
@@ -201,15 +217,12 @@ export class GameRenderer implements IGameRenderer {
     castShadows(this.monster.object);
     this.dynamic.add(this.monster.object);
 
-    this.cameraProp = new CameraProp();
-    this.cameraProp.group.visible = false;
-    this.dynamic.add(this.cameraProp.group);
-
-    this.flashFx = new FlashEffect(scene, camera);
+    this.lights = new CrankLights(scene);
+    this.afterimages = new Afterimages(scene);
     scene.add(this.glare.mesh);
     this.motes = new DustMotes(Math.max(RENDER.tiers.quest.motes, RENDER.tiers.desktop.motes));
     scene.add(this.motes.points);
-    this.jumpscare = new Jumpscare(scene, camera, this.hemi, this.nearLight, this.flashFx, RENDER.jumpscare);
+    this.jumpscare = new Jumpscare(scene, camera, this.hemi, this.nearLight, this.afterimages, RENDER.jumpscare);
     this.jumpscare.onDeferredMessage = (text, seconds) => this.message.show(text, seconds);
     this.meter = new NoiseMeter();
     this.dynamic.add(this.meter.mesh);
@@ -241,7 +254,7 @@ export class GameRenderer implements IGameRenderer {
     if (monster && inst) {
       const old = this.monster;
       const next = new SkinnedMonster(monster, inst);
-      // Wet, translucent skin + glossy keratin; casts / receives the flash shadows.
+      // Wet, translucent skin + glossy keratin; casts / receives the Crank Light's shadows.
       applyMonsterSkin(next.object);
       next.setLevel(this.levelData);
       this.dynamic.remove(old.object);
@@ -272,17 +285,8 @@ export class GameRenderer implements IGameRenderer {
       }
       this.avatars.clear();
     }
-    // Item props: the camera now, fuses/film get recreated by updateItems() next frame.
-    if (this.models.has('camera')) {
-      const old = this.cameraProp;
-      const next = new CameraProp(this.models);
-      next.group.visible = old.group.visible;
-      this.dynamic.remove(old.group);
-      old.dispose();
-      this.cameraProp = next;
-      this.dynamic.add(next.group);
-    }
-    if (this.models.has('fuse') || this.models.has('film')) this.clearItems();
+    // Item props (fuses) get recreated with their models by updateItems() next frame.
+    if (this.models.has('fuse')) this.clearItems();
     // A level built before the models arrived gets rebuilt with them.
     if (this.levelData && (this.models.names().some(isLevelModel) || this.surfaces.loaded)) this.loadLevel(this.levelData);
   }
@@ -306,15 +310,16 @@ export class GameRenderer implements IGameRenderer {
       this.level = null;
     }
     this.clearItems();
-    this.flashFx.clearAfterimages();
+    this.afterimages.clear();
     this.jumpscare.reset(this.monster);
     this.levelData = level;
     this.monster.setLevel(level);
     this.level = new LevelView(level, this.models, this.surfaces);
     this.ctx.scene.add(this.level.group);
     this.motes.setWindows(this.level.moonWindows);
-    // Compile every shader now (incl. afterimage + whiteout) so the first flash doesn't hitch.
-    this.flashFx.setWarmupVisible(true);
+    // Compile every shader now (incl. the afterimage + glare ones) so nothing hitches mid-round.
+    // Every beam is lit for it: intensity 0 lights still count, so the programs match play.
+    this.afterimages.setWarmupVisible(true);
     this.jumpscare.setWarmupVisible(true);
     this.glare.setWarmupVisible(true);
     const hidden: THREE.Object3D[] = [];
@@ -340,18 +345,18 @@ export class GameRenderer implements IGameRenderer {
     }
     for (const o of hidden) o.visible = false;
     for (const w of this.warmAvatars) w.group.visible = false;
-    this.flashFx.setWarmupVisible(false);
+    this.afterimages.setWarmupVisible(false);
     this.jumpscare.setWarmupVisible(false);
     this.glare.setWarmupVisible(false);
   }
 
   /**
    * compile() doesn't build the shadow pass's depth programs (static / skinned / instanced): render
-   * the flash's shadow map once with every caster in it, so the first flash doesn't compile them.
+   * the beam's shadow map once with every caster in it, so the first frames don't compile them.
    */
   private warmShadowPrograms(): void {
     const r = this.ctx.renderer;
-    if (!this.flashFx.spot.castShadow) return;
+    if (!this.lights.local.castShadow) return;
     const culled: THREE.Object3D[] = [];
     this.ctx.scene.traverse((o) => {
       if (o.castShadow && o.frustumCulled) {
@@ -360,7 +365,7 @@ export class GameRenderer implements IGameRenderer {
       }
     });
     r.shadowMap.needsUpdate = true;
-    r.shadowMap.render([this.flashFx.spot], this.ctx.scene, this.ctx.camera);
+    r.shadowMap.render([this.lights.local], this.ctx.scene, this.ctx.camera);
     for (const o of culled) o.frustumCulled = true;
   }
 
@@ -395,8 +400,9 @@ export class GameRenderer implements IGameRenderer {
     this.jumpscare.update(state, localId, this.headPos, this.headQuat, this.monster, this.time, dt, this.victimHead);
     this.monster.update(state.monster, dt);
     this.updateItems(state, localId, localPose);
-    this.flashFx.update(this.time);
-    this.updateFx(localId);
+    this.updateLights(state, localId, localPose, dt);
+    this.afterimages.update(this.time);
+    this.updateFx();
 
     // Noise meter on the inside of the local left wrist.
     setV(_a, localPose.left.position);
@@ -464,7 +470,7 @@ export class GameRenderer implements IGameRenderer {
       seen.add(it.id);
       let prop = this.items.get(it.id);
       if (!prop) {
-        prop = it.kind === 'fuse' ? new FuseProp(this.models) : new FilmProp(this.models);
+        prop = new FuseProp(this.models);
         castShadows(prop.group);
         this.items.set(it.id, prop);
         this.dynamic.add(prop.group);
@@ -485,16 +491,126 @@ export class GameRenderer implements IGameRenderer {
         this.items.delete(id);
       }
     }
-    const cam = state.camera;
-    const cp = this.cameraProp;
-    cp.group.visible = true;
-    cp.setFilm(cam.film);
-    if (cam.holder && this.handFrame(cam.holder, cam.hand, localId, localPose, _a, _q)) {
-      cp.placeInHand(cam.hand!, _a, _q, this.holdStyle(state, cam.holder, localId));
-    } else {
-      cp.placeInWorld(cam.position.x, cam.position.y, cam.position.z, cam.yaw);
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Crank Lights
+  // -------------------------------------------------------------------------------------------
+
+  setLocalLight(on: boolean, cranking: boolean): void {
+    this.localLight.on = on;
+    this.localLight.cranking = cranking;
+  }
+
+  /**
+   * Lens position + orientation (-Z = beam) of a player's Crank Light this frame: the local player
+   * from the freshest pose, others from their smoothed avatar. False if it isn't anywhere to show.
+   */
+  private lightFrame(id: PlayerId, isDesktop: boolean, localId: PlayerId, localPose: PlayerPose,
+    outPos: THREE.Vector3, outQuat: THREE.Quaternion): boolean {
+    const local = id === localId;
+    const desktop = local ? !this.ctx.renderer.xr.isPresenting : isDesktop;
+    if (desktop) {
+      let hp: THREE.Vector3, hq: THREE.Quaternion;
+      if (local) {
+        hp = this.headPos;
+        hq = this.headQuat;
+      } else {
+        const av = this.avatars.get(id);
+        if (!av?.target) return false;
+        hp = av.headPos;
+        hq = av.headQuat;
+      }
+      outPos.copy(DESK_LENS).applyQuaternion(hq).add(hp);
+      // Aimed at a point straight ahead, so the beam's centre meets the middle of the view.
+      _b.set(0, 0, -DESK_AIM).applyQuaternion(hq).add(hp);
+      _up.set(0, 1, 0).applyQuaternion(hq);
+      _m4.lookAt(outPos, _b, _up);
+      outQuat.setFromRotationMatrix(_m4);
+      return true;
     }
-    cp.update(this.time, cp.group.position.distanceTo(this.headPos));
+    if (local) {
+      // The last known pose is kept while tracking blips, so the beam doesn't cut out.
+      setV(_a, localPose.left.position);
+      setQ(outQuat, localPose.left.rotation);
+    } else {
+      const av = this.avatars.get(id);
+      if (!av?.target) return false;
+      _a.copy(av.hands.left.pos);
+      outQuat.copy(av.hands.left.quat);
+    }
+    outPos.copy(WRIST_LENS).applyQuaternion(outQuat).add(_a);
+    return true;
+  }
+
+  private updateLights(state: WorldState, localId: PlayerId, localPose: PlayerPose, dt: number): void {
+    const L = this.lights;
+    const blockers = this.level ? this.level.blockers() : [];
+    for (const id of [...this.beamSlot.keys()]) if (!state.players[id] || id === localId) this.beamSlot.delete(id);
+    for (const [id, prop] of this.lightProps) {
+      if (!state.players[id]) {
+        prop.dispose();
+        this.lightProps.delete(id);
+      }
+    }
+    const lit = new Set<number>();
+    this.glareK = 0;
+    for (const id in state.players) {
+      const p = state.players[id];
+      const local = id === localId;
+      let slot = local ? 0 : this.beamSlot.get(id);
+      if (slot === undefined) {
+        const taken = new Set(this.beamSlot.values());
+        for (let i = 1; i < L.spots.length; i++) {
+          if (!taken.has(i)) {
+            slot = i;
+            this.beamSlot.set(id, i);
+            break;
+          }
+        }
+      }
+      const light = local ? { on: this.localLight.on, charge: p.light.charge, cranking: this.localLight.cranking } : p.light;
+      const alive = p.status === 'alive';
+      const shown = alive && this.lightFrame(id, p.isDesktop, localId, localPose, _a, _q);
+      const k = shown ? beamBrightness(light, this.time, seedOf(id)) : 0;
+
+      let prop = this.lightProps.get(id);
+      if (!prop) {
+        prop = new LightProp();
+        this.lightProps.set(id, prop);
+        this.dynamic.add(prop.group);
+      }
+      prop.group.visible = shown;
+      if (shown) {
+        prop.place(_a, _q);
+        prop.update(k, light.charge, light.cranking, dt);
+      }
+
+      if (slot === undefined) continue;
+      lit.add(slot);
+      _d.set(0, 0, -1).applyQuaternion(_q);
+      // A centimetre in front of the lens, so the light is never inside the model.
+      _b.copy(_a).addScaledVector(_d, 0.01);
+      let hit = 4;
+      if (local && k > 0) {
+        hit = RENDER.beamRange;
+        for (const bl of blockers) hit = Math.min(hit, rayAabb(_b, _d, bl));
+      }
+      L.set(slot, k, _b, _d, hit);
+      // Another player's beam in your eyes: lens glare (the strongest one wins).
+      if (!local && k > 0) {
+        const toMe = _glarePos.subVectors(this.headPos, _b);
+        const dist = Math.max(0.05, toMe.length());
+        const facing = Math.max(0, _d.dot(toMe) / dist);
+        const g = k * facing * facing * Math.max(0, 1 - dist / RENDER.beamRange);
+        if (g > this.glareK * this.glareFacing * this.glareFacing || this.glareK === 0) {
+          this.glareK = k * Math.max(0, 1 - dist / RENDER.beamRange);
+          this.glareFacing = facing;
+          this.glare.mesh.position.copy(_b);
+        }
+      }
+    }
+    for (let i = 0; i < L.spots.length; i++) if (!lit.has(i)) L.set(i, 0, this.headPos, _d.set(0, 0, -1));
   }
 
   /** Desktop hands rest palm down; VR hands hold things in a natural grip. */
@@ -507,110 +623,6 @@ export class GameRenderer implements IGameRenderer {
     const av = this.avatars.get(id);
     if (av) av.setTarget(pose, true, this.time);
     else this.pendingPoses.set(id, pose);
-  }
-
-  // -------------------------------------------------------------------------------------------
-  // Flash + afterimages
-  // -------------------------------------------------------------------------------------------
-
-  flash(event: FlashEvent, state: WorldState, localId: PlayerId, localPose: PlayerPose): void {
-    const origin = _origin.set(event.position.x, event.position.y, event.position.z);
-    const dir = _dir.set(event.direction.x, event.direction.y, event.direction.z);
-    if (dir.lengthSq() < 1e-8) dir.set(0, 0, -1);
-    dir.normalize();
-    const blockers = this.level ? this.level.blockers() : [];
-
-    /** 0 = not captured, else brightness 0.45..1 by distance. */
-    const captured = (p: THREE.Vector3): number => {
-      _d.subVectors(p, origin);
-      const dist = _d.length();
-      if (dist > RENDER.flashRange) return 0;
-      if (dist > 1e-4 && _d.dot(dir) / dist <= AFTERIMAGE_MIN_DOT) return 0;
-      for (const b of blockers) if (segmentHitsAabb(origin, p, b, 0.08)) return 0;
-      return Math.max(0.45, Math.min(1, 1.12 - (dist / RENDER.flashRange) * 0.7));
-    };
-
-    const parts: THREE.BufferGeometry[] = [];
-    const halo: THREE.BufferGeometry[] = [];
-    const push = (list: THREE.BufferGeometry[], from: number, k: number): void => {
-      _col.setRGB(k, k, k);
-      for (let i = from; i < list.length; i++) paint(list[i], _col);
-    };
-    // The hand holding the camera is behind its lens: it never freezes into its own flash (it
-    // would sit in the flasher's view as a big white ghost). Their other hand still can.
-    const lensHand = state.camera.holder === event.by ? state.camera.hand : null;
-    for (const id in state.players) {
-      const pl = state.players[id];
-      // Someone being grabbed right now still gets frozen into the flash (with the monster).
-      if (pl.status !== 'alive' && !this.jumpscare.grabbing(id)) continue;
-      let pose: PlayerPose = pl.pose;
-      if (id === localId) pose = localPose;
-      else {
-        const av = this.avatars.get(id);
-        if (av?.target) pose = av.target;
-      }
-      // Head.
-      setV(_a, pose.head.position);
-      let k = captured(_a);
-      if (k > 0) {
-        setQ(_q, pose.head.rotation);
-        const from = parts.length;
-        this.avatarKit.bakeHead(_a, _q, parts);
-        push(parts, from, k * 0.85);
-      }
-      // Hands with their exact finger curls right now.
-      for (const side of SIDES) {
-        const h = pose[side];
-        if (!h.tracked || (id === event.by && side === lensHand)) continue;
-        setV(_a, h.position);
-        k = captured(_a);
-        if (k <= 0) continue;
-        setQ(_q, h.rotation);
-        let from = parts.length;
-        this.hands.bakePose(side, _a, _q, h.curls, parts, 1.04);
-        push(parts, from, k);
-        from = halo.length;
-        this.hands.bakePose(side, _a, _q, h.curls, halo, 1.45);
-        push(halo, from, k);
-      }
-    }
-    // The monster: test a few points along its body so a partly hidden monster still shows.
-    const mp = state.monster.position;
-    let mk = 0;
-    for (const y of MONSTER_PROBES) mk = Math.max(mk, captured(_b.set(mp.x, mp.y + y, mp.z)));
-    if (mk > 0) {
-      const from = parts.length;
-      this.monster.bake(parts, 1.03);
-      push(parts, from, mk);
-    }
-    this.flashFx.addAfterimage(parts, halo, this.time);
-
-    // How much does this flash blind the local viewer? (capped to ~70 ms by FlashEffect)
-    setV(_a, localPose.head.position);
-    let white = 0;
-    if (event.by === localId) {
-      white = 0.16;
-    } else {
-      _d.subVectors(_a, origin);
-      const dist = Math.max(0.05, _d.length());
-      _d.multiplyScalar(1 / dist);
-      let los = dist <= RENDER.flashRange;
-      for (const b of blockers) if (los && segmentHitsAabb(origin, _a, b, 0.08)) los = false;
-      if (los) {
-        const aim = Math.max(0, _d.dot(dir));
-        setQ(_q, localPose.head.rotation);
-        const look = -_b.set(0, 0, -1).applyQuaternion(_q).dot(_d);
-        const lookK = Math.max(0, Math.min(1, (look + 0.2) / 1.2));
-        white = 0.05 + 0.85 * Math.pow(aim, 3) * lookK * Math.pow(1 - dist / RENDER.flashRange, 0.6);
-      }
-    }
-    // How far the beam's axis travels before it hits a wall (the bounce light sits in that room).
-    let hit: number = RENDER.fogFar;
-    for (const b of blockers) hit = Math.min(hit, rayAabb(origin, dir, b));
-    this.flashFx.fire(this.time, origin, dir, white, hit);
-    this.lastFlashBy = event.by;
-    this.lastFlashDir.copy(dir);
-    this.cameraProp.flashed(this.time);
   }
 
   /** Catch sequence hook (see IGameRenderer.caught and Jumpscare). */
@@ -665,14 +677,14 @@ export class GameRenderer implements IGameRenderer {
     return this.readableCache.list;
   }
 
-  /** Quality tier, shared FX uniforms, dust motes and the flash glare (once per frame). */
-  private updateFx(localId: PlayerId): void {
+  /** Quality tier, shared FX uniforms, dust motes and the beam glare (once per frame). */
+  private updateFx(): void {
     const r = this.ctx.renderer;
     const q = pickQuality(RENDER.quality, r.xr.isPresenting, this.forcedQuality);
     const tier = RENDER.tiers[q];
     if (q !== this.quality) {
       this.quality = q;
-      this.flashFx.setShadowQuality(tier.shadowMapSize, tier.shadowRadius);
+      this.lights.setShadowQuality(tier.shadowMapSize, tier.shadowRadius);
       this.motes.setCount(tier.motes);
       this.glare.streak = q === 'desktop' ? 1 : 0.35;
       if (this.perf) this.perf.tier = q;
@@ -683,22 +695,14 @@ export class GameRenderer implements IGameRenderer {
     const h = cam ? cam.viewport.w : r.getDrawingBufferSize(_dbs).y;
     const proj = (cam ?? this.ctx.camera).projectionMatrix.elements[5];
     this.motes.setPixelScale(0.5 * h * proj);
-    // Glare on a flash aimed at you (not your own: you're behind the lens).
-    const k = this.flashFx.brightness;
-    if (k > 0 && tier.glare) {
-      const p = this.flashFx.spot.position;
-      _d.subVectors(this.headPos, p);
-      const dist = Math.max(0.05, _d.length());
-      const facing = Math.max(0, this.lastFlashDir.dot(_d) / dist);
-      this.glare.update(p, k, facing, this.lastFlashBy === localId);
-    } else {
-      this.glare.update(this.headPos, 0, 0, true);
-    }
+    // Glare on another player's beam aimed at you (never your own: you're behind the lens).
+    if (this.glareK > 0 && tier.glare) this.glare.update(_glarePos.copy(this.glare.mesh.position), this.glareK * 0.55, this.glareFacing, false);
+    else this.glare.update(this.headPos, 0, 0, true);
   }
 
   render(): void {
-    // The flash shadow map is only re-rendered while the flash is lit.
-    this.ctx.renderer.shadowMap.needsUpdate = this.flashFx.needsShadowUpdate();
+    // The beam's shadow map is only re-rendered while your light is on.
+    this.ctx.renderer.shadowMap.needsUpdate = this.lights.needsShadowUpdate();
     this.ctx.renderer.render(this.ctx.scene, this.ctx.camera);
     this.perf?.frame(this.ctx.renderer, this.ctx.scene, performance.now());
   }
@@ -738,13 +742,14 @@ export class GameRenderer implements IGameRenderer {
     }
     for (const av of this.avatars.values()) av.dispose();
     for (const p of this.items.values()) p.dispose();
-    this.cameraProp.dispose();
+    for (const p of this.lightProps.values()) p.dispose();
     this.monster.dispose();
     this.localLeft.dispose();
     this.localRight.dispose();
     this.localHandMat.dispose();
     this.ghostMat.dispose();
-    this.flashFx.dispose();
+    this.lights.dispose();
+    this.afterimages.dispose();
     this.glare.dispose();
     this.motes.dispose();
     this.jumpscare.dispose();

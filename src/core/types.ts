@@ -67,7 +67,20 @@ export interface PlayerPose {
 }
 
 /** Something held in a hand. */
-export type HeldRef = { kind: 'camera' } | { kind: 'item'; itemId: number };
+export type HeldRef = { kind: 'item'; itemId: number };
+
+/**
+ * The Crank Light every player carries (strapped to the left wrist in VR, held low on the right
+ * on desktop). It never takes up a hand. The beam itself is silent; winding it is loud.
+ */
+export interface CrankLightState {
+  /** Switched on (it gives no light while `charge` is 0). */
+  on: boolean;
+  /** Battery 0..1: drains while on, refills while winding. */
+  charge: number;
+  /** Being wound right now (makes NOISE.crank noises). */
+  cranking: boolean;
+}
 
 export type PlayerStatus = 'alive' | 'caught' | 'escaped';
 
@@ -85,32 +98,21 @@ export interface PlayerState {
   spawnYaw: number;
   pose: PlayerPose;
   held: Record<Handedness, HeldRef | null>;
+  light: CrankLightState;
 }
 
-export type ItemKind = 'fuse' | 'film';
+export type ItemKind = 'fuse';
 
 export interface ItemState {
   id: number;
   kind: ItemKind;
-  /** 'world' = lying around, 'held' = in someone's hand, 'used' = consumed (inserted fuse / loaded film). */
+  /** 'world' = lying around, 'held' = in someone's hand, 'used' = consumed (an inserted fuse). */
   where: 'world' | 'held' | 'used';
   position: Vec3;
   /** Yaw of the item when lying in the world (visual only). */
   yaw: number;
   holder: PlayerId | null;
   hand: Handedness | null;
-}
-
-export interface CameraState {
-  holder: PlayerId | null;
-  hand: Handedness | null;
-  /** World position (follows the holder's hand while held, stays put when dropped). */
-  position: Vec3;
-  /** Yaw when lying in the world (visual only). */
-  yaw: number;
-  film: number;
-  /** Sim time of the last successful flash (for cooldown + visuals). -Infinity-like if never: use -1e9. */
-  lastFlashTime: number;
 }
 
 export type MonsterMode =
@@ -184,7 +186,6 @@ export interface WorldState {
   players: Record<PlayerId, PlayerState>;
   monster: MonsterState;
   items: ItemState[];
-  camera: CameraState;
   fusesInserted: number;
   fusesRequired: number;
   exitOpen: boolean;
@@ -192,7 +193,7 @@ export interface WorldState {
   lastHeard: { position: Vec3; loudness: number; time: number } | null;
 }
 
-export type NoiseSource = 'voice' | 'footstep' | 'camera' | 'item' | 'door';
+export type NoiseSource = 'voice' | 'footstep' | 'light' | 'item' | 'door';
 
 /** A sound in the world that the monster might hear. */
 export interface NoiseEvent {
@@ -205,30 +206,21 @@ export interface NoiseEvent {
 
 /** Things a player asks the host to do. */
 export type PlayerAction =
-  /** Grab the nearest grabbable (camera, fuse, film) within `reach` of `position`. */
+  /** Grab the nearest grabbable (a fuse) within `reach` of `position`. */
   | { type: 'grab'; hand: Handedness; position: Vec3; reach: number }
   /** Let go of whatever is in `hand`, leaving it at `position`. */
   | { type: 'release'; hand: Handedness; position: Vec3 }
-  /** Pull the camera trigger. Host checks the player holds the camera in `hand` and has film. */
-  | { type: 'flash'; hand: Handedness; position: Vec3; direction: Vec3 };
-
-export interface FlashEvent {
-  type: 'flash';
-  by: PlayerId;
-  position: Vec3;
-  /** Unit vector the camera lens is pointing. */
-  direction: Vec3;
-  time: number;
-}
+  /** Switch the Crank Light on or off. */
+  | { type: 'light'; on: boolean }
+  /** Start (true) or stop (false) winding the Crank Light. */
+  | { type: 'crank'; on: boolean };
 
 /** Things that happened, produced by the host sim and broadcast to every client. */
 export type SimEvent =
-  | FlashEvent
-  /** Trigger pulled with no film left (or during cooldown): just a dry click. */
-  | { type: 'dryFire'; by: PlayerId; position: Vec3 }
-  | { type: 'pickup'; by: PlayerId; what: 'camera' | ItemKind; position: Vec3 }
-  | { type: 'drop'; by: PlayerId; what: 'camera' | ItemKind; position: Vec3 }
-  | { type: 'filmLoaded'; by: PlayerId; amount: number; total: number; position: Vec3 }
+  /** Someone switched their Crank Light on or off (a click). */
+  | { type: 'light'; by: PlayerId; on: boolean; position: Vec3 }
+  | { type: 'pickup'; by: PlayerId; what: ItemKind; position: Vec3 }
+  | { type: 'drop'; by: PlayerId; what: ItemKind; position: Vec3 }
   | { type: 'fuseInserted'; by: PlayerId; count: number; required: number; position: Vec3 }
   | { type: 'exitOpened'; position: Vec3 }
   /** Monster changed mode to 'investigate' or 'chase' (audio plays a growl/shriek). */
@@ -282,14 +274,14 @@ export interface LevelData {
   /** Player spawn points (feet), at least 4. */
   playerSpawns: { position: Vec3; yaw: number }[];
   monsterSpawn: Vec3;
-  cameraSpawn: { position: Vec3; yaw: number };
   /** Where fuses start (the sim picks `fusesRequired` of these). */
   fuseSpawns: Vec3[];
-  filmSpawns: Vec3[];
   /** Wall-mounted fuse box; holding a fuse near `position` inserts it. `yaw` = direction it faces. */
   fuseBox: { position: Vec3; yaw: number };
   /** The exit door. Solid while closed. When open, an alive player whose head enters `zone` escapes. */
   exit: { door: Box; zone: { min: Vec3; max: Vec3 } };
+  /** Where the tutorial note lies: a surface right by the spawn (renderer only). */
+  tutorialSpot?: Vec3;
   /** Windows let in faint moonlight (renderer only). Each is a vertical rectangle on a wall. */
   windows: { center: Vec3; width: number; height: number; yaw: number }[];
 }

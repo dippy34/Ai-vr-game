@@ -52,12 +52,10 @@ Halcyon's service tunnel under the hill. Inside, they learn they can trap or kil
 ### In-game notes that already exist (keep the story consistent with them)
 Text lives in `art/blender/decals_notes.py`:
 - tutorial: "If you can read this, don't say a word. It can't see you. It HEARS you. Three fuses.
-  Box by the front door. The camera shows it. Talk with your hands." (**needs rewording** once the
-  camera is replaced by the Crank Light, see below)
+  Box by the front door. Winding is LOUD. Talk with your hands." 
 - tom: "It found Tom when he screamed."
 - whisper: "Whisper. Always whisper. Even the floor creaks."
-- flash: "The flash doesn't hurt it, but you'll see where it is. Count your film." (OCT 30)
-  (**needs rewording or removing** with the camera)
+- light (`note_light`, OCT 30): "The light doesn't bother it. It's blind. But it hears you wind it." 
 - dad: "Dad hid the fuses so we couldnt leave. Im sorry. - Ellie" (read it as sinister: he trapped
   them in with him)
 - kitchen: "It keeps coming back to the kitchen. We were loud there."
@@ -78,7 +76,7 @@ Decals: a drag trail to the bathroom, "IT HEARS YOU", "SHH", a child's drawing.
    (`afterimageDuration: 2.2` in `src/config.ts`) while the real one keeps walking. Two monsters on
    screen, one fake. **Cut the afterimage.**
 
-### Tool 1: the Crank Light (replaces the camera)
+### Tool 1: the Crank Light (replaces the camera) ✅ built (see `docs/HANDOFF.md` §6 step 1)
 - A wind-up flashlight. **Every player starts holding it.** No hunting for it.
 - **F** toggles it (VR: a controller button). It gives a steady beam, like any flashlight.
 - The battery lasts about a minute and **flickers when low**.

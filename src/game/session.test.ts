@@ -182,21 +182,27 @@ describe('HostSession vs hostile clients', () => {
     expect(host.state.players.constructor).toMatchObject({ name: 'Ctor', status: 'alive' });
   });
 
-  it('a client leaving with the camera drops it, and the others hear about it', () => {
+  it('a client leaving with a fuse drops it, and the others hear about it', () => {
     const { tr, host } = hostWith(['a', 'b']);
     host.startRound();
-    const cam = host.state.camera.position;
+    // A fuse on the foyer table, a step from the spawns (remote players can't teleport).
+    const fuse = host.state.items[0];
+    fuse.position = v3(-2.6, 0.75, 6.5);
+    const cam = fuse.position;
     const pose = makeSpawnPose(v3(cam.x + 0.6, 0, cam.z), Math.PI / 2);
     pose.right.position = v3(cam.x, cam.y + 0.05, cam.z);
     tr.deliver({ t: 'pose', pose }, 'a');
     tr.deliver({ t: 'action', action: { type: 'grab', hand: 'right', position: pose.right.position, reach: 0.35 } }, 'a');
-    expect(host.state.camera.holder).toBe('a');
+    expect(fuse.holder).toBe('a');
+    // Its Crank Light switches through the network too.
+    tr.deliver({ t: 'action', action: { type: 'light', on: false } }, 'a');
+    expect(host.state.players.a.light.on).toBe(false);
     tr.sent = [];
     tr.leave('a');
-    expect(host.state.camera.holder).toBeNull();
+    expect(fuse.holder).toBeNull();
     expect(host.state.players.a).toBeUndefined();
     const events = tr.take('event').map((m) => (m.t === 'event' ? m.event : null));
-    expect(events).toContainEqual(expect.objectContaining({ type: 'drop', by: 'a', what: 'camera' }));
+    expect(events).toContainEqual(expect.objectContaining({ type: 'drop', by: 'a', what: 'fuse' }));
     const lobby = tr.take('lobby');
     expect(lobby).toHaveLength(1);
     expect(lobby[0].t === 'lobby' && lobby[0].players.map((p) => p.id)).toEqual(['host', 'b']);
@@ -252,7 +258,7 @@ describe('ClientSession vs a hostile host', () => {
       { t: 'round', state: [] },
       { t: 'peerPose', id: t.selfId, pose: { head: { position: { x: 'a' } } } },
       { t: 'peerPose', id: 'stranger', pose: makeSpawnPose(v3(), 0) },
-      { t: 'event', event: { type: 'flash', by: t.selfId, position: { x: 'a', y: 0, z: 0 } } },
+      { t: 'event', event: { type: 'light', by: t.selfId, on: 'maybe', position: { x: 0, y: 0, z: 0 } } },
       { t: 'event', event: { type: 'selfDestruct' } },
       { t: 'event', event: null },
       { t: 'lobby', players: 'everyone' },
@@ -270,13 +276,13 @@ describe('ClientSession vs a hostile host', () => {
     const snap = sim.snapshot() as unknown as Record<string, unknown> & WorldState;
     (snap.players as Record<string, unknown>).ghost = { id: 'ghost', pose: 7 };
     snap.monster.position = v3(1e9, 0, 0);
-    snap.camera.film = -5;
+    snap.players[t.selfId].light = { on: 'yes', charge: 99, cranking: 1 } as unknown as WorldState['players'][string]['light'];
     t.send({ t: 'snapshot', state: snap });
     t.send({ t: 'lobby', players: [{ id: clientId, name: 5, color: 'red', isDesktop: 1 }, null, { id: 9 }] } as unknown as NetMessage);
     await until(() => got.lobby.length > 0);
     expect(Object.keys(client.state.players).sort()).toEqual([clientId, t.selfId].sort());
     expect(client.state.monster.position.x).toBeLessThan(20);
-    expect(client.state.camera.film).toBe(0);
+    expect(client.state.players[t.selfId].light).toEqual({ on: false, charge: 1, cranking: false });
     expect(finiteDeep(client.state)).toBe(true);
     expect(got.lobby[0]).toEqual([{ id: clientId, name: 'Survivor', color: 0xffffff, isDesktop: false }]);
 
@@ -306,15 +312,17 @@ describe('session flows over the local transport', () => {
     const host = new HostSession(t, 'Host', true);
     open.push(host);
     host.startRound();
-    // Like the browser flow: the host walks to the table and takes the camera; an early guest
+    // Like the browser flow: the host switches its light off and picks up a fuse; an early guest
     // came and went; time passes and the monster roams.
-    const cam = host.state.camera.position;
-    const hostPose = makeSpawnPose(v3(cam.x + 0.8, 0, cam.z), Math.PI / 2);
+    const fuse = host.state.items[0];
+    const cam = fuse.position;
+    const hostPose = makeSpawnPose(v3(cam.x, 0, cam.z), Math.PI / 2);
     hostPose.right.position = v3(cam.x, cam.y + 0.05, cam.z);
     hostPose.left.tracked = hostPose.right.tracked = true;
     host.sendPose(hostPose);
     host.sendAction({ type: 'grab', hand: 'right', position: hostPose.right.position, reach: 0.35 });
-    expect(host.state.camera.holder).toBe(host.localId);
+    host.sendAction({ type: 'light', on: false });
+    expect(fuse.holder).toBe(host.localId);
     const early = await ClientSession.connect('local', t.roomCode, 'Early', true);
     early.close();
     await until(() => Object.keys(host.state.players).length === 1);
@@ -322,7 +330,8 @@ describe('session flows over the local transport', () => {
     const client = await ClientSession.connect('local', t.roomCode, 'Late', false);
     open.push(client);
     expect(client.state).toEqual(JSON.parse(JSON.stringify(client.state)));
-    expect(client.state.camera.holder).toBe(host.localId);
+    expect(client.state.items.find((i) => i.id === fuse.id)?.holder).toBe(host.localId);
+    expect(client.state.players[host.localId].light.on).toBe(false);
     const me = client.state.players[client.localId];
     expect(client.state.phase).toBe('playing');
     expect(me.status).toBe('alive');

@@ -7,8 +7,8 @@
  *           A single red/black vignette pulse floods in from the edges.
  *   ~0.3 s  The burst settles to a dim, harsh glow; the face keeps pressing in (0.34 m), the claws
  *           close around you and the vignette closes in like tunnel vision.
- *   0.90 s  Cut to black over 0.22 s. A pale afterimage of the face (the flash "burned" into your
- *           eyes, same look as camera-flash afterimages) hangs in the black.
+ *   0.90 s  Cut to black over 0.22 s. A pale afterimage of the face (the burst "burned" into your
+ *           eyes) hangs in the black.
  *   1.12 s  While black: the monster goes back to where the sim has it (feeding) and the ghost
  *           look turns on (red-tinted, desaturated fog/ambient).
  *   1.30 s  Fade into the ghost (spectator) view, done at 1.60 s.
@@ -20,14 +20,14 @@
  * direction, so it sits at infinity instead of at the overlay quad's depth.
  *
  * Other players being caught: the monster turns to their head and plays Attack at them (no screen
- * effects); a flash during the grab freezes it into an afterimage like anything else.
+ * effects).
  *
  * The timing curves are pure functions (jumpscareFrame / remoteGrabFrame) so they are unit tested.
  */
 
 import * as THREE from 'three';
 import type { PlayerId, WorldState } from '../../core/types';
-import type { FlashEffect } from './FlashEffect';
+import type { Afterimages } from './Afterimages';
 import type { Aabb } from './util';
 import { damp, paint } from './util';
 
@@ -166,7 +166,7 @@ const BURST = { intensity: 6, distance: 1.35, color: 0xf2f5ff, below: 0.07 } as 
 const GHOST_LOOK = {
   sky: 0xc09a9a, ground: 0x3c1f1f, ambient: 1.45, fog: 0x0e0405, background: 0x050102, near: 0xd8a0a0,
 } as const;
-/** Pale afterimage of the face left by the flash, seen over the black. */
+/** Pale afterimage of the face left by the burst, seen over the black. */
 const BURN = { brightness: 0.55, strength: 0.4, push: 2.6 } as const;
 /** Head pitch the face follows is clamped to this (rad) so it never ends up in the floor/ceiling. */
 const PITCH_LIMIT = { down: 0.4, up: 0.25 } as const;
@@ -257,7 +257,7 @@ export class Jumpscare {
     camera: THREE.Camera,
     private readonly hemi: THREE.HemisphereLight,
     private readonly nearLight: THREE.PointLight,
-    private readonly flashFx: FlashEffect,
+    private readonly afterimages: Afterimages,
     enabled: boolean,
   ) {
     this.enabled = enabled;
@@ -274,7 +274,7 @@ export class Jumpscare {
     this.overlay = new THREE.Mesh(new THREE.PlaneGeometry(2.5, 2.5), this.mat);
     this.overlay.name = 'jumpscare';
     this.overlay.position.z = -0.12;
-    // After the world and ghost avatars, but BEFORE flash afterimages (19/20), so the burned-in
+    // After the world and ghost avatars, but BEFORE afterimages (19/20), so the burned-in
     // afterimage of the face shows over the black. Messages/whiteout draw later still.
     this.overlay.renderOrder = 15;
     this.overlay.frustumCulled = false;
@@ -295,7 +295,7 @@ export class Jumpscare {
     return this.localActive;
   }
 
-  /** Is this (other) player being grabbed right now? (They still get flash afterimages.) */
+  /** Is this (other) player being grabbed right now? */
   grabbing(id: PlayerId): boolean {
     return this.remoteActive && this.remote.id === id;
   }
@@ -468,7 +468,7 @@ export class Jumpscare {
       .multiply(_m2.makeTranslation(-eye.x, -eye.y, -eye.z));
     _c.setScalar(BURN.brightness);
     for (const g of parts) paint(g.applyMatrix4(_m), _c);
-    this.flashFx.addAfterimage(parts, [], time, BURN.strength);
+    this.afterimages.add(parts, [], time, BURN.strength);
   }
 
   private applyLook(ghost: number, burst: number): void {

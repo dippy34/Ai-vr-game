@@ -8,7 +8,6 @@
 
 import type * as THREE from 'three';
 import type {
-  FlashEvent,
   Handedness,
   HandPose,
   HeadPose,
@@ -49,12 +48,12 @@ export interface IGameRenderer {
   /** Update a remote player's pose as soon as it arrives (between snapshots). */
   setRemotePose(id: PlayerId, pose: PlayerPose): void;
   /**
-   * Camera flash: a brief, very bright light from `event.position` along `event.direction`, plus
-   * frozen pale "afterimages" of every player's head + hands (with their current finger curls) and
-   * of the monster, if within RENDER.flashRange and roughly in front of the flash. Afterimages fade
-   * over RENDER.afterimageDuration. This is how hand signs are read in the dark.
+   * The local player's Crank Light as the game predicts it (call before update()): a flipped
+   * switch or winding shows at once instead of a network round trip later. Everyone else's light
+   * comes from `state.players[id].light`. Each player's beam shines from their light (left wrist
+   * in VR, held low on the right on desktop); this is how hand signs are read in the dark.
    */
-  flash(event: FlashEvent, state: WorldState, localId: PlayerId, localPose: PlayerPose): void;
+  setLocalLight(on: boolean, cranking: boolean): void;
   /**
    * The monster caught a player (sim 'playerCaught' event). For the local player this plays the
    * catch / jumpscare sequence; for others it can show the monster grabbing them.
@@ -118,6 +117,16 @@ export interface InputFrame {
   usePressed: boolean;
   /** Menu button / Escape pressed this frame. */
   menuPressed: boolean;
+  /**
+   * Crank Light on/off pressed this frame (edge). Desktop F; VR the left controller's trigger, or a
+   * right-hand pinch with hand tracking.
+   */
+  lightPressed: boolean;
+  /**
+   * Winding the Crank Light right now (held). Desktop R; VR the left controller's X button, or
+   * shaking the left hand (controller or tracked hand) back and forth.
+   */
+  crank: boolean;
 }
 
 export interface IInputManager {

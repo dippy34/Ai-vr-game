@@ -3,10 +3,10 @@
 //
 //   npx vite --config dev/anim/vite.capture.config.ts      (no-HMR server on :5320, restart on changes)
 //   node dev/anim/capture.cjs <scene> [--every N] [--size 960x540] [--from F] [--to F] [--sheet | --video]
-//                                    [--game [--hemi I]] [--flash N]
+//                                    [--game [--hemi I]]
 //   --game   the game's own darkness and fog (review lighting lifts the ambient and pushes the fog
-//            away); --hemi sets the ambient intensity (default: the game's own)
-//   --flash  fire the camera flash from the review camera every N frames (shadows, afterimages)
+//            away); --hemi sets the ambient intensity (default: the game's own). The Crank Lights
+//            follow the players, not the review camera, so raise --hemi to see the body.
 //
 // Scenes live in dev/anim/scenes.cjs. Frames go to dev/anim/out/<scene>/, the clip to
 // dev/anim/out/<scene>.mp4 (every frame), or with --every N a contact sheet of every Nth frame
@@ -85,7 +85,6 @@ fs.mkdirSync(dir, { recursive: true });
   });
   if (scene.init) await page.evaluate(scene.init);
   const game = args.includes('--game');
-  const flashEvery = Number(opt('flash', 0));
   const hemi = opt('hemi', null);
   await page.evaluate(([g]) => {
     window.__game = g;
@@ -99,15 +98,6 @@ fs.mkdirSync(dir, { recursive: true });
     const cam = scene.cam(f);
     await page.evaluate(([c, d, h]) => { window.__camPose = c; window.__draw = d; window.__hemi = h; },
       [cam, shoot, game ? (hemi === null ? null : Number(hemi)) : scene.hemi ?? 2.2]);
-    if (flashEvery > 0 && f > 0 && f % flashEvery === 0) {
-      // The camera flash, fired from the review camera along its view (as if the viewer held it).
-      await page.evaluate((c) => {
-        const m = window.__mute, s = m.game.current, st = s.state;
-        const d = { x: c.tx - c.x, y: c.ty - c.y, z: c.tz - c.z };
-        const l = Math.hypot(d.x, d.y, d.z) || 1;
-        m.renderer.flash({ type: 'flash', by: 'review', position: { x: c.x, y: c.y - 0.15, z: c.z }, direction: { x: d.x / l, y: d.y / l, z: d.z / l }, time: st.time }, st, s.localId, m.game.localPose);
-      }, cam);
-    }
     const file = shoot ? path.join(dir, `f_${String(shots).padStart(5, '0')}.jpg`) : null;
     await step(cmd, file);
     if (shoot) shots++;

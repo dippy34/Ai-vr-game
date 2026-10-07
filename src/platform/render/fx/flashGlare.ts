@@ -1,8 +1,8 @@
 /**
- * Lens glare on someone else's camera flash: a hot core, a soft halo and a thin horizontal streak
- * at the flash, strongest when it is aimed at you. A world-space billboard (correct per eye in VR,
- * hidden by walls through the depth test), drawn only while the flash is lit: one draw call for
- * ~0.2 s. The local player's own flash never glares (they are behind the lens).
+ * Lens glare on someone else's Crank Light: a hot core, a soft halo and a thin horizontal streak
+ * at their lens, strongest when the beam is aimed at you. A world-space billboard (correct per eye
+ * in VR, hidden by walls through the depth test), drawn only while a beam faces you: one draw
+ * call. Your own light never glares (you're behind the lens).
  */
 
 import * as THREE from 'three';

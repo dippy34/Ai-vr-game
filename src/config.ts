@@ -8,12 +8,6 @@ export const GAME = {
   maxPlayers: 4,
   /** Fuses that must go into the fuse box to open the exit. */
   fusesRequired: 3,
-  /** Film shots the camera starts with. */
-  startingFilm: 6,
-  /** Shots added by each film roll pickup. */
-  filmPerRoll: 3,
-  /** Minimum seconds between flashes. */
-  flashCooldown: 1.2,
   /** Seconds the monster pauses after catching someone. */
   feedingTime: 4,
   /** Seconds the win/lose screen shows before the host can restart. */
@@ -50,7 +44,7 @@ export const PLAYER = {
  * Reference loudness values (what the numbers mean):
  *   whisper ~0.12   normal talk ~0.5   shout/scream ~0.95
  *   sneaking step ~0.06   walking step ~0.18   sprinting step ~0.45
- *   camera click ~0.22   dropping an item ~0.3   exit door opening 1.0
+ *   light switch click ~0.04   winding the light ~0.42   dropping an item ~0.3   exit door 1.0
  */
 export const HEARING = {
   rangeMeters: 26,
@@ -73,13 +67,34 @@ export const NOISE = {
   sneakStep: 0.06,
   walkStep: 0.18,
   sprintStep: 0.45,
-  cameraClick: 0.22,
+  /** Switching the Crank Light on or off: a tiny click, heard only right next to it. */
+  lightClick: 0.04,
+  /** Winding the Crank Light: a loud ratcheting whirr (louder than a sprinting step). */
+  crank: 0.42,
   itemDrop: 0.3,
   itemPickup: 0.08,
   fuseInsert: 0.35,
   exitDoor: 1.0,
   /** Footstep emitted every this many meters of horizontal head travel. */
   stepLength: 0.7,
+} as const;
+
+/**
+ * The Crank Light: a wind-up flashlight strapped to every player's left wrist (desktop: held low
+ * on the right). Light is safe (the monster is blind) but charging it is loud.
+ */
+export const LIGHT = {
+  /** Seconds a full charge lasts with the beam on. */
+  batterySeconds: 60,
+  /** Seconds of winding that fill an empty battery. */
+  crankSecondsToFull: 6,
+  /** Every round starts with this charge (0..1), switched on. */
+  startCharge: 1,
+  startOn: true,
+  /** Below this charge the beam dims and flickers (a warning to wind it). */
+  lowCharge: 0.2,
+  /** While winding, a NOISE.crank noise is made this often (s). */
+  crankNoiseInterval: 0.3,
 } as const;
 
 export const MONSTER = {
@@ -244,7 +259,7 @@ export const RENDER = {
   quality: 'auto' as 'auto' | 'quest' | 'desktop',
   tiers: {
     quest: {
-      /** Flash shadow map (px, square); rendered only while the flash is lit. */
+      /** Crank Light shadow map (px, square; the local beam only), rendered only while it is on. */
       shadowMapSize: 512,
       /** PCF blur radius in shadow-map texels. */
       shadowRadius: 2.2,
@@ -256,9 +271,9 @@ export const RENDER = {
       fringe: 0,
       /** How much the fog density drifts (0..1). */
       fogNoise: 0.35,
-      /** Dust motes around the viewer (lit by moon shafts and the flash). */
+      /** Dust motes around the viewer (lit by moon shafts and your Crank Light). */
       motes: 260,
-      /** Lens glare sprite on flashes aimed at you. */
+      /** Lens glare sprite on other players' beams aimed at you. */
       glare: true,
     },
     desktop: {
@@ -278,9 +293,10 @@ export const RENDER = {
   /**
    * Faint ambient light so the world isn't 100% black (eyes "adjusted to the dark"): fraction of a
    * surface's colour, scene-linear (before exposure and the tone curve, which crushes the deepest
-   * darks, hence a higher value than without tone mapping).
+   * darks). Kept very low on purpose: without your Crank Light you should barely make out a
+   * doorway, never read a room (or see the monster coming).
    */
-  ambientIntensity: 0.08,
+  ambientIntensity: 0.02,
   /** Fog makes far things vanish into black: fully fogged by fogFar (the level culls beyond it). */
   fogNear: 1.5,
   fogFar: 11,
@@ -288,25 +304,26 @@ export const RENDER = {
   fogDensity: 0.07,
   fogHeightFalloff: 1.6,
   fogGroundBoost: 1.4,
-  /** Flash light scattered by the haze (output-space colour, strength). */
+  /** Crank Light scattered by the haze (output-space colour, strength). */
   hazeColor: [0.78, 0.84, 1.0] as readonly [number, number, number],
   hazeStrength: 0.07,
-  /** Seconds the flash light takes to fade. */
-  flashDuration: 0.22,
-  /** Seconds the frozen afterimages from a flash take to fade. */
+  /** Seconds the jumpscare's burned-in afterimage of the face takes to fade. */
   afterimageDuration: 2.2,
-  /** Max distance (m) from the flash at which things get an afterimage. */
-  flashRange: 14,
   /**
-   * Flash spot light: peak intensity (candela-like; inverse-square falloff, decay 2), cone half
-   * angle (deg) and penumbra. The omni "bounce" sits where the beam first hits a wall.
+   * Crank Light beam (a spot light per player): intensity (candela-like; inverse-square falloff,
+   * decay 2), cone half angle (deg), penumbra, range (m) and colour (a warm incandescent bulb).
+   * The weak omni "bounce" sits where the local beam hits something.
    */
-  flashPeak: 40,
-  flashAngle: 56,
-  flashPenumbra: 0.75,
-  flashBounce: 2.0,
-  /** The flash casts soft shadows (map rendered only while it is lit) through a beam cookie. */
-  flashShadows: true as boolean,
+  beamIntensity: 20,
+  beamAngle: 30,
+  beamPenumbra: 0.6,
+  beamRange: 13,
+  beamColor: 0xffdcb4,
+  beamBounce: 0.6,
+  /** How much the local beam lights the haze and dust motes (the old camera flash was 1). */
+  beamHaze: 0.3,
+  /** The local beam casts soft shadows through a lens cookie (`?shadows=0` turns it off). */
+  beamShadows: true as boolean,
   /**
    * WebXR eye-buffer size relative to the browser's recommended one (Quest: fill rate is the
    * bottleneck with per-pixel lights; 0.9 = 19% fewer pixels, barely visible with MSAA on).

@@ -144,51 +144,34 @@ function pad(
 // Props / player actions
 // ---------------------------------------------------------------------------------------------
 
-/** Camera flash: two-blade shutter click, xenon tick, then the capacitor whine rising as it recharges. */
-export function sfxShutter(s: Shot, t: number): void {
-  clicks(s, t, [0, 0.006, 0.052], { freq: 3200, q: 1.2, peak: 1.3, decay: 0.02 });
-  const body = s.osc('square', 1400, t, t + 0.06);
-  glide(body.frequency, t, 1400, 480, 0.04);
-  const bbp = s.filter('bandpass', 1200, 3);
-  const bg = s.gain(0);
-  body.connect(bbp).connect(bg).connect(s.out);
-  perc(bg.gain, t, 0.18, 0.001, 0.035);
-  clicks(s, t + 0.004, [0], { freq: 6000, type: 'highpass', q: 0.7, peak: 0.35, decay: 0.012 });
-
-  // Recharge whine (quiet, slightly unstable).
-  const t0 = t + 0.18;
-  const w = s.osc('sine', 1700, t0, t + 2.7);
-  glide(w.frequency, t0, 1700, 8600, 2.1);
-  const w2 = s.osc('sine', 3420, t0, t + 2.7);
-  glide(w2.frequency, t0, 3420, Math.min(17200, s.eng.nyquistSafe), 2.1);
-  const wg = s.gain(0);
-  const w2g = s.gain(0.18);
-  w.connect(wg);
-  w2.connect(w2g).connect(wg);
-  wg.connect(s.out);
-  wg.gain.setValueAtTime(0, t0);
-  wg.gain.linearRampToValueAtTime(0.028, t0 + 0.4);
-  wg.gain.setValueAtTime(0.028, t0 + 1.7);
-  wg.gain.linearRampToValueAtTime(0, t + 2.65);
+/** Crank Light switch: a small, firm plastic click (two contacts), a touch lower switching off. */
+export function sfxLightSwitch(s: Shot, t: number, on: boolean): void {
+  clicks(s, t, [0, 0.007], { freq: on ? 3100 : 2500, q: 2.5, peak: 0.7, decay: 0.01 });
+  thud(s, t, { level: 0.08, f0: 900, f1: 500, body: 2200, dur: 0.03, tick: 0 });
 }
 
-/** Trigger pulled with no film: small mechanical click. */
-export function sfxDryFire(s: Shot, t: number): void {
-  clicks(s, t, [0, 0.011], { freq: 2600, q: 3, peak: 1.0, decay: 0.012 });
-  const o = s.osc('square', 520, t, t + 0.03);
-  glide(o.frequency, t, 520, 280, 0.02);
+/**
+ * One tooth of the Crank Light's ratchet, with the gear rattle and the dynamo's whine under it.
+ * Played every ~85 ms while someone winds (`pitch` jitters a little so it never sounds looped).
+ */
+export function sfxCrankTick(s: Shot, t: number, pitch = 1): void {
+  clicks(s, t, [0], { freq: rand(2600, 3300) * pitch, q: 3, peak: 0.55, decay: 0.01 });
+  const n = s.noise('pink', t, 0.09);
+  const bp = s.filter('bandpass', 1100 * pitch, 1.4);
   const g = s.gain(0);
-  o.connect(s.filter('lowpass', 1500)).connect(g).connect(s.out);
-  perc(g.gain, t, 0.05, 0.001, 0.02);
+  n.connect(bp).connect(g).connect(s.out);
+  swell(g.gain, t, 0.05, 0.01, 0.03, 0.04);
+  const o = s.osc('sawtooth', 210 * pitch, t, t + 0.1);
+  const lp = s.filter('lowpass', 900);
+  const og = s.gain(0);
+  o.connect(lp).connect(og).connect(s.out);
+  swell(og.gain, t, 0.025, 0.01, 0.05, 0.03);
 }
 
 /** Pickup: soft clink, colored by what was picked up. */
-export function sfxPickup(s: Shot, t: number, what: 'camera' | ItemKind): void {
+export function sfxPickup(s: Shot, t: number, what: ItemKind): void {
   if (what === 'fuse') metal(s, t, [2380, 3910, 5420], 0.28, 0.1);
-  else if (what === 'film') {
-    metal(s, t, [1650, 2730, 4100], 0.12, 0.06);
-    clicks(s, t + 0.03, [0, 0.045, 0.08], { freq: 4200, q: 2, peak: 0.35, decay: 0.01 });
-  } else metal(s, t, [1180, 2150, 3320], 0.1, 0.05);
+  else metal(s, t, [1180, 2150, 3320], 0.1, 0.05);
   // Handling rustle.
   const n = s.noise('pink', t, 0.2);
   const bp = s.filter('bandpass', 1400, 0.8);
@@ -197,32 +180,10 @@ export function sfxPickup(s: Shot, t: number, what: 'camera' | ItemKind): void {
   perc(g.gain, t, 0.07, 0.02, 0.12);
 }
 
-/** Drop: thud, plus a rattle for the camera or a tinkle for a fuse. */
-export function sfxDrop(s: Shot, t: number, what: 'camera' | ItemKind): void {
-  thud(s, t, { level: what === 'camera' ? 0.7 : 0.45, f0: 160, f1: 70, body: 700, dur: 0.16, tick: 0.15 });
-  if (what === 'camera') clicks(s, t + 0.04, [0, 0.03, 0.075, 0.13], { freq: 2900, q: 1.6, peak: 0.6, decay: 0.02 });
-  else if (what === 'fuse') metal(s, t + 0.01, [2380, 3910], 0.18, 0.05);
-}
-
-/** Film loaded: two ratchet winding strokes and a final snap. */
-export function sfxRatchet(s: Shot, t: number): void {
-  for (let k = 0; k < 2; k++) {
-    const base = k * 0.42;
-    const times: number[] = [];
-    let dt = 0;
-    for (let i = 0; i < 7; i++) {
-      times.push(base + dt);
-      dt += 0.05 - i * 0.003;
-    }
-    clicks(s, t, times, { freq: rand(2700, 3200), q: 3, peak: 0.6, decay: 0.012 });
-    const n = s.noise('pink', t + base, 0.32);
-    const bp = s.filter('bandpass', 1800, 0.6);
-    const g = s.gain(0);
-    n.connect(bp).connect(g).connect(s.out);
-    swell(g.gain, t + base, 0.03, 0.05, 0.15, 0.1);
-  }
-  clicks(s, t + 0.9, [0, 0.005], { freq: 2200, q: 1.5, peak: 0.6, decay: 0.03 });
-  thud(s, t + 0.9, { level: 0.15, f0: 420, f1: 200, body: 1500, dur: 0.06, tick: 0 });
+/** Drop: thud, plus a tinkle for a fuse. */
+export function sfxDrop(s: Shot, t: number, what: ItemKind): void {
+  thud(s, t, { level: 0.45, f0: 160, f1: 70, body: 700, dur: 0.16, tick: 0.15 });
+  if (what === 'fuse') metal(s, t + 0.01, [2380, 3910], 0.18, 0.05);
 }
 
 /** Fuse inserted: clunk, relay click, then an electrical buzz (longer + power-up whine when the last one goes in). */

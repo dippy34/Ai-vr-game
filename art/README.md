@@ -31,7 +31,7 @@ with `node dev/models/shoot.cjs out.png "model=monster&anim=Walk&t=0.4"`.
 - **Budget for Quest:** whole visible scene ≤ ~150k triangles, few materials, no 4K textures.
 - **Style:** grounded, worn, slightly stylized realism. Think a decades-abandoned house: dust,
   chipped paint, water stains, dull brass. Low-saturation palette (sepia, olive, gray-blue).
-  Silhouettes must read in near-darkness and under a harsh camera flash. Bevel hard edges (even
+  Silhouettes must read in near-darkness and in a harsh flashlight beam. Bevel hard edges (even
   a 2–5 mm bevel catches the flash light and stops things looking like CG boxes).
 
 ## Asset list
@@ -42,9 +42,7 @@ with `node dev/models/shoot.cjs out.png "model=monster&anim=Walk&t=0.4"`.
 | `hand_left.glb`, `hand_right.glb` | `hands.py` | ≤ 3k each | Rigged hand. Origin = wrist. Canonical frame: fingers along −Z (three.js), back of hand +Y, thumb on −X (right) / +X (left). Bones: `wrist`, `thumb_1..3`, `index_1..3`, `middle_1..3`, `ring_1..3`, `pinky_1..3`. Curl = rotate each finger bone about its local X. |
 | `avatar_head.glb` | `avatar.py` | ≤ 3k | Player head (origin = eye center, faces −Z). A survivor in a knit hood/beanie with a cloth mask over the mouth. Node `tint` = the mesh whose material gets the player color. |
 | `avatar_body.glb` | `avatar.py` | ≤ 4k | Torso + shoulders, no arms (origin = neck base), worn jacket. Node `tint` as above. |
-| `camera.glb` | `props.py` | ≤ 3k | Vintage flash camera, origin = right-hand grip (+X end), lens faces −Z. Nodes: `lens`, `flash_reflector`, `film_screen` (a plane on the back for a live film counter, UVs 0..1). |
 | `fuse.glb` | `props.py` | ≤ 600 | Glass cartridge fuse, ~12 cm, origin = center. Node `glass`. |
-| `film.glb` | `props.py` | ≤ 600 | Film canister, origin = bottom center. |
 | `fusebox.glb` | `props.py` | ≤ 2k | Wall-mounted, back flat on the wall plane (origin at center of the back face), faces −Z. A conduit runs 1.4 m up the wall, so don't place it by its bounding box. Nodes `lamp_0`, `lamp_1`, `lamp_2` (indicator bulbs) and `slot_0..2` (where fuses sit). |
 | `door.glb` | `props.py` | ≤ 2k | Front door. Node `door_leaf` with its origin ON THE HINGE edge (so rotating it opens the door), plus frame. Fits the level's 1.2 m × 2.4 m × 0.2 m opening. |
 | `furniture_<style>.glb` | `furniture.py` | ≤ 2.5k each | One per `PropStyle`: table, shelf, bed, couch, crate, counter, cabinet, piano. Modeled at a typical real size (write it into the glTF extras: `extras.size = [w, h, d]`). The game scales it to fit its box. |
@@ -69,7 +67,7 @@ the skull (it hunts by sound), plus a vertical mouth that splits sideways: ragge
 gums and three rows of needle teeth per side over a wet, ridged throat. Ribs with sunken spaces
 between them, winged shoulder blades and the spine show through pale, mottled, bruised skin with
 dark veins, sores and scars; knees, elbows and knuckles are dry and cracked, the mouth, gums and
-eye seams are wet. It should look *horrible* in the camera flash: pale and glossy against black.
+eye seams are wet. It should look *horrible* in a flashlight beam: pale and glossy against black.
 
 Animations loop except `Attack`. Stride is matched so that `Walk` plays at 1.0 m/s and `Run` at
 3.1 m/s with timeScale 1 (the game scales timeScale by actual speed). Write the speeds into the
@@ -102,7 +100,7 @@ the attribute in its own shader).
 Keep exporting WebP into `public/`: that's what `npm run dev` serves. `npm run build` then runs
 `scripts/optimize-assets.mjs`, which writes KTX2 (Basis Universal) copies into `dist/`
 (`models/ktx2/*.glb`, `textures/*.ktx2`): ETC1S for color and ORM, ETC1S normal-map mode for prop
-normals, UASTC for the monster/hands/camera and house-surface normals, mipmaps included. The game
+normals, UASTC for the monster/hands and house-surface normals, mipmaps included. The game
 prefers those and falls back to the WebP originals. On a Quest that cuts texture memory ~7x
 (RGBA8 → ETC2/ASTC). `npm run dev:ktx2` serves the same compressed copies in dev (cached by
 content hash, so only changed textures are re-encoded).

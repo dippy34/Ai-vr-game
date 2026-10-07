@@ -41,7 +41,7 @@ export class MessagePanel {
   show(text: string, seconds = 3): void {
     const g = this.canvas.getContext('2d')!;
     g.clearRect(0, 0, W, H);
-    // Soft dark backing so text reads over the flash too.
+    // Soft dark backing so text reads over a lit wall too.
     g.save();
     g.translate(W / 2, H / 2);
     g.scale(1, H / W);

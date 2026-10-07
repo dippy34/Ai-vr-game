@@ -143,7 +143,7 @@ async function setup({ width = 960, height = 540, base = 'http://localhost:5302/
       document.getElementById('fade').style.opacity = String(cmd.fade ?? 0);
       m.game.frame(nowMs);
       const me = s.state.players[s.localId];
-      return { mode: s.state.monster.mode, mx: +s.state.monster.position.x.toFixed(2), mz: +s.state.monster.position.z.toFixed(2), status: me.status, film: s.state.camera.film, holder: s.state.camera.holder, phase: s.state.phase };
+      return { mode: s.state.monster.mode, mx: +s.state.monster.position.x.toFixed(2), mz: +s.state.monster.position.z.toFixed(2), status: me.status, light: me.light.on, charge: +me.light.charge.toFixed(2), winding: me.light.cranking, phase: s.state.phase };
     };
   });
   let now = await page.evaluate(() => performance.now());

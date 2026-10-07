@@ -208,7 +208,7 @@ const _v = new THREE.Vector3();
 
 /**
  * Append world-space, position+normal-only copies of every visible mesh under `root` in its
- * CURRENT pose (skinning applied on the CPU). Used to freeze a model into a flash afterimage.
+ * CURRENT pose (skinning applied on the CPU). Used to freeze a model into an afterimage.
  * `offset` pushes vertices out along their normals (meters), for the glow halo.
  */
 export function bakeObject(root: THREE.Object3D, out: THREE.BufferGeometry[], offset = 0): void {

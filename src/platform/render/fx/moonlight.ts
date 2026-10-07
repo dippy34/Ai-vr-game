@@ -1,13 +1,13 @@
 /**
  * Moonlight through the windows: soft volumetric shafts, the window's light pool (with the
  * mullion shadows) on the floor, and slow dust motes that glow where they drift through a shaft
- * (or light up for an instant in the camera flash). All additive, no real lights:
+ * (or in your Crank Light's beam). All additive, no real lights:
  *  - shafts + pools: the level's two existing merged meshes (one draw call each), with materials
  *    that fade the shaft's sides when seen edge-on or from inside, add drifting density and a slow
  *    "cloud over the moon" breathing shared by shafts and pools;
  *  - motes: ONE Points draw call for the whole house, a box of dust that wraps around the viewer
  *    (positions are computed in the vertex shader; brightness from the window list below and the
- *    flash in the shared FX uniforms).
+ *    beam in the shared FX uniforms).
  */
 
 import * as THREE from 'three';
@@ -153,7 +153,7 @@ void main() {
 		moon += b.w * inside * mull * step( 0.0, along ) * step( 0.02, wp.y ) * exp( - tau * 0.35 );
 	}
 	moon *= muteClouds();
-	// Camera flash: inverse square, inside the cone.
+	// Your Crank Light: inverse square, inside the beam cone.
 	vec3 fl = wp - muteFx.flashPos.xyz;
 	float dl2 = dot( fl, fl );
 	float cone = smoothstep( muteFx.flashDir.w - 0.1, muteFx.flashDir.w + 0.08, dot( fl, muteFx.flashDir.xyz ) * inversesqrt( max( dl2, 1e-4 ) ) );

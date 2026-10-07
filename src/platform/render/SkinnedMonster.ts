@@ -340,7 +340,7 @@ export class SkinnedMonster implements CatchPoser {
     return out.copy(this.object.position).setY(this.object.position.y + MONSTER.height * 0.92);
   }
 
-  /** World-space copy of the current pose for flash afterimages. */
+  /** World-space copy of the current pose (the jumpscare's burned-in afterimage). */
   bake(out: THREE.BufferGeometry[], inflate = 1): void {
     bakeObject(this.object, out, (inflate - 1) * 0.3);
   }

@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createLevel } from '../core/level';
 import { GameSim } from '../core/sim';
-import type { PlayerPose, SimEvent, WorldState } from '../core/types';
+import type { PlayerAction, PlayerPose, SimEvent, WorldState } from '../core/types';
 import type { IAudioManager, IGameRenderer, IInputManager, InputFrame, Readable } from '../platform/types';
 import type { UI } from '../ui/ui';
 import { Game } from './game';
@@ -20,7 +20,7 @@ function fakes() {
   const hold = { messages: false };
   const notes: Readable[] = [];
   /** Input for the next frame (reset after it). */
-  const next = { use: false, move: { x: 0, y: 0 } };
+  const next = { use: false, light: false, crank: false, move: { x: 0, y: 0 } };
   const renderer = {
     ctx: {
       renderer: { setAnimationLoop: (fn: (t: number) => void) => (loop = fn), xr: { isPresenting: false } },
@@ -31,7 +31,7 @@ function fakes() {
     loadLevel: vi.fn(),
     update: vi.fn(),
     setRemotePose: vi.fn(),
-    flash: vi.fn(),
+    setLocalLight: vi.fn(),
     setLocalNoiseLevel: vi.fn(),
     showMessage: vi.fn(),
     holdingMessages: () => hold.messages,
@@ -53,8 +53,9 @@ function fakes() {
         mode: 'desktop', move: { ...next.move }, sprint: false, sneak: false,
         head: { position: { x: p.x, y: p.y, z: p.z }, rotation: { x: q.x, y: q.y, z: q.z, w: q.w } },
         left: hand(), right: hand(), grip: no(), gripPressed: no(), gripReleased: no(), triggerPressed: no(),
-        usePressed: next.use, menuPressed: false,
+        usePressed: next.use, menuPressed: false, lightPressed: next.light, crank: next.crank,
       };
+      next.light = false;
       next.use = false;
       next.move = { x: 0, y: 0 };
       return frame;
@@ -66,7 +67,7 @@ function fakes() {
   } as unknown as IAudioManager;
   const messages: string[] = [];
   const ui = {
-    hud: { showMessage: (t: string) => messages.push(t), setStatus: vi.fn(), setFilm: vi.fn(), setMicLevel: vi.fn(), setAim: vi.fn() },
+    hud: { showMessage: (t: string) => messages.push(t), setStatus: vi.fn(), setLight: vi.fn(), setMicLevel: vi.fn(), setAim: vi.fn() },
     setMicLevel: vi.fn(),
     setLobbyPlayers: vi.fn(),
   } as unknown as UI;
@@ -126,6 +127,38 @@ describe('Game', () => {
     now.mockReturnValue(1_000_000 + 95_000);
     session.callbacks.onEvent({ type: 'phase', phase: 'won' } satisfies SimEvent);
     expect(messages.at(-1)).toMatch(/1:35 in the house/);
+  });
+
+  it('F switches the Crank Light and R winds it: sent to the host, shown locally at once', () => {
+    const { game, frames, next, renderer, ui } = fakes();
+    const sim = new GameSim(createLevel(3));
+    sim.addPlayer('me', 'Me', true);
+    sim.startRound();
+    const session = fakeSession(sim, 'me');
+    // A real host round trip: actions reach the sim.
+    session.sendAction = vi.fn((a: PlayerAction) => void sim.handleAction('me', a));
+    game.attach(session);
+    frames(2);
+    const setLight = renderer.setLocalLight as ReturnType<typeof vi.fn>;
+    expect(setLight).toHaveBeenLastCalledWith(true, false);
+    next.light = true;
+    frames(1);
+    expect(session.sendAction).toHaveBeenLastCalledWith({ type: 'light', on: false });
+    expect(setLight).toHaveBeenLastCalledWith(false, false);
+    expect(sim.state.players.me.light.on).toBe(false);
+    next.light = true;
+    frames(1);
+    expect(sim.state.players.me.light.on).toBe(true);
+    // Winding: one 'crank on' when R goes down, one 'crank off' when it comes up.
+    next.crank = true;
+    frames(3);
+    expect((session.sendAction as ReturnType<typeof vi.fn>).mock.calls.filter(([a]) => a.type === 'crank')).toEqual([[{ type: 'crank', on: true }]]);
+    expect(sim.state.players.me.light.cranking).toBe(true);
+    expect(setLight).toHaveBeenLastCalledWith(true, true);
+    expect(ui.hud.setLight).toHaveBeenLastCalledWith(expect.objectContaining({ cranking: true, on: true }));
+    next.crank = false;
+    frames(1);
+    expect(sim.state.players.me.light.cranking).toBe(false);
   });
 
   it('desktop HUD messages wait until the catch sequence lets go of the screen', () => {
@@ -259,7 +292,7 @@ describe('Game', () => {
 
     it('a pickup more in the middle of your view wins over a note next to it', () => {
       const { notes, next, frames, input, session, sim, at } = reading();
-      sim.state.camera.position = at(1.0);
+      sim.state.items[0].position = at(1.0);
       notes.push({ position: at(1.0, 0.12), readYaw: 0, upright: false });
       next.use = true;
       frames(1);

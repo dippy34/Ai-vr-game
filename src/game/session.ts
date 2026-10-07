@@ -137,7 +137,7 @@ const CLIENT_LIMITS = {
 type LimitKind = keyof typeof CLIENT_LIMITS;
 
 /** Non-voice noises a client may report (voice goes through 'voice' messages). */
-const CLIENT_NOISES: readonly NoiseSource[] = ['footstep', 'item', 'camera'];
+const CLIENT_NOISES: readonly NoiseSource[] = ['footstep', 'item'];
 
 export interface HostSessionOptions {
   /** Clock in seconds for rate limiting (default: performance.now). */
@@ -183,7 +183,6 @@ export class HostSession implements Session {
     this.level = createLevel(seed);
     this.sim = new GameSim(this.level, {
       fusesRequired: GAME.fusesRequired,
-      startingFilm: GAME.startingFilm,
       randomMonsterSpawn: true,
     });
     this.localId = transport?.selfId ?? 'solo';

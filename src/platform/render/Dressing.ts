@@ -17,7 +17,7 @@
  *     bottles/candles/books on table + counter tops (real surface height found by raycasting the
  *     furniture model, so sinks/stoves/backsplashes are avoided), rugs under living/bedroom
  *     furniture, boards over a couple of windows, bare bulbs hanging over tables, and the toys
- *     somewhere you see them on the first flash (straight ahead of the spawn, across the house).
+ *     somewhere your light finds them first (straight ahead of the spawn, across the house).
  *  4. All copies of a source mesh are merged into one static mesh (StaticBatcher).
  */
 
@@ -443,8 +443,7 @@ export class DressingSet {
     const disc = (p: Vec3, r: number, f: number) => g.markCapsule(p.x, p.z, p.x, p.z, r, f);
     for (const s of level.playerSpawns) disc(s.position, 0.75, F_CLEAR);
     disc(level.monsterSpawn, 0.6, F_CLEAR);
-    disc(level.cameraSpawn.position, 0.4, F_ITEM);
-    for (const p of [...level.fuseSpawns, ...level.filmSpawns]) disc(p, 0.4, F_ITEM);
+    for (const p of [...level.fuseSpawns, ...(level.tutorialSpot ? [level.tutorialSpot] : [])]) disc(p, 0.4, F_ITEM);
     disc(this.input.fuseBoxMount, 1.0, F_CLEAR);
   }
 
@@ -690,7 +689,7 @@ export class DressingSet {
     }
   }
 
-  /** Something you see in your first flash: straight ahead of the spawn, against a far wall. */
+  /** Something your light finds first: straight ahead of the spawn, against a far wall. */
   private ruleToys(): void {
     const p = this.pieces.get('toys')!;
     const s = this.natural(p);
@@ -1068,7 +1067,7 @@ export class DressingSet {
     const inset = Math.min(r * 0.8 + 0.04, 0.2);
     const w = top.max.x - top.min.x - inset * 2, d = top.max.z - top.min.z - inset * 2;
     if (w <= 0 || d <= 0) return false;
-    const items = [this.level.cameraSpawn.position, ...this.level.fuseSpawns, ...this.level.filmSpawns];
+    const items = [...this.level.fuseSpawns, ...(this.level.tutorialSpot ? [this.level.tutorialSpot] : [])];
     for (let k = 0; k < 24; k++) {
       const x = top.min.x + inset + rnd() * w, z = top.min.z + inset + rnd() * d;
       if (items.some((q) => Math.hypot(q.x - x, q.z - z) < r + 0.16)) continue;

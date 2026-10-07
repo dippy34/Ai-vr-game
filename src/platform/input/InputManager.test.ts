@@ -139,6 +139,20 @@ describe('InputManager desktop', () => {
     expect(t.input.update(1 / 60).usePressed).toBe(false);
   });
 
+  it('F switches the light (one-frame edge), R held winds it', () => {
+    const t = setup();
+    t.key('KeyF', true);
+    expect(t.input.update(1 / 60).lightPressed).toBe(true);
+    expect(t.input.update(1 / 60).lightPressed).toBe(false);
+    t.key('KeyF', true, true); // auto-repeat does not re-fire
+    expect(t.input.update(1 / 60).lightPressed).toBe(false);
+    expect(t.input.update(1 / 60).crank).toBe(false);
+    t.key('KeyR', true);
+    expect(run(t.input, 10).crank).toBe(true);
+    t.key('KeyR', false);
+    expect(t.input.update(1 / 60).crank).toBe(false);
+  });
+
   it('click locks the pointer; mouse looks (yaw on rig, clamped pitch on camera); left click = right trigger', () => {
     const t = setup();
     t.el.dispatchEvent(t.ev('mousedown', { button: 0 }));
@@ -264,6 +278,50 @@ describe('InputManager XR controllers', () => {
     f = t.input.update(1 / 72);
     expect(f.move.y).toBeCloseTo(1);
     expect(f.move.x).toBeCloseTo(0);
+  });
+
+  it('the Crank Light: left trigger switches it, left X or shaking the left hand winds it', () => {
+    const t = xrSetup();
+    const trig = t.L.buttons[0];
+    trig.value = 1;
+    trig.pressed = true;
+    expect(t.input.update(1 / 72).lightPressed).toBe(true);
+    expect(t.input.update(1 / 72).lightPressed).toBe(false);
+    trig.value = 0;
+    trig.pressed = false;
+    t.input.update(1 / 72);
+    // The right trigger is not the light switch.
+    t.R.buttons[0].value = 1;
+    t.R.buttons[0].pressed = true;
+    expect(t.input.update(1 / 72).lightPressed).toBe(false);
+    t.L.buttons[4].pressed = true;
+    expect(t.input.update(1 / 72).crank).toBe(true);
+    t.L.buttons[4].pressed = false;
+    expect(t.input.update(1 / 72).crank).toBe(false);
+
+    const q = new THREE.Quaternion();
+    const at = (x: number) => {
+      t.L.slot.grip.matrix.compose(new THREE.Vector3(x, 1.2, -0.3), q, new THREE.Vector3(1, 1, 1));
+      t.L.slot.grip.visible = true;
+    };
+    // A quick reach (one fast sweep, no back and forth) never winds it...
+    let wound = false;
+    for (let i = 0; i <= 20; i++) {
+      at(-0.2 + i * 0.03);
+      wound ||= t.input.update(1 / 72).crank;
+    }
+    expect(wound).toBe(false);
+    // ...shaking it back and forth (~6 cm at 4 Hz) does, and stops soon after you stop.
+    for (let i = 0; i < 72; i++) {
+      at(0.1 + 0.06 * Math.sin((i / 72) * Math.PI * 2 * 4));
+      wound = t.input.update(1 / 72).crank;
+    }
+    expect(wound).toBe(true);
+    for (let i = 0; i < 72; i++) {
+      at(0.1);
+      wound = t.input.update(1 / 72).crank;
+    }
+    expect(wound).toBe(false);
   });
 
   it('grip edges with hysteresis, exactly one frame each', () => {

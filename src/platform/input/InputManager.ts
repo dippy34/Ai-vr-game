@@ -67,6 +67,16 @@ export const SPRINT_RELEASE_GRACE = 0.35;
  */
 export const XR_MENU_HAND: Handedness = 'left';
 export const XR_MENU_BUTTON = XR_BUTTON.b;
+/** VR: holding this left-controller button winds the Crank Light (X; Y is the menu). */
+export const XR_CRANK_BUTTON = XR_BUTTON.a;
+/**
+ * VR shake-to-wind: the left hand (relative to the head, so walking doesn't count) reversing
+ * direction at least SHAKE_REVERSALS times within SHAKE_WINDOW s, each time moving faster than
+ * SHAKE_MIN_SPEED m/s. A quick reach never reverses that often, so it can't wind by accident.
+ */
+export const SHAKE_MIN_SPEED = 0.55;
+export const SHAKE_REVERSALS = 3;
+export const SHAKE_WINDOW = 0.9;
 /** Desktop mouse-look sensitivity (radians per pixel). */
 export const MOUSE_SENSITIVITY = 0.0022;
 /** Desktop pitch limit (radians). */
@@ -96,7 +106,7 @@ const MOVE_KEYS = {
 /** Keys whose browser default we suppress while the pointer is locked (scrolling, Ctrl+S/D...). */
 const GAME_KEYS = new Set<string>([
   ...MOVE_KEYS.forward, ...MOVE_KEYS.back, ...MOVE_KEYS.left, ...MOVE_KEYS.right,
-  ...MOVE_KEYS.sprint, ...MOVE_KEYS.crouch, 'KeyE', 'Space',
+  ...MOVE_KEYS.sprint, ...MOVE_KEYS.crouch, 'KeyE', 'KeyF', 'KeyR', 'Space',
   'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6',
 ]);
 
@@ -183,6 +193,10 @@ export class InputManager implements IInputManager {
   private readonly slots: XRSlot[] = [];
   /** How long the left hand has been pinching (hand-tracking walk). */
   private pinchWalkTime = 0;
+  /** Shake-to-wind detector (left hand relative to the head). */
+  private readonly shake = { prev: null as THREE.Vector3 | null, dir: new THREE.Vector3(), reversals: [] as number[] };
+  /** Desktop F pressed since the last frame. */
+  private pendingLight = false;
   private readonly sides: Record<Handedness, XRSideState> = {
     left: { source: null, grip: false, trigger: false, menu: false, stickClick: false, curls: restCurls(), pose: untrackedPose() },
     right: { source: null, grip: false, trigger: false, menu: false, stickClick: false, curls: restCurls(), pose: untrackedPose() },
@@ -399,13 +413,15 @@ export class InputManager implements IInputManager {
     const { renderer, rig, camera } = this.ctx;
     const xr = renderer.xr;
     // Desktop-only events are meaningless here.
-    this.pendingUse = this.pendingTrigger = this.pendingMenu = false;
+    this.pendingUse = this.pendingTrigger = this.pendingMenu = this.pendingLight = false;
     this.mouseDX = this.mouseDY = 0;
 
     const gripPressed = edges();
     const gripReleased = edges();
     const triggerPressed = edges();
     let menuPressed = false;
+    let lightPressed = false;
+    let crankButton = false;
     let move = { x: 0, y: 0 };
     let turn = 0;
 
@@ -440,6 +456,11 @@ export class InputManager implements IInputManager {
       const t = hysteresisAbove(st.trigger, buttonValue(b[XR_BUTTON.trigger]), TRIGGER_PRESS, TRIGGER_RELEASE);
       if (t && !st.trigger) triggerPressed[side] = true;
       st.trigger = t;
+      // The Crank Light is on the left wrist: left trigger switches it, left X winds it.
+      if (side === 'left') {
+        if (triggerPressed.left) lightPressed = true;
+        if (b[XR_CRANK_BUTTON]?.pressed) crankButton = true;
+      }
 
       const ax = gp.axes;
       const sx = ax.length >= 4 ? ax[XR_AXIS.stickX] : (ax[0] ?? 0);
@@ -532,7 +553,11 @@ export class InputManager implements IInputManager {
         st.pose = { tracked: true, position: res.position, rotation: res.rotation, curls: res.curls };
         const pinchOk = res.curls[1] < PINCH_MAX_INDEX_CURL;
         const pinch = pinchOk && hysteresisBelow(st.trigger, res.pinchDistance, PINCH_ON_M, PINCH_OFF_M);
-        if (pinch && !st.trigger) triggerPressed[side] = true;
+        if (pinch && !st.trigger) {
+          triggerPressed[side] = true;
+          // Hand tracking: a right-hand pinch switches the light (a left pinch is for walking).
+          if (side === 'right') lightPressed = true;
+        }
         st.trigger = pinch;
         const fist = hysteresisAbove(st.grip, fistAmount(res.curls), FIST_ON, FIST_OFF);
         if (fist && !st.grip) gripPressed[side] = true;
@@ -561,6 +586,9 @@ export class InputManager implements IInputManager {
       this.pinchWalkTime = 0;
     }
 
+    // ---- 6. shake the left hand to wind the light ----
+    const crank = crankButton || this.updateShake(this.sides.left.pose, head, dt);
+
     // Keep ctx.camera current for anyone reading it before render() (render updates it again).
     xr.updateCamera(camera);
 
@@ -578,7 +606,30 @@ export class InputManager implements IInputManager {
       triggerPressed,
       usePressed: false,
       menuPressed,
+      lightPressed,
+      crank,
     };
+  }
+
+  /** Shake-to-wind (see SHAKE_*): true while the left hand is being shaken back and forth. */
+  private updateShake(hand: HandPose, head: HeadPose, dt: number): boolean {
+    const sh = this.shake;
+    if (!hand.tracked || !(dt > 0)) {
+      sh.prev = null;
+      sh.reversals.length = 0;
+      return false;
+    }
+    const rel = new THREE.Vector3(hand.position.x - head.position.x, hand.position.y - head.position.y, hand.position.z - head.position.z);
+    if (sh.prev) {
+      const v = _v.copy(rel).sub(sh.prev).divideScalar(dt);
+      if (v.length() > SHAKE_MIN_SPEED) {
+        if (sh.dir.lengthSq() > 0 && v.dot(sh.dir) < 0) sh.reversals.push(this.time);
+        sh.dir.copy(v).normalize();
+      }
+    }
+    sh.prev = rel;
+    while (sh.reversals.length && this.time - sh.reversals[0] > SHAKE_WINDOW) sh.reversals.shift();
+    return sh.reversals.length >= SHAKE_REVERSALS;
   }
 
   /** Read tracked joints (reference space), analyze, and convert to world space. */
@@ -706,6 +757,7 @@ export class InputManager implements IInputManager {
     this.keys.add(e.code);
     if (e.repeat) return;
     if (e.code === 'KeyE') this.pendingUse = true;
+    if (e.code === 'KeyF') this.pendingLight = true;
     const preset = signForCode(e.code);
     if (preset) this.sign = { preset, start: this.time, held: true };
   }
@@ -807,7 +859,8 @@ export class InputManager implements IInputManager {
     triggerPressed.right = this.enabled && this.pendingTrigger;
     const usePressed = this.enabled && this.pendingUse;
     const menuPressed = this.pendingMenu;
-    this.pendingTrigger = this.pendingUse = this.pendingMenu = false;
+    const lightPressed = this.enabled && this.pendingLight;
+    this.pendingTrigger = this.pendingUse = this.pendingMenu = this.pendingLight = false;
 
     return {
       mode: 'desktop',
@@ -823,6 +876,8 @@ export class InputManager implements IInputManager {
       triggerPressed,
       usePressed,
       menuPressed,
+      lightPressed,
+      crank: this.enabled && this.keys.has('KeyR'),
     };
   }
 }

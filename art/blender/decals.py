@@ -44,7 +44,7 @@ DECAL_SPECS = {
 }
 DECAL_TEX = (512, 1024)
 DECAL_ROUGHNESS = 0.72
-NOTE_NAMES = ['tutorial', 'tom', 'whisper', 'flash', 'dad', 'kitchen']
+NOTE_NAMES = ['tutorial', 'tom', 'whisper', 'light', 'dad', 'kitchen']
 PIECES = [f'decal_{n}' for n in DECAL_SPECS] + [f'note_{n}' for n in NOTE_NAMES]
 
 

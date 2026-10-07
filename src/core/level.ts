@@ -168,7 +168,7 @@ export function createLevel(seed: number): LevelData {
 
   // --- Furniture ---------------------------------------------------------------------------
   // Foyer
-  boxes.push(furn('table', -2.9, 6.1, -2.3, 6.9, 0.75, COLOR.wood)); // camera table
+  boxes.push(furn('table', -2.9, 6.1, -2.3, 6.9, 0.75, COLOR.wood)); // foyer table
   boxes.push(furn('cabinet', 2.4, 1.8, 2.9, 3.2, 1.9, COLOR.darkWood)); // coat cabinet
   boxes.push(furn('couch', 2.4, 6.2, 2.9, 7.4, 0.5, COLOR.bench)); // bench
   // Hallway
@@ -251,8 +251,8 @@ export function createLevel(seed: number): LevelData {
     ],
     // Bathroom: the deepest room from the front door.
     monsterSpawn: v3(-3.4, 0, -5.6),
-    // On the little foyer table by the door (y = table top).
-    cameraSpawn: { position: v3(-2.6, 0.75, 6.5), yaw: -HALF_PI },
+    // The tutorial note, on the little foyer table by the door (y = table top).
+    tutorialSpot: v3(-2.6, 0.75, 6.5),
     // All on furniture tops (y = top surface), one per room.
     fuseSpawns: [
       v3(-10.65, 0.6, -5.85), // bedroom nightstand
@@ -263,12 +263,6 @@ export function createLevel(seed: number): LevelData {
       v3(6.5, 0.9, 7.65), // dining sideboard
       v3(-2.35, 0.85, -5.3), // bathroom sink
       v3(10.65, 0.75, 0), // hallway end table
-    ],
-    filmSpawns: [
-      v3(-10.65, 1.0, 7.0), // living room side cabinet
-      v3(-5.35, 0.9, -3.4), // bedroom dresser
-      v3(7.5, 0.9, -4.7), // kitchen island
-      v3(4.5, 0.8, -0.9), // hallway console
     ],
     // On the inside of the south wall, right of the front door, facing into the foyer.
     fuseBox: { position: v3(1.5, 1.4, 8 - HT - 0.05), yaw: 0 },

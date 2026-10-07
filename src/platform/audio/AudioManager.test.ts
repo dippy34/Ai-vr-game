@@ -19,6 +19,7 @@ function player(id: string, x: number, z: number, status: PlayerState['status'] 
     spawnYaw: 0,
     pose: { head: { position: { x, y: 1.6, z }, rotation: { x: 0, y: 0, z: 0, w: 1 } }, left: hand(), right: hand() },
     held: { left: null, right: null },
+    light: { on: true, charge: 1, cranking: false },
   };
 }
 
@@ -30,7 +31,6 @@ function world(): WorldState {
     players: { me: player('me', 0, 0), a: player('a', 3, 0), b: player('b', -4, 2) },
     monster: { position: { x: 10, y: 0, z: 0 }, yaw: 0, mode: 'wander', target: null, targetPlayer: null, speed: 1, alert: 0, gait: 'walk', posture: 'tall', act: 'none', actStart: 0, focus: null },
     items: [],
-    camera: { holder: null, hand: null, position: { x: 0, y: 1, z: 0 }, yaw: 0, film: 6, lastFlashTime: -1e9 },
     fusesInserted: 0,
     fusesRequired: 3,
     exitOpen: false,
@@ -43,15 +43,10 @@ const p0 = { x: 1, y: 1, z: 1 };
 
 const ALL_EVENTS: SimEvent[] = [
   { type: 'phase', phase: 'playing' },
-  { type: 'flash', by: 'me', position: p0, direction: { x: 0, y: 0, z: -1 }, time: 0 },
-  { type: 'dryFire', by: 'a', position: p0 },
-  { type: 'pickup', by: 'a', what: 'camera', position: p0 },
+  { type: 'light', by: 'me', on: false, position: p0 },
+  { type: 'light', by: 'a', on: true, position: p0 },
   { type: 'pickup', by: 'a', what: 'fuse', position: p0 },
-  { type: 'pickup', by: 'a', what: 'film', position: p0 },
-  { type: 'drop', by: 'a', what: 'camera', position: p0 },
   { type: 'drop', by: 'a', what: 'fuse', position: p0 },
-  { type: 'drop', by: 'a', what: 'film', position: p0 },
-  { type: 'filmLoaded', by: 'a', amount: 3, total: 5, position: p0 },
   { type: 'fuseInserted', by: 'a', count: 1, required: 3, position: p0 },
   { type: 'fuseInserted', by: 'a', count: 3, required: 3, position: p0 },
   { type: 'exitOpened', position: p0 },
@@ -359,6 +354,25 @@ describe('AudioManager with a strict fake WebAudio', () => {
     const t0 = performance.now();
     while (performance.now() - t0 < 400) am.getMicLevel();
     expect(am.getMicLevel()).toBe(0);
+  });
+
+  it('someone winding their Crank Light ratchets every ~85 ms, and stops when they stop', async () => {
+    vi.stubGlobal('AudioContext', FakeContext);
+    const am = new AudioManager();
+    await am.unlock();
+    const ctx = FakeContext.last!;
+    const w = world();
+    for (let f = 0; f < 72; f++) am.update(w, 'me', head, 1 / 72);
+    const idle = ctx.nodes;
+    w.players.a.light.cranking = true;
+    for (let f = 0; f < 72; f++) am.update(w, 'me', head, 1 / 72);
+    const winding = ctx.nodes - idle;
+    // ~12 ratchet teeth in a second, each a handful of nodes.
+    expect(winding).toBeGreaterThan(40);
+    w.players.a.light.cranking = false;
+    const after = ctx.nodes;
+    for (let f = 0; f < 72; f++) am.update(w, 'me', head, 1 / 72);
+    expect(ctx.nodes - after).toBeLessThan(winding / 4);
   });
 
   it('ignores events while the context is suspended (no backlog of stingers)', async () => {

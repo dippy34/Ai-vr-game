@@ -1,5 +1,5 @@
 /**
- * The monster's skin and keratin (teeth / claws), made to read as horribly alive under the flash:
+ * The monster's skin and keratin (teeth / claws), made to read as horribly alive in a flashlight beam:
  *  - Skin: physically based (MeshPhysicalMaterial) with a wet clearcoat, plus a fake subsurface
  *    term added inside the light loop for every light that reaches the pixel:
  *      wrap lighting (light bleeding past the terminator, tinted warm like blood under skin) and
@@ -13,7 +13,7 @@
  * bone: fingers / ears thin, torso and skull not), no wet areas and no cavities.
  *
  * Applied from GameRenderer to the skinned monster instance (its own materials: the library's
- * source materials are left alone). Shadows: the monster casts and receives the flash's shadow.
+ * source materials are left alone). Shadows: the monster casts and receives the Crank Light's shadow.
  */
 
 import * as THREE from 'three';
@@ -26,7 +26,7 @@ const SKIN = {
   translucency: 2.2,
   clearcoat: 0.55,
   clearcoatRoughness: 0.08,
-  /** Fine wet film / fuzz: edge brightening under frontal light (the flash). */
+  /** Fine wet film / fuzz: edge brightening under frontal light (a flashlight). */
   sheen: 0.06,
   sheenColor: new THREE.Color(1.0, 0.8, 0.76),
   sheenRoughness: 0.45,
@@ -200,7 +200,7 @@ function keratinFrom(src: THREE.MeshStandardMaterial): THREE.MeshPhysicalMateria
 
 /**
  * Give a monster instance the skin / keratin materials (meshes using 'monster_skin' /
- * 'monster_keratin') and make it cast and receive the flash's shadows.
+ * 'monster_keratin') and make it cast and receive the Crank Light's shadows.
  */
 export function applyMonsterSkin(root: THREE.Object3D): void {
   root.updateMatrixWorld(true);
