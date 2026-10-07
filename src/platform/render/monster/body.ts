@@ -39,7 +39,6 @@ export const BODY = {
   quadHand: { r: 0.5, f: 0.74, runReach: 0.28 },
   /** Leg stays within this share of its length (the hips drop to keep it). */
   legReach: 0.965,
-  armReach: 0.97,
   /** Head top clearance under a lintel / the ceiling. */
   headClear: 0.07,
   /** Foot / hand contact radius for placement. */
@@ -1124,7 +1123,6 @@ export class ProceduralBody implements StepHost {
 
     // ---- Face -------------------------------------------------------------------------------
     this.face(dt, breath);
-    void lerp;
   }
 
   /** Average height of the planted support limbs (level): the body rides on its contacts. */

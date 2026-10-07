@@ -14,7 +14,6 @@ export const FINGERS = ['thumb', 'index', 'middle', 'ring', 'pinky'] as const;
 const SIDES = ['L', 'R'] as const;
 
 const CORE = ['root', 'hips', 'spine_1', 'spine_2', 'spine_3', 'neck', 'neck_2', 'head', 'jaw'] as const;
-const OPTIONAL = ['jaw_L', 'jaw_R', 'ear_L', 'ear_R'] as const;
 const ARM = ['shoulder', 'upper_arm', 'forearm', 'hand'] as const;
 const LEG = ['thigh', 'shin', 'foot', 'toe'] as const;
 
@@ -166,7 +165,6 @@ export class MonsterRig {
     this.jawR = I('jaw_R');
     this.earL = I('ear_L');
     this.earR = I('ear_R');
-    void OPTIONAL;
     const P = this.restMP;
     this.hipHeight = P[this.hips].y;
     this.headHeight = P[this.head].y;
@@ -256,8 +254,7 @@ export class MonsterRig {
       ankleFromBall: P[foot].clone().sub(P[toe]),
       ballHeight: Math.max(0.01, P[toe].y),
       restBall: P[toe].clone().setY(0),
-      // Toes up = rotation about the model's left axis... (+X model = right; toes up is a
-      // rotation about +X: forward tilts up).
+      // Toes up: a rotation about the model's +X (right) axis tilts forward up.
       toeAxis: new THREE.Vector3(1, 0, 0).applyQuaternion(toeInv),
     };
   }
