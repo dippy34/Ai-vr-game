@@ -2,7 +2,7 @@
 // monster state scripted every 1/30 s frame) and films it with a free review camera.
 //
 //   npx vite --config dev/anim/vite.capture.config.ts      (no-HMR server on :5320, restart on changes)
-//   node dev/anim/capture.cjs <scene> [--every N] [--size 960x540] [--from F] [--to F] [--sheet]
+//   node dev/anim/capture.cjs <scene> [--every N] [--size 960x540] [--from F] [--to F] [--sheet | --video]
 //
 // Scenes live in dev/anim/scenes.cjs. Frames go to dev/anim/out/<scene>/, the clip to
 // dev/anim/out/<scene>.mp4 (every frame), or with --every N a contact sheet of every Nth frame
@@ -28,7 +28,9 @@ const every = Number(opt('every', 1));
 const [W, H] = opt('size', '960x540').split('x').map(Number);
 const from = Number(opt('from', 0));
 const to = Number(opt('to', scene.frames - 1));
-const sheet = args.includes('--sheet') || every > 1;
+// --video: an MP4 even when skipping frames (encoded at 30 / every fps).
+const video = args.includes('--video');
+const sheet = !video && (args.includes('--sheet') || every > 1);
 const OUT = path.join(__dirname, 'out');
 const dir = path.join(OUT, name);
 fs.rmSync(dir, { recursive: true, force: true });
@@ -100,7 +102,11 @@ fs.mkdirSync(dir, { recursive: true });
     console.log(`sheet ${out} (${shots} frames)`);
   } else {
     const out = path.join(OUT, `${name}.mp4`);
-    execSync(`sh ${path.join(__dirname, '../capture/encode.sh')} ${dir} ${out}`, { stdio: 'inherit' });
+    if (every === 1) execSync(`sh ${path.join(__dirname, '../capture/encode.sh')} ${dir} ${out}`, { stdio: 'inherit' });
+    else {
+      execSync(`ffmpeg -loglevel error -y -framerate ${30 / every} -i ${dir}/f_%05d.jpg -c:v libx264 -preset slow -crf 18 -tune film -pix_fmt yuv420p -movflags +faststart ${out}`);
+      execSync(`ffprobe -v error -show_entries format=duration,size -of default=nw=1 ${out}`, { stdio: 'inherit' });
+    }
     console.log(`clip ${out}`);
   }
   console.log(`done in ${((Date.now() - t0) / 1000).toFixed(0)} s`);
