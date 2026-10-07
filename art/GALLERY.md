@@ -12,6 +12,10 @@ screenshots from the actual three.js game renderer (`*_threejs`).
 
 ![monster threejs](previews/monster_threejs.png)
 
+**monster threejs flash**
+
+![monster threejs flash](previews/monster_threejs_flash.png)
+
 **monster flash**
 
 ![monster flash](previews/monster_flash.png)
@@ -36,9 +40,53 @@ screenshots from the actual three.js game renderer (`*_threejs`).
 
 ![monster attack](previews/monster_attack.png)
 
+**monster catch**
+
+![monster catch](previews/monster_catch.png)
+
 **monster face**
 
 ![monster face](previews/monster_face.png)
+
+**monster hand**
+
+![monster hand](previews/monster_hand.png)
+
+**monster stress crawl**
+
+![monster stress crawl](previews/monster_stress_crawl.png)
+
+**monster stress crawl back**
+
+![monster stress crawl back](previews/monster_stress_crawl_back.png)
+
+**monster stress crouch**
+
+![monster stress crouch](previews/monster_stress_crouch.png)
+
+**monster stress crouch knee**
+
+![monster stress crouch knee](previews/monster_stress_crouch_knee.png)
+
+**monster stress grip**
+
+![monster stress grip](previews/monster_stress_grip.png)
+
+**monster stress grip elbow**
+
+![monster stress grip elbow](previews/monster_stress_grip_elbow.png)
+
+**monster stress grip hand**
+
+![monster stress grip hand](previews/monster_stress_grip_hand.png)
+
+**monster stress reach**
+
+![monster stress reach](previews/monster_stress_reach.png)
+
+**monster stress reach armpit**
+
+![monster stress reach armpit](previews/monster_stress_reach_armpit.png)
 
 ## Hands
 
