@@ -166,7 +166,8 @@ describe('StepPlanner (upright)', () => {
     pl.reset(host);
     const p = walk(0);
     host.yawRate = 2;
-    const lifts = run(host, pl, p, 1.6);
+    // Shuffling, never hopping: one foot is always down.
+    const lifts = run(host, pl, p, 1.6, () => expect(pl.limbs[0].planted || pl.limbs[1].planted).toBe(true));
     host.yawRate = 0;
     run(host, pl, p, 2);
     expect(lifts.length).toBeGreaterThanOrEqual(3);

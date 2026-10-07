@@ -131,6 +131,8 @@ class Encounters {
   private readonly keys = new Int32Array(MEM).fill(-1);
   private readonly ok = new Uint8Array(MEM);
   private readonly until = new Float64Array(MEM);
+  /** Not usable again before this time (a hand just let go of it). */
+  private readonly after = new Float64Array(MEM);
   private readonly count = new Map<number, number>();
   private readonly rng = new Rng(1);
   private next = 0;
@@ -139,8 +141,8 @@ class Encounters {
   decide(key: number, p: number, now: number, seed: number, hold = 2.5): boolean {
     for (let i = 0; i < MEM; i++) {
       if (this.keys[i] === key && this.until[i] > now) {
-        this.until[i] = now + hold;
-        return this.ok[i] === 1;
+        this.until[i] = Math.max(this.until[i], now + hold);
+        return this.ok[i] === 1 && now >= this.after[i];
       }
     }
     const n = (this.count.get(key) ?? 0) + 1;
@@ -151,23 +153,26 @@ class Encounters {
     this.keys[i] = key;
     this.ok[i] = ok ? 1 : 0;
     this.until[i] = now + hold;
+    this.after[i] = 0;
     return ok;
   }
 
-  /** Forbid `key` for `seconds` (a cooldown after using it). */
-  block(key: number, now: number, seconds: number): void {
-    for (let i = 0; i < MEM; i++) {
-      if (this.keys[i] === key) {
-        this.ok[i] = 0;
-        this.until[i] = now + seconds;
-        return;
-      }
+  /**
+   * Done with `key` for now. `again`: the same encounter may use it again after `seconds` (a
+   * hand walking along a counter); otherwise it is off for `seconds`.
+   */
+  block(key: number, now: number, seconds: number, again = false): void {
+    let i = -1;
+    for (let k = 0; k < MEM; k++) if (this.keys[k] === key) i = k;
+    if (i < 0) {
+      i = this.next;
+      this.next = (this.next + 1) % MEM;
+      this.keys[i] = key;
+      this.ok[i] = again ? 1 : 0;
     }
-    const i = this.next;
-    this.next = (this.next + 1) % MEM;
-    this.keys[i] = key;
-    this.ok[i] = 0;
-    this.until[i] = now + seconds;
+    if (!again) this.ok[i] = 0;
+    this.after[i] = now + seconds;
+    this.until[i] = Math.max(this.until[i], now + seconds + (again ? 2.5 : 0));
   }
 
   /** Encounters with `key` so far (seeds per-instance variation). */
@@ -185,9 +190,9 @@ export class Affordances {
 
   constructor(private readonly world: MonsterWorld, private readonly seed: number) {}
 
-  /** Cooldown: don't reuse this feature (with this arm) for a while. */
-  rest(key: number, arm: number, now: number, seconds: number): void {
-    this.mem.block(key ^ (arm << 28), now, seconds);
+  /** Cooldown: don't reuse this feature (with this arm) for a while (`again`: same encounter, later). */
+  rest(key: number, arm: number, now: number, seconds: number, again = false): void {
+    this.mem.block(key ^ (arm << 28), now, seconds, again);
   }
 
   /**
@@ -331,16 +336,18 @@ export class Affordances {
     if (t.y < c.ground + 0.3 || t.y > c.ground + 1.35) return false;
     if (S.y - t.y < 0.3) return false;
     // Nearest point of the top to the shoulder (a little inside the edge), a bit ahead.
-    const ax = S.x + c.fx * 0.25;
-    const az = S.z + c.fz * 0.25;
+    const lead = c.speed > 0.15 ? 0.45 : 0.2;
+    const ax = S.x + c.fx * lead;
+    const az = S.z + c.fz * lead;
     const m = 0.08;
     const px = THREE.MathUtils.clamp(ax, t.minX + m, t.maxX - m);
     const pz = THREE.MathUtils.clamp(az, t.minZ + m, t.maxZ - m);
     const dx = px - c.x;
     const dz = pz - c.z;
     if ((dx * c.rx + dz * c.rz) * side < -0.05 || dx * c.fx + dz * c.fz < -0.15) return false;
+    // A little beyond the hanging reach is fine: the body dips and leans toward it.
     _v.set(px - S.x, t.y - S.y, pz - S.z);
-    if (_v.length() > c.reach * 0.9) return false;
+    if (_v.length() > c.reach * 1.12) return false;
     const moving = c.speed > 0.15;
     if (!moving && !c.idle) return false;
     const key = (Feat.Top << 16) | i;
@@ -488,7 +495,10 @@ export class Affordances {
         const behind = -((g.p.x - S.x) * c.fx + (g.p.z - S.z) * c.fz);
         return behind < 0.35 && stretch < 1.02;
       }
-      case 'top':
+      case 'top': {
+        const behind = -((g.p.x - S.x) * c.fx + (g.p.z - S.z) * c.fz);
+        return behind < 0.45 && stretch < 1.12;
+      }
       case 'wall':
       case 'ear':
       case 'window': {

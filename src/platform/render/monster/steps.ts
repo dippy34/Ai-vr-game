@@ -237,7 +237,7 @@ export class StepPlanner {
     let swinging = 0;
     const desperate = l.urge > 2.4;
     // Upright and dragged past its reach (a sudden burst of speed): scramble, feet briefly off.
-    const scramble = !p.quad && (l.urge > 3 || l.stretch > 0.99);
+    const scramble = !p.quad && (l.stretch > 0.95 || (l.urge > 3 && p.speed > 1.5));
     for (const o of this.limbs) {
       if (o === l || !o.active) continue;
       if (!o.planted) {

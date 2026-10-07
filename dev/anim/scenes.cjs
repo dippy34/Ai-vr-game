@@ -110,7 +110,32 @@ const coffeeTop = (x, z) => {
   return 0.45 * k * k * (3 - 2 * k);
 };
 
+/** Camera cuts: the first shot whose test passes films the frame. */
+const cuts = (...shots) => (f, m) => {
+  const s = shots.find((x) => x.when(m, f)) ?? shots[shots.length - 1];
+  return { x: s.x, y: s.y, z: s.z, tx: m.x + (s.dx ?? 0), ty: (m.y ?? 0) + (s.ty ?? 1.1), tz: m.z, fov: s.fov ?? 52 };
+};
+
 module.exports = {
+  // (6) Affordances in one path: fingertips along the hallway wall, pivoting on the study door's
+  // jamb as it turns in, the jambs, a hand on the desk as it passes, hands on the moonlit window.
+  tour: scene(
+    { x: -4.4, z: -0.5, yaw: -90 },
+    [
+      { gait: 'walk', alert: 0.35 },
+      { path: [[-2.0, -0.56], [0.6, -0.6], [1.55, -0.62]], speed: 0.85, stop: false },
+      { path: [[2.3, -0.85], [2.55, -1.6], [2.7, -2.7]], speed: 0.75, stop: false },
+      { path: [[3.35, -4.3], [3.2, -4.85], [2.3, -5.05], [0.9, -5.05]], speed: 0.75, stop: false },
+      { path: [[1.4, -6.4], [2.6, -6.95], [2.95, -7.05]], speed: 0.55 },
+      { gait: 'still', act: 'listen', focus: { x: 3.0, y: 1.6, z: -8.2 }, mode: 'investigate', alert: 0.55, wait: 4.5 },
+      { act: 'none', focus: null, mode: 'wander', wait: 0.8 },
+    ],
+    cuts(
+      { when: (m) => m.z > -1.75, x: 3.75, y: 1.75, z: 0.75, fov: 50 },
+      { when: (m) => m.z > -6.3 && !(m.x < 2.2 && m.z < -5.6), x: -1.05, y: 1.7, z: -4.3, fov: 54 },
+      { when: () => true, x: 0.35, y: 1.7, z: -4.4, ty: 1.25, fov: 46 },
+    ),
+  ),
   // Close-up side view for tuning: across the living room along X, stop, turn in place, back.
   lab: scene(
     { x: -3.9, z: 3.2, yaw: 90 },
@@ -180,9 +205,10 @@ module.exports = {
   run: scene(
     { x: -10.2, z: 0.1, yaw: -90 },
     [
-      { gait: 'run', mode: 'chase', alert: 1 },
+      { gait: 'run', mode: 'chase', alert: 1, focus: { x: 2.4, y: 1.3, z: -0.1 } },
       { path: [[-7.0, -0.2], [-3.0, 0.25], [0.6, 0]], speed: 3.1, accel: 5 },
-      { gait: 'still', mode: 'investigate', wait: 1.2 },
+      { gait: 'still', wait: 1.0 },
+      { mode: 'investigate', focus: null, alert: 0.8, wait: 0.8 },
     ],
     follow(3.4, 1.9, -0.8, 0.7, 55),
   ),

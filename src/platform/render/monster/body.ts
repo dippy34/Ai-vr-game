@@ -395,8 +395,9 @@ export class ProceduralBody implements StepHost {
 
   /** Chasing someone within arm's reach soon: it rears up and reaches. */
   private reachingTarget(): boolean {
-    if (this.mode !== 'chase' || !this.hasTarget) return false;
-    return Math.hypot(this.target.x - this.root.x, this.target.z - this.root.z) < 2.4;
+    if (this.mode !== 'chase') return false;
+    const t = this.hasTarget ? this.target : this.hasFocus ? this.focus : null;
+    return !!t && Math.hypot(t.x - this.root.x, t.z - this.root.z) < 2.4;
   }
 
   /** Read the geometry around it: doorway, headroom, climbing, narrow gaps. */
@@ -464,6 +465,9 @@ export class ProceduralBody implements StepHost {
         const s = sign * dn;
         const u = (this.root.x - d.cx) * d.tx + (this.root.z - d.cz) * d.tz;
         if (s < -BODY.doorAhead || s > 0.2 || Math.abs(u) > d.halfW + 0.4) continue;
+        // Only a door its path goes through: where the heading crosses the wall, inside the gap.
+        const cross = u + ((dirX * d.tx + dirZ * d.tz) * -s) / Math.abs(toward);
+        if (Math.abs(cross) > d.halfW + 0.05) continue;
         D.id = d.id;
         D.sign = sign;
         D.s = s;
@@ -613,7 +617,9 @@ export class ProceduralBody implements StepHost {
           let keep = af.keep(g, a.i, c, a.stretch);
           if (keep && g.kind === 'trail') keep = af.slideTrail(g, a.i, c);
           if (!keep) {
-            af.rest(g.key, a.i, this.time, g.kind === 'wall' ? 0.25 : g.kind === 'jamb' ? 4 : 2.5);
+            // Walls and tops: the hand walks along them (same encounter, a beat later).
+            const walk = (g.kind === 'wall' || g.kind === 'top') && this.time < g.until;
+            af.rest(g.key, a.i, this.time, walk ? 0.25 : g.kind === 'jamb' ? 4 : 2.5, walk);
             this.releaseGoal(a);
           }
         }
@@ -841,7 +847,7 @@ export class ProceduralBody implements StepHost {
     }
     if (this.reachingTarget()) {
       // Reach for the prey: hands out toward it, claws open.
-      this.toModel(this.target, _v4);
+      this.toModel(this.hasTarget ? this.target : this.focus, _v4);
       _v4.y = clamp(_v4.y + 1.25, 0.8, 1.7);
       _v4.x += side * 0.22;
       _v5.subVectors(_v4, sh);
@@ -966,9 +972,12 @@ export class ProceduralBody implements StepHost {
       if (g.kind === 'corner' && a.mode === 2) {
         side += a.side * 0.16;
         shiftT += a.side * 0.05;
-      } else if (g.kind === 'top' && a.mode === 2) {
-        side += a.side * 0.06;
-        hunchT += 0.08;
+      } else if (g.kind === 'top' && a.mode !== 0) {
+        // Lean and dip toward a low top so the hand can rest on it.
+        const need = clamp(this.ctx.shoulder[a.i].distanceTo(g.p) - this.ctx.reach * 0.8, 0, 0.4);
+        side += a.side * (0.06 + need * 0.6);
+        hunchT += 0.08 + need * 1.2;
+        crouchT += need * 0.7;
       } else if (g.kind === 'window' && a.mode !== 0) hunchT += 0.1;
       else if (g.kind === 'ear' && a.mode !== 0) side += a.side * 0.12;
       else if (g.kind === 'touch' || g.kind === 'jamb') hunchT += 0.05;
