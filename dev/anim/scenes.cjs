@@ -110,18 +110,7 @@ const coffeeTop = (x, z) => {
   return 0.45 * k * k * (3 - 2 * k);
 };
 
-/** Camera cuts: the first shot whose test passes films the frame. */
-const cuts = (...shots) => (f, m) => {
-  const s = shots.find((x) => x.when(m, f)) ?? shots[shots.length - 1];
-  return { x: s.x, y: s.y, z: s.z, tx: m.x + (s.dx ?? 0), ty: (m.y ?? 0) + (s.ty ?? 1.1), tz: m.z, fov: s.fov ?? 52 };
-};
-
-module.exports = {
-  // (6) Affordances in one path: fingertips along the hallway wall, pivoting on the study door's
-  // jamb as it turns in, the jambs, a hand on the desk as it passes, hands on the moonlit window.
-  tour: scene(
-    { x: -4.4, z: -0.5, yaw: -90 },
-    [
+const TOUR_STEPS = [
       { gait: 'walk', alert: 0.35 },
       { path: [[-2.0, -0.56], [0.6, -0.6], [1.55, -0.62]], speed: 0.85, stop: false },
       { path: [[2.3, -0.85], [2.55, -1.6], [2.7, -2.7]], speed: 0.75, stop: false },
@@ -129,7 +118,31 @@ module.exports = {
       { path: [[1.4, -6.4], [2.6, -6.95], [2.95, -7.05]], speed: 0.55 },
       { gait: 'still', act: 'listen', focus: { x: 3.0, y: 1.6, z: -8.2 }, mode: 'investigate', alert: 0.55, wait: 4.5 },
       { act: 'none', focus: null, mode: 'wander', wait: 0.8 },
-    ],
+    ];
+const DOOR_STEPS = [
+      { path: [[-7.4, -0.2], [-6.5, 0.6], [-6.4, 1.9], [-6.0, 3.4]], speed: 0.9 },
+      { wait: 0.8 },
+      { turn: 170, rate: 100 },
+      { posture: 'crawl', gait: 'creep' },
+      { path: [[-6.3, 2.4], [-6.5, 1.2], [-6.7, -0.1], [-7.6, -0.5]], speed: 0.6 },
+      { posture: 'tall', gait: 'still', wait: 0.8 },
+    ];
+
+/** Camera cuts: the first shot whose test passes films the frame. */
+const cuts = (...shots) => (f, m) => {
+  const s = shots.find((x) => x.when(m, f)) ?? shots[shots.length - 1];
+  return { x: s.x, y: s.y, z: s.z, tx: m.x + (s.dx ?? 0), ty: (m.y ?? 0) + (s.ty ?? 1.1), tz: m.z, fov: s.fov ?? 52 };
+};
+
+module.exports = {
+  // Close-ups for checking contacts (not part of the footage set).
+  trailClose: scene({ x: -4.4, z: -0.5, yaw: -90 }, TOUR_STEPS, (f, m) => ({ x: m.x + 1.6, y: 1.3, z: 0.6, tx: m.x - 0.1, ty: 1.15, tz: -0.95, fov: 50 })),
+  jambClose: scene({ x: -8.6, z: -0.5, yaw: -120 }, DOOR_STEPS, () => ({ x: -5.35, y: 1.45, z: 2.9, tx: -6.45, ty: 1.35, tz: 1.2, fov: 48 })),
+  // (6) Affordances in one path: fingertips along the hallway wall, pivoting on the study door's
+  // jamb as it turns in, the jambs, a hand on the desk as it passes, hands on the moonlit window.
+  tour: scene(
+    { x: -4.4, z: -0.5, yaw: -90 },
+    TOUR_STEPS,
     cuts(
       { when: (m) => m.z > -1.75, x: 3.75, y: 1.75, z: 0.75, fov: 50 },
       { when: (m) => m.z > -6.3 && !(m.x < 2.2 && m.z < -5.6), x: -1.05, y: 1.7, z: -4.3, fov: 54 },
@@ -160,20 +173,13 @@ module.exports = {
       { path: [[-8.4, 3.0], [-6.6, 2.6], [-5.6, 3.4]], speed: 1.1 },
       { wait: 1.0 },
     ],
-    follow(-3.6, 1.65, 7.5, 1.0, 30),
+    follow(-10.15, 1.6, 7.25, 1.05, 40),
   ),
   // (2) Through the living-room door (hallway south wall, gap x [-7.0, -5.9] at z = 1.2), at an
   // angle, then back out on all fours through the same frame.
   door: scene(
     { x: -8.6, z: -0.5, yaw: -120 },
-    [
-      { path: [[-7.4, -0.2], [-6.5, 0.6], [-6.4, 1.9], [-6.0, 3.4]], speed: 0.9 },
-      { wait: 0.8 },
-      { turn: 170, rate: 100 },
-      { posture: 'crawl', gait: 'creep' },
-      { path: [[-6.3, 2.4], [-6.5, 1.2], [-6.7, -0.1], [-7.6, -0.5]], speed: 0.6 },
-      { posture: 'tall', gait: 'still', wait: 0.8 },
-    ],
+    DOOR_STEPS,
     (f, m) => ({ x: -4.75, y: 1.5, z: 4.4, tx: -6.45 + (m.x + 6.45) * 0.35, ty: 1.15, tz: 1.2 + (m.z - 1.2) * 0.35, fov: 52 }),
   ),
   // (3) Over the living-room coffee table (top 0.45 m) along X, on all fours.
@@ -199,7 +205,7 @@ module.exports = {
       { act: 'sweep', focus: { x: -6.3, y: 1.0, z: 3.7 }, alert: 0.95, wait: 2.4 },
       { act: 'none', focus: null, alert: 0.8, wait: 0.8 },
     ],
-    follow(-3.5, 1.6, 2.2, 1.1, 55),
+    follow(-7.3, 1.65, 6.95, 1.25, 52),
   ),
   // (5) A run down the hallway toward the camera (chase).
   run: scene(

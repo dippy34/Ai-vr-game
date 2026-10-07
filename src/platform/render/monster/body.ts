@@ -206,6 +206,10 @@ export class ProceduralBody implements StepHost {
   /** Optional authored deltas (Attack clip) for the split mandibles at full open. */
   private jawSplit: [THREE.Quaternion, THREE.Quaternion] | null = null;
   private readonly aimChain: number[];
+  /** Idle: a point on a nearby wall its blind head slowly tracks along (level), and when to move on. */
+  private readonly idleLook = new THREE.Vector3();
+  private idleLookAt = -1;
+  private idleFace = -1;
   /** Hips placement this frame (model space). */
   private readonly hipP = new THREE.Vector3();
   private readonly hipQ = new THREE.Quaternion();
@@ -1212,8 +1216,11 @@ export class ProceduralBody implements StepHost {
       }
     } else if (this.hasFocus && this.mode === 'chase') {
       _v1.copy(this.focus);
+    } else if (this.motion.speed < 0.1 && !this.quad && this.idleWall(t)) {
+      // Standing: its blind head tracks slowly along a nearby wall, as if listening through it.
+      _v1.copy(this.idleLook);
     } else {
-      // The way ahead, low; it "looks" around blindly (slow scans along the walls).
+      // The way ahead, low; it "looks" around blindly.
       const scan = 0.55 * fbm1(t * 0.12, this.seed + 62) + turnLead;
       const yaw = this.rootYaw + scan;
       const dist = 2.5;
@@ -1241,7 +1248,7 @@ export class ProceduralBody implements StepHost {
       _v1.lerp(_v2, k * 0.8);
     }
     // Smooth the look point: fast snap toward a new sound, slower otherwise.
-    const w = this.snapT > 0 ? 26 : act === 'listen' ? 3 : 6;
+    const w = this.snapT > 0 ? 26 : act === 'listen' ? 3 : this.motion.speed < 0.1 ? 2.2 : 6;
     const z = this.snapT > 0 ? 0.55 : 0.9;
     if (dt > 0) {
       const n = dt > 1 / 60 ? Math.ceil(dt * 60) : 1;
@@ -1289,6 +1296,46 @@ export class ProceduralBody implements StepHost {
     _q3.setFromAxisAngle(_v1.lengthSq() > 0.5 ? _v1 : LEFT, thp * 0.6 + sniff);
     _qa.copy(R.mq[hd]);
     R.setModelQ(hd, _q1.multiply(_q2).multiply(_q3).multiply(_qa));
+  }
+
+  /** Pick / slide the idle look point along a wall face in front of it. False: no wall near. */
+  private idleWall(t: number): boolean {
+    const w = this.world;
+    if (!w) return false;
+    if (t >= this.idleLookAt) {
+      // Every few seconds: another face (or another stretch of the same one).
+      const r = this.rng.seed(hashKey(this.seed + 301, Math.floor(t * 10)));
+      this.idleLookAt = t + r.range(2.2, 4.5);
+      this.idleFace = -1;
+      const fx = -Math.sin(this.rootYaw);
+      const fz = -Math.cos(this.rootYaw);
+      let best = 2.6;
+      w.query(this.root.x, this.root.z);
+      for (let q = w.qStart; q < w.qEnd; q++) {
+        const ref = w.refs[q];
+        if (ref >> 16 !== Feat.Face) continue;
+        const f = w.faces[ref & 0xffff];
+        const d = f.nx !== 0 ? (this.root.x - f.plane) * f.nx : (this.root.z - f.plane) * f.nz;
+        // In front of it (facing the body) and within a couple of meters.
+        if (d < 0.2 || d > best || -(f.nx * fx + f.nz * fz) < 0.1 - r.next() * 0.4) continue;
+        best = d;
+        this.idleFace = ref & 0xffff;
+      }
+      if (this.idleFace >= 0) {
+        const f = w.faces[this.idleFace];
+        const a = clamp((f.nx !== 0 ? this.root.z : this.root.x) + r.signed() * 1.2, f.a0 + 0.1, f.a1 - 0.1);
+        const y = this.root.y + r.range(0.7, 2.0);
+        if (f.nx !== 0) this.idleLook.set(f.plane, y, a);
+        else this.idleLook.set(a, y, f.plane);
+      }
+    }
+    if (this.idleFace < 0) return false;
+    // Drift along the face.
+    const f = w.faces[this.idleFace];
+    const v = 0.12 * noise1(t * 0.35, this.seed + 302) * this.dt * 6;
+    if (f.nx !== 0) this.idleLook.z = clamp(this.idleLook.z + v, f.a0 + 0.1, f.a1 - 0.1);
+    else this.idleLook.x = clamp(this.idleLook.x + v, f.a0 + 0.1, f.a1 - 0.1);
+    return true;
   }
 
   /** How much the hips must come down for planted leg i to reach its foot. */
@@ -1444,6 +1491,7 @@ export class ProceduralBody implements StepHost {
   /** Finger curls and spread per finger: contact style, drumming, twitching, splay. */
   private fingers(a: Arm, supportStyle: number, dt: number): void {
     const R = this.rig;
+    const l = this.planner.limbs[2 + a.i];
     const arm = R.arms[a.i];
     const t = this.time;
     const g = a.goal;
@@ -1476,11 +1524,11 @@ export class ProceduralBody implements StepHost {
       let q2: number;
       let sp: number;
       const grip = a.supportW > 0.5 ? (supportStyle === 1 ? Grip.Tips : Grip.Palm) : g.grip;
-      const k = a.supportW > 0.5 ? 0.5 : g.curl;
+      const k = a.supportW > 0.5 ? 0.25 + 0.55 * l.styleB : g.curl;
       if (grip === Grip.Palm) {
-        q0 = -0.12; q1 = 0.05 + k * 0.2; q2 = 0.1 + k * 0.3; sp = a.supportW > 0.5 ? 0.3 : g.spread;
+        q0 = -0.12; q1 = 0.05 + k * 0.2; q2 = 0.1 + k * 0.3; sp = a.supportW > 0.5 ? 0.15 + 0.3 * l.styleC : g.spread;
       } else if (grip === Grip.Tips) {
-        q0 = 0.3 + k * 0.2; q1 = 0.45 + k * 0.3; q2 = 0.3 + k * 0.2; sp = a.supportW > 0.5 ? 0.25 : g.spread;
+        q0 = 0.3 + k * 0.2; q1 = 0.45 + k * 0.3; q2 = 0.3 + k * 0.2; sp = a.supportW > 0.5 ? 0.1 + 0.3 * l.styleC : g.spread;
       } else if (grip === Grip.Wrap) {
         q0 = 0.15 + k * 0.25; q1 = k; q2 = k * 0.85; sp = g.spread;
       } else {
