@@ -282,7 +282,8 @@ export class Affordances {
   /** A convex corner it turns around (or passes close by): grip the edge, swing around it. */
   private corner(i: number, arm: number, side: number, S: THREE.Vector3, c: AffordCtx, out: HandGoal): boolean {
     const k = this.world.corners[i];
-    if (k.door >= 0 || c.quad) return false;
+    // A jamb is a pivot when it turns into a doorway; once it walks through, the door pass owns it.
+    if ((k.door >= 0 && k.door === c.door) || c.quad) return false;
     const dx = k.x - c.x;
     const dz = k.z - c.z;
     const lat = dx * c.rx + dz * c.rz;

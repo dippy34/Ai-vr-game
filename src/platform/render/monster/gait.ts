@@ -70,14 +70,17 @@ export class GaitSelector {
   gait: MonsterGait = 'still';
   /** Seconds in the current gait. */
   age = 0;
+  /** Seconds it has been (nearly) stopped. */
+  private stopped = 0;
 
   update(contract: MonsterGait, speed: number, mode: MonsterMode, dt: number): MonsterGait {
     const prev = this.gait;
+    this.stopped = speed < 0.06 ? this.stopped + dt : 0;
     let g: MonsterGait;
     if (contract !== 'still') {
       g = contract;
-      // The sim says it moves but it has (almost) stopped: settle like 'still'.
-      if (speed < 0.05 && this.age > 0.4 && contract !== 'run') g = 'still';
+      // The sim says it moves but it has stopped: settle like 'still'.
+      if (this.stopped > 0.3 && contract !== 'run') g = 'still';
     } else if (speed < 0.12) {
       g = prev !== 'still' && speed > 0.06 ? prev : 'still';
     } else {

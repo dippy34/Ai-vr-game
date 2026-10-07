@@ -156,8 +156,8 @@ module.exports = {
     { x: -5.9, z: 4.45, yaw: 90 },
     [
       { gait: 'creep', y: coffeeTop },
-      { path: [[-6.6, 4.5], [-7.0, 4.5]], speed: 0.6, stop: false },
-      { act: 'climb', posture: 'crawl', path: [[-7.7, 4.5], [-8.4, 4.5]], speed: 0.45, stop: false },
+      { path: [[-6.3, 4.5]], speed: 0.6, stop: false },
+      { act: 'climb', posture: 'crawl', path: [[-7.0, 4.5], [-7.7, 4.5], [-8.4, 4.5]], speed: 0.42, stop: false },
       { act: 'none', posture: 'tall', path: [[-9.2, 4.4], [-9.6, 4.0]], speed: 0.6 },
       { gait: 'still', wait: 1.0 },
     ],

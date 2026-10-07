@@ -196,6 +196,8 @@ export class ProceduralBody implements StepHost {
   private doorPasses = 0;
   private climbHold = 0;
   private climbing = false;
+  /** Furniture top it is climbing onto / over (-1 none). */
+  private climbTop = -1;
   private headroom = 2.8;
   private breath = 0;
   private readonly tw = { hy: new Twitch(), hp: new Twitch(), hr: new Twitch(), sp: new Twitch(), ear: new Twitch(), jaw: new Twitch() };
@@ -308,6 +310,16 @@ export class ProceduralBody implements StepHost {
     out.x = px + c * r - s * f;
     out.z = pz - s * r - c * f;
     out.y = this.root.y;
+    // Climbing: contacts near the top it climbs land on it (the stance narrows to fit).
+    if (this.climbTop >= 0 && this.world) {
+      const tp = this.world.tops[this.climbTop];
+      const e = 0.38;
+      if (out.x > tp.minX - e && out.x < tp.maxX + e && out.z > tp.minZ - e && out.z < tp.maxZ + e) {
+        const m = l.front ? 0.07 : 0.1;
+        out.x = clamp(out.x, tp.minX + m, Math.max(tp.minX + m, tp.maxX - m));
+        out.z = clamp(out.z, tp.minZ + m, Math.max(tp.minZ + m, tp.maxZ - m));
+      }
+    }
     return l.front ? yaw - l.side * 0.35 : yaw;
   }
 
@@ -401,6 +413,25 @@ export class ProceduralBody implements StepHost {
       this.doorK = 0;
       this.headroom = 2.8;
       return;
+    }
+    // What it climbs: the nearest furniture top within reach of its path.
+    this.climbTop = -1;
+    if (this.climbing) {
+      let best = 1.3;
+      w.query(this.root.x, this.root.z);
+      for (let q = w.qStart; q < w.qEnd; q++) {
+        const ref = w.refs[q];
+        if (ref >> 16 !== Feat.Top) continue;
+        const tp = w.tops[ref & 0xffff];
+        if (Math.abs(tp.y - this.root.y) > 1.0) continue;
+        const ax = this.root.x + fx * 0.4;
+        const az = this.root.z + fz * 0.4;
+        const d = Math.hypot(Math.max(0, tp.minX - ax, ax - tp.maxX), Math.max(0, tp.minZ - az, az - tp.maxZ));
+        if (d < best) {
+          best = d;
+          this.climbTop = ref & 0xffff;
+        }
+      }
     }
     // Headroom over where the head is and will be.
     let hr = w.ceiling;
@@ -588,7 +619,10 @@ export class ProceduralBody implements StepHost {
         }
         // Door jambs first (the signature), then whatever the geometry offers.
         if (c.door < 0) a.delay = 0;
-        else if (!c.doorLow && g.kind !== 'jamb' && a.jambPass !== this.doorPasses && this.door.s < 0.15 && this.door.s > -1.75) {
+        else if (g.kind === 'corner' && this.world && this.world.corners[g.key & 0xffff].door === c.door) {
+          // Already pivoting on this door's jamb: that is its grip for this pass.
+          a.jambPass = this.doorPasses;
+        } else if (!c.doorLow && g.kind !== 'jamb' && a.jambPass !== this.doorPasses && this.door.s < 0.15 && this.door.s > -1.75) {
           if (af.jamb(a.i, c, a.cand)) {
             const reachD = a.cand.p.distanceTo(c.shoulder[a.i]);
             // Reach once it is close enough; the second hand a beat later.
@@ -857,23 +891,26 @@ export class ProceduralBody implements StepHost {
     }
     const fAng = Math.atan2(_v4.x - sh.x, -(_v4.z - sh.z));
     const rad = clamp(Math.hypot(_v4.x - sh.x, _v4.z - sh.z), 0.55, reach * 0.94);
-    const wind = a.side * 2.0;
-    const end = fAng - a.side * 1.3;
+    const wind = a.side * 2.35;
+    const end = fAng - a.side * 1.35;
     let ang: number;
     let y: number;
+    const high = sh.y + 0.7;
     if (t < W) {
-      const u = smooth(0, W, t);
-      ang = lerp(a.side * 0.3, wind, u) + 0.05 * Math.sin(t * 37) * u * u; // trembling at the top
-      y = lerp(0.95, sh.y + 0.45, u);
-      a.omega = 9;
+      // Cocked high and far back over the shoulder; it trembles there (the warning).
+      const u = smooth(0, W * 0.75, t);
+      const shake = smooth(W * 0.55, W, t);
+      ang = lerp(a.side * 0.3, wind, u) + 0.07 * Math.sin(t * 41) * shake;
+      y = lerp(0.95, high, u) + 0.04 * Math.sin(t * 29 + 1) * shake;
+      a.omega = 10;
       a.zeta = 0.7;
     } else if (t < W + S) {
       const u = (t - W) / S;
       const e = u * u * (3 - 2 * u);
       ang = lerp(wind, end, e);
       // Through the focus height at the middle of the swipe, low at the end.
-      y = lerp(sh.y + 0.45, _v4.y, smooth(0, 0.5, u)) - 0.35 * smooth(0.5, 1, u);
-      a.omega = 38;
+      y = lerp(high, _v4.y, smooth(0, 0.5, u)) - 0.35 * smooth(0.5, 1, u);
+      a.omega = 40;
       a.zeta = 0.55;
     } else if (t < W + S + F) {
       ang = end - a.side * 0.15 * Math.sin(((t - W - S) / F) * Math.PI);
@@ -886,7 +923,8 @@ export class ProceduralBody implements StepHost {
       a.omega = 5;
       a.zeta = 0.8;
     }
-    const r = t < W ? lerp(0.6, reach * 0.85, smooth(0, W, t)) : rad;
+    // Elbow bent in the wind-up, the arm flung to full length through the strike.
+    const r = t < W ? lerp(0.6, reach * 0.62, smooth(0, W, t)) : t < W + S ? lerp(reach * 0.62, Math.max(rad, reach * 0.9), smooth(0, 0.4, (t - W) / S)) : rad;
     _v5.set(sh.x + Math.sin(ang) * r, Math.max(0.25, y), sh.z - Math.cos(ang) * r);
     this.toLevel(_v5, out);
   }
@@ -961,10 +999,11 @@ export class ProceduralBody implements StepHost {
       const S = SWEEP.strike;
       const coil = smooth(0, W, at) * (1 - smooth(W, W + S, at));
       const strike = smooth(W, W + S, at) * (1 - smooth(W + S + SWEEP.follow, W + S + SWEEP.follow + SWEEP.recover, at));
-      twistT += -sgn * 0.6 * coil + sgn * 0.5 * strike;
-      crouchT += 0.12 * coil + 0.08 * strike;
-      hunchT += -0.12 * coil + 0.3 * strike;
-      side += sgn * 0.1 * coil - sgn * 0.12 * strike;
+      twistT += -sgn * 0.8 * coil + sgn * 0.65 * strike;
+      crouchT += -0.03 * coil + 0.12 * strike;
+      hunchT += -0.25 * coil + 0.4 * strike;
+      side += sgn * 0.12 * coil - sgn * 0.14 * strike;
+      shiftT += -sgn * 0.06 * coil;
     }
     if (this.mode === 'chase' && !this.quad) hunchT += 0.15;
     if (this.reachingTarget()) hunchT += 0.15;
