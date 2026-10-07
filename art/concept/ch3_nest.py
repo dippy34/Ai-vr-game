@@ -120,10 +120,10 @@ def shot_tunnel():
         point('work', (0.6, y, 4.3), pw, color=(1.0, 0.7, 0.4), radius=0.06)
     sphere('red', 0.06, (R - 0.12, 14.0, 3.2), mat=emissive('redb', (1, 0.08, 0.03), 60), sub=2)
     point('redl', (R - 0.25, 14.0, 3.2), 18, color=(1.0, 0.1, 0.04))
-    mist = fog('mist', 0.035, (0.82, 0.86, 0.88), 0.4, 0.6, 0.7, falloff=0.9)
+    mist = fog('mist', 0.007, (0.82, 0.86, 0.88), 0.4, 0.6, 0.7, falloff=0.5)
     box('mistbox', (2 * R - 0.05, LEN + 6, 3.4), (0, LEN / 2 - 3, WATER + 1.7), mat=mist)
     cam = camera((0.45, -0.6, 1.62), (0.0, 9.0, 0.95), lens=22, roll_deg=2.0, dof=7.0, fstop=5.6)
-    flashlight(cam, (0.1, 7.5, 1.0), power=900, angle=30, blend=0.6)
+    flashlight(cam, (0.1, 7.5, 1.0), power=240, angle=26, blend=0.6)
     render('ch3_nest_tunnel')
 
 
@@ -133,7 +133,7 @@ def fabric(name, colors, scale=4.0, rough=0.95):
     nz = node(n, 'ShaderNodeTexNoise', Scale=scale, Detail=3.0)
     l.new(tc.outputs['Object'], nz.inputs['Vector'])
     stops = [(i / max(1, len(colors) - 1), (*c, 1)) for i, c in enumerate(colors)]
-    r = ramp(n, stops, 'CONSTANT')
+    r = ramp(n, stops, 'LINEAR')
     l.new(nz.outputs['Fac'], r.inputs['Fac'])
     fine = node(n, 'ShaderNodeTexNoise', Scale=140.0, Detail=2.0)
     l.new(tc.outputs['Object'], fine.inputs['Vector'])
@@ -212,7 +212,7 @@ def shot_den():
     coat = fabric('coat', [(0.55, 0.53, 0.48), (0.42, 0.4, 0.36), (0.6, 0.58, 0.52)], 3.0)
     insul = fabric('insul', [(0.5, 0.3, 0.26), (0.45, 0.36, 0.2), (0.35, 0.28, 0.22)], 6.0)
     blanket = fabric('blanket', [(0.16, 0.17, 0.2), (0.25, 0.14, 0.1), (0.2, 0.2, 0.17), (0.12, 0.13, 0.11)], 2.0)
-    mound_m = fabric('mound', [(0.3, 0.28, 0.25), (0.2, 0.17, 0.14), (0.45, 0.43, 0.38), (0.28, 0.2, 0.17), (0.15, 0.15, 0.16)], 5.0)
+    mound_m = fabric('mound', [(0.3, 0.28, 0.25), (0.2, 0.17, 0.14), (0.45, 0.43, 0.38), (0.28, 0.2, 0.17), (0.15, 0.15, 0.16)], 11.0)
     bm = bmesh.new()
     # torus-ish ring with noise
     segs, rsegs = 72, 18
@@ -226,7 +226,7 @@ def shot_den():
             rad = rr * (1 + 0.25 * math.sin(a * 5 + 1.3) * math.cos(b * 2) + random.uniform(-0.06, 0.06))
             x = (Rr + rad * math.cos(b)) * math.cos(a) * 1.15
             y = (Rr + rad * math.cos(b)) * math.sin(a)
-            z = max(0.02, rad * math.sin(b) * 0.85 + 0.2)
+            z = max(0.02, rad * math.sin(b) * 0.55 + 0.12)
             ring.append(bm.verts.new((x, y, z)))
         vs.append(ring)
     for i in range(segs):
@@ -318,10 +318,9 @@ def shot_den():
     point('bulbl', B - Vector((0, 0, 0.05)), 70, color=(1.0, 0.66, 0.36), radius=0.05)
     sphere('red', 0.06, (-RX + 0.3, -2.0, 3.0), mat=emissive('redb', (1, 0.08, 0.03), 60), sub=2)
     point('redl', (-RX + 0.5, -2.0, 3.0), 25, color=(1.0, 0.1, 0.04))
-    box('haze', (2 * RX, 2 * RY + 4, RZ), (0, 0, RZ / 2), mat=fog('haze', 0.03, (0.85, 0.85, 0.85), 0.4, 0.5, 0.5))
-    scatter_dust('dust', (0.5, -1.0, 1.4), (5, 4, 2.4), 900, emissive('dustm', (0.9, 0.85, 0.75), 0.6), r=0.003)
-    cam = camera((-2.6, -4.6, 0.95), (1.1, 0.4, 0.55), lens=26, dof=5.0, fstop=4.0)
-    flashlight(cam, (1.4, 0.0, 0.5), power=300, angle=32, blend=0.6)
+    box('haze', (2 * RX, 2 * RY + 4, RZ), (0, 0, RZ / 2), mat=fog('haze', 0.012, (0.85, 0.85, 0.85), 0.4, 0.5, 0.5))
+    cam = camera((-4.2, -5.6, 2.2), (0.9, 0.4, 0.35), lens=28, dof=7.0, fstop=5.6)
+    flashlight(cam, (1.0, 0.2, 0.4), power=260, angle=30, blend=0.6)
     render('ch3_nest_den')
 
 
