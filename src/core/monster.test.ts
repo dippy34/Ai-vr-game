@@ -3,7 +3,7 @@ import { GAME, HEARING, MONSTER, NOISE, PLAYER } from '../config';
 import { createLevel } from './level';
 import { distXZ, makeRng, v3 } from './math';
 import { distToBox } from './physics';
-import { navGridFor, surfaceTop, underLintel } from './navgrid';
+import { astarStats, navGridFor, surfaceTop, underLintel } from './navgrid';
 import { GameSim, makeSpawnPose } from './sim';
 import type { Box, LevelData, MonsterState, PlayerId, SimEvent, Vec3 } from './types';
 
@@ -470,6 +470,10 @@ describe('performance', () => {
     for (let i = 0; i < g.stand.length; i++) if (g.stand[i] && g.allClear[i] > 0.4) stand.push(i);
     const pos = [0, 1, 2, 3].map(() => stand[Math.floor(rng() * stand.length)]);
     const ticks = 30 * 300;
+    // CPU time when available (wall time suffers on a busy machine), else wall time.
+    const proc = (globalThis as { process?: { cpuUsage(prev?: unknown): { user: number; system: number } } }).process;
+    const c0 = proc?.cpuUsage();
+    const searches = astarStats.searches;
     const t0 = performance.now();
     for (let k = 0; k < ticks; k++) {
       // Players drift between spots, stepping (and now and then talking) as they go.
@@ -489,8 +493,14 @@ describe('performance', () => {
         sim.startRound();
       }
     }
-    const perTick = (performance.now() - t0) / ticks;
-    console.log(`sim tick: ${(perTick * 1000).toFixed(1)} us average over ${ticks} ticks`);
+    const wall = (performance.now() - t0) / ticks;
+    const c1 = proc?.cpuUsage(c0);
+    const perTick = c1 ? (c1.user + c1.system) / 1000 / ticks : wall;
+    const plans = astarStats.searches - searches;
+    console.log(
+      `sim tick: ${(perTick * 1000).toFixed(1)} us CPU (${(wall * 1000).toFixed(1)} us wall) average over ${ticks} ticks; ` +
+        `${plans} A* plans (${((plans * 30) / ticks).toFixed(2)} per second)`,
+    );
     // Budget: well under 0.5 ms per tick on desktop (measured ~0.01 ms; generous for busy CI).
     expect(perTick).toBeLessThan(0.5);
   });
