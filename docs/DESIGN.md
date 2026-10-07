@@ -37,6 +37,43 @@ door makes a huge noise, so the last sprint is always a chase.
   they can see it. The afterimage hangs in the air for ~2 seconds.
 - Caught players become spectators. The monster ignores them.
 
+## How the monster thinks
+
+It is **blind**. It only knows what it hears (`HEARING`: loudness x range vs distance, each wall
+in between counts extra), what it touches (bumping into you, its searching hands, its sweep)
+and what it remembers. Everything runs on the host (`src/core/monster.ts`), seeded, so every
+client sees the same monster. Tunables: `MONSTER` and `NAV` in `src/config.ts`.
+
+- **Moving.** A fine nav grid (0.2 m, `src/core/navgrid.ts`, built once per level) knows where
+  its 2.6 m body fits: upright, **ducking** under 2.4 m door lintels (slower), **crawling** on
+  all fours through tight gaps, or **climbing** over low furniture (beds, tables, couches,
+  crates: `position.y` follows the top). A* picks the fastest route for its current pace, so it
+  clambers over a bed while searching but runs around it in a chase. Hiding behind furniture
+  is not safe, and no standable spot is out of its reach (a test checks every one).
+- **Patrol (wander).** It roams briskly from room to room and prowls inside them, stopping
+  now and then to listen or sniff. It heads for rooms it has not *listened to* lately (the
+  hallway "covers" the rooms around it), rooms where it heard things (noise memory, fades over
+  a couple of minutes) and the fuse-box room. When it freezes to listen it hears better.
+- **A faint sound** makes it freeze and turn its head, then **stalk**: it walks closer, then
+  creeps (near-silent steps), stopping to listen. Hear that sound again and it **lunges**.
+  A normal sound gets a short freeze and a walk over. A loud or close one gets a **charge**.
+- **Chasing** it runs at the last thing it heard; if you keep making noise while running it
+  aims ahead of you (cutting through doorways). Arriving where it heard you a moment ago, it
+  swipes. Silence for a few seconds and it loses you.
+- **Searching.** Arriving and finding nothing, it listens, then checks 2-3 likely hiding spots
+  nearby (corners, behind furniture, beside the door), feeling around (its hands find you
+  within ~1 m), sniffing, or **sweeping**: a long-armed swipe with a 0.5 s wind-up (a hiss you
+  can hear) that catches anyone within 1.6 m in front of it, never through a wall. After a
+  search, and more often after losing a chase, it may **lurk**: wait motionless beside a
+  doorway or in a corner for 6-12 s, ready to lunge at small sounds.
+- **Escalation.** Every fuse makes it faster and keener, and so does a long round. When the
+  exit opens it goes into a **frenzy**: faster, hears more, charges at less, guards the exit.
+- **Body language.** Every tick the sim publishes what its body is doing (`gait`, `posture`,
+  `act`, `actStart`, `focus` on `MonsterState`) and keeps it truthful (it ducks only under a
+  lintel, crawls only where it must, "run" only at speed). The animation and its sounds
+  (`src/platform/audio/monster.ts`) follow those, so players can *read* it in the dark: creeping
+  steps, held breath while it listens, scrapes on all fours, the hiss before a sweep.
+
 ## Hand signs
 
 There's no fixed sign vocabulary. Players invent their own, which is half the fun (and great clips).

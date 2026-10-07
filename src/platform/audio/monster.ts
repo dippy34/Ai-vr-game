@@ -1,13 +1,17 @@
 /**
  * The monster's sound: a continuous wet, ragged breath (inhale/exhale envelopes scheduled ahead on
- * persistent nodes), heavy footsteps synced to its speed, echolocation clicks and sniffs while it
+ * persistent nodes), footsteps synced to its speed, echolocation clicks and sniffs while it
  * investigates, a growl / shriek on alerts and wet crunching while it feeds.
+ * Its body language (MonsterState gait / posture / act) shapes it: creeping steps are near-silent
+ * and it holds its breath while listening or lurking; on all fours it knocks and scrapes (wood
+ * creaks when it climbs furniture); sniffs sniff, searching hands scrape, and a sweep hisses on
+ * the wind-up and whooshes on the strike.
  * Two persistent HRTF panners follow it: one at head height (voice) and one at the floor (feet).
  */
 
 import { GAME, MONSTER } from '../../config';
 import { distXZ, forwardFromYaw } from '../../core/math';
-import type { GamePhase, MonsterMode, Vec3, WorldState } from '../../core/types';
+import type { GamePhase, MonsterAct, MonsterMode, MonsterState, Vec3, WorldState } from '../../core/types';
 import { MONSTER_STRIDE, breathPeriod, occlusionMix, smoothFactor } from './audioMath';
 import {
   SPATIAL,
@@ -19,9 +23,36 @@ import {
   setPannerPosition,
   type Engine,
 } from './engine';
-import { sfxCrunch, sfxGrowl, sfxMonsterClicks, sfxMonsterStep, sfxShriek, sfxSniff } from './sfx';
+import {
+  sfxClawScrape,
+  sfxCrunch,
+  sfxGrowl,
+  sfxHiss,
+  sfxMonsterClicks,
+  sfxMonsterCrawl,
+  sfxMonsterStep,
+  sfxShriek,
+  sfxSniff,
+  sfxWhoosh,
+} from './sfx';
 
 const HEAD_Y = MONSTER.height * 0.9;
+
+/** Footstep spacing (m) and level for its gait / posture: creeping is near-silent. */
+export function monsterStepStyle(m: Pick<MonsterState, 'gait' | 'posture'>): { stride: number; level: number; crawl: boolean } {
+  if (m.posture === 'crawl') return { stride: 0.55, level: m.gait === 'creep' ? 0.35 : 0.7, crawl: true };
+  if (m.gait === 'creep') return { stride: 0.8, level: 0.12, crawl: false };
+  return { stride: MONSTER_STRIDE, level: 1, crawl: false };
+}
+
+/** Breath level for what it is doing: it holds its breath to listen, barely breathes lurking. */
+export function monsterBreathHush(m: Pick<MonsterState, 'gait' | 'act' | 'mode'>): number {
+  if (m.mode === 'chase' || m.mode === 'feeding') return 1;
+  if (m.act === 'lurk') return 0.25;
+  if (m.act === 'listen') return 0.45;
+  if (m.gait === 'creep') return 0.55;
+  return 1;
+}
 
 export class MonsterAudio {
   private readonly head: PannerNode;
@@ -57,6 +88,11 @@ export class MonsterAudio {
   private speed = 0;
   private alert = 0;
   private mode: MonsterMode = 'wander';
+  private hush = 1;
+  private prevAct: MonsterAct = 'none';
+  private prevActStart = -1;
+  /** Next repeat of the current act's sound (sniffs, scraping hands). */
+  private nextActSound = Infinity;
 
   constructor(private readonly eng: Engine) {
     const ctx = eng.ctx;
@@ -200,6 +236,7 @@ export class MonsterAudio {
     this.speed = Math.max(0, m.speed || 0);
     this.alert = m.alert || 0;
     this.mode = m.mode;
+    this.hush = monsterBreathHush(m);
 
     if (m.mode !== this.prevMode) {
       if (m.mode === 'feeding') {
@@ -215,22 +252,34 @@ export class MonsterAudio {
     if (this.nextBreath < now - 1) this.nextBreath = now + 0.05;
     if (now + 0.2 >= this.nextBreath) this.nextBreath = this.scheduleBreath(Math.max(this.nextBreath, now + 0.01));
 
-    // Footsteps: one heavy step per stride.
+    // Footsteps: one step per stride (heavy walking, near-silent creeping, knocks on all fours).
+    const style = monsterStepStyle(m);
     if (this.speed > 0.12) {
       this.stepAccum += this.speed * dt;
-      if (this.stepAccum >= MONSTER_STRIDE) {
-        this.stepAccum = Math.min(this.stepAccum - MONSTER_STRIDE, MONSTER_STRIDE * 0.5);
-        const weight = (this.speed - MONSTER.wanderSpeed) / (MONSTER.chaseSpeed - MONSTER.wanderSpeed);
-        const drag = 1 - Math.min(1, this.speed / MONSTER.investigateSpeed);
-        const shot = this.eng.pool.begin(this.feet, 1);
-        if (shot) sfxMonsterStep(shot, now + 0.005, weight, drag);
+      if (this.stepAccum >= style.stride) {
+        this.stepAccum = Math.min(this.stepAccum - style.stride, style.stride * 0.5);
+        const shot = this.eng.pool.begin(this.feet, style.level < 0.5 ? 0 : 1);
+        if (shot) {
+          shot.out.gain.value = style.level;
+          if (style.crawl) sfxMonsterCrawl(shot, now + 0.005, m.act === 'climb');
+          else {
+            const weight = (this.speed - MONSTER.wanderSpeed) / (MONSTER.chaseSpeed - MONSTER.wanderSpeed);
+            const drag = 1 - Math.min(1, this.speed / MONSTER.investigateSpeed);
+            sfxMonsterStep(shot, now + 0.005, weight, drag);
+          }
+        }
       }
     } else {
-      this.stepAccum = Math.min(this.stepAccum, MONSTER_STRIDE * 0.6);
+      this.stepAccum = Math.min(this.stepAccum, style.stride * 0.6);
     }
 
-    // Idle vocalizations.
-    if (now >= this.nextIdle) {
+    this.updateActSounds(m, state.time, now);
+
+    // Idle vocalizations (not while it is listening, lurking or creeping up on something).
+    const quiet = m.act === 'listen' || m.act === 'lurk' || m.act === 'sweep' || m.gait === 'creep';
+    if (now >= this.nextIdle && quiet && m.mode !== 'feeding') {
+      this.nextIdle = now + rand(1.5, 3);
+    } else if (now >= this.nextIdle) {
       if (m.mode === 'investigate') {
         const listening = this.speed < 0.2;
         const shot = this.eng.pool.begin(this.head, 1);
@@ -258,6 +307,56 @@ export class MonsterAudio {
       const shot = this.eng.pool.begin(this.head, 2);
       if (shot) sfxCrunch(shot, now + 0.01, rand(0.7, 1));
       this.nextCrunch = now + rand(0.45, 1.0);
+    }
+  }
+
+  /** Sounds that go with what its body is doing (MonsterState.act). */
+  private updateActSounds(m: MonsterState, simTime: number, now: number): void {
+    const act = m.act;
+    if (act !== this.prevAct || m.actStart !== this.prevActStart) {
+      const started = act !== this.prevAct || m.actStart > this.prevActStart;
+      this.prevAct = act;
+      this.prevActStart = m.actStart;
+      this.nextActSound = Infinity;
+      if (started) {
+        switch (act) {
+          case 'sniff':
+            this.nextActSound = now;
+            break;
+          case 'search':
+            this.nextActSound = now + 0.1;
+            break;
+          case 'sweep': {
+            const hiss = this.eng.pool.begin(this.head, 2);
+            if (hiss) sfxHiss(hiss, now + 0.01);
+            // The strike lands MONSTER.sweepWindup s after the act started (sim time).
+            const delay = Math.min(1, Math.max(0, m.actStart + MONSTER.sweepWindup - simTime));
+            const whoosh = this.eng.pool.begin(this.head, 2);
+            if (whoosh) sfxWhoosh(whoosh, now + delay + 0.01);
+            break;
+          }
+          case 'climb': {
+            const shot = this.eng.pool.begin(this.feet, 1);
+            if (shot) sfxMonsterCrawl(shot, now + 0.01, true);
+            break;
+          }
+          default:
+            break;
+        }
+      }
+    }
+    if (now >= this.nextActSound) {
+      if (act === 'sniff') {
+        const shot = this.eng.pool.begin(this.head, 1);
+        if (shot) sfxSniff(shot, now + 0.01);
+        this.nextActSound = now + rand(0.8, 1.2);
+      } else if (act === 'search') {
+        const shot = this.eng.pool.begin(this.feet, 1);
+        if (shot) sfxClawScrape(shot, now + 0.01);
+        this.nextActSound = now + rand(0.45, 0.8);
+      } else {
+        this.nextActSound = Infinity;
+      }
     }
   }
 
@@ -299,7 +398,7 @@ export class MonsterAudio {
     const a = Math.min(1, Math.max(0, this.alert));
     const mode = this.mode;
     const P = breathPeriod(a, mode);
-    const loud = mode === 'chase' ? 1 : 0.55 + 0.45 * a;
+    const loud = (mode === 'chase' ? 1 : 0.55 + 0.45 * a) * this.hush;
     const air = this.airGain.gain;
     const bp = this.airBp.frequency;
     const rat = this.rattleGain.gain;
@@ -333,9 +432,9 @@ export class MonsterAudio {
     bp.setTargetAtTime(rand(380, 520), tEx + exDur * 0.3, exDur * 0.5);
     air.setTargetAtTime(0.55 * loud * rand(0.8, 1.15), tEx, 0.05);
     air.setTargetAtTime(0, tEx + exDur * 0.35, exDur * 0.3);
-    rat.setTargetAtTime(rand(0.6, 1.4) * (0.5 + a), tEx, 0.06);
+    rat.setTargetAtTime(rand(0.6, 1.4) * (0.5 + a) * this.hush, tEx, 0.06);
     rat.setTargetAtTime(0, tEx + exDur * 0.4, exDur * 0.3);
-    const g = 0.04 + 0.35 * a * a + (mode === 'chase' ? 0.2 : mode === 'feeding' ? 0.12 : 0);
+    const g = (0.04 + 0.35 * a * a + (mode === 'chase' ? 0.2 : mode === 'feeding' ? 0.12 : 0)) * this.hush;
     groan.setTargetAtTime(g, tEx + 0.03, 0.08);
     groan.setTargetAtTime(0, tEx + exDur * 0.45, exDur * 0.25);
     const f = rand(62, 82) * (1 + 0.3 * a);

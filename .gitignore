@@ -8,3 +8,6 @@ coverage/
 art/previews/*.blend1
 __pycache__/
 *.pyc
+
+# Parallel workers' git worktrees (never commit)
+.claude/worktrees/

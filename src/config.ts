@@ -83,15 +83,130 @@ export const NOISE = {
 } as const;
 
 export const MONSTER = {
-  wanderSpeed: 1.0,
+  /** Patrol pace inside a room (a hunched prowl), and when roaming over to another room. */
+  wanderSpeed: 1.1,
+  roamSpeed: 1.45,
   investigateSpeed: 1.9,
   chaseSpeed: 3.1,
+  /** Stalking a faint sound / probing hiding spots: slow, near-silent steps (gait 'creep'). */
+  creepSpeed: 0.6,
+  probeSpeed: 0.85,
   /** Turn rate rad/s. */
   turnSpeed: 4.5,
-  /** Seconds it lingers at an investigated spot, "listening", before wandering again. */
-  listenTime: 3,
+  /** Seconds it stands listening where it heard something before searching around. */
+  listenTime: 1.4,
   /** How far its body is from the ground to the top of its head (visual + hearing origin). */
   height: 2.3,
+  /** Full standing height (m): door lintels are lower (2.4 m), so it ducks under them. */
+  standHeight: 2.6,
+  /** Body radius on the XZ plane standing up, and on all fours (squeezing through gaps). */
+  radius: 0.35,
+  crawlRadius: 0.24,
+  /** Furniture whose top is at most this high (beds, tables, couches, crates) is climbed over. */
+  climbMaxHeight: 0.86,
+  /** Speed while ducking under a lintel (multiplier), crawling and climbing (multiplier + cap, m/s). */
+  duckSpeedMul: 0.8,
+  crawlSpeedMul: 0.6,
+  crawlSpeedMax: 1.2,
+  climbSpeedMul: 0.5,
+  climbSpeedMax: 0.9,
+  /** How fast (m/s) its body rises onto / sinks off a furniture top. */
+  climbRiseSpeed: 1.8,
+
+  // ---- hearing reactions ----
+  /** Hearing ratios (see HEARING) below this are "faint": it stalks instead of walking over. */
+  stalkRatio: 1.4,
+  /** Hearing a stalked sound again within this distance (m) makes it lunge (chase). */
+  lungeRange: 4.5,
+  /** It only creeps within this distance (m) of a stalked sound; farther away it walks closer first. */
+  stalkRange: 6,
+  /** Seconds it freezes to orient on a new sound (faint: random in [min, max]). */
+  orientTime: 0.35,
+  stalkOrientMin: 0.8,
+  stalkOrientMax: 1.4,
+  /** While stalking it stops to listen every [min, max] s of creeping. */
+  stalkListenEvery: [2.2, 3.6] as readonly [number, number],
+  stalkListenTime: [0.8, 1.3] as readonly [number, number],
+  /** Chase prediction: aim at most this many seconds ahead along a noisy runner's track. */
+  chaseLead: 1.0,
+
+  // ---- searching (after arriving where it heard something and finding nothing) ----
+  /** Hiding spots it checks around the spot (m radius), and how many. */
+  searchRadius: 3.5,
+  searchSpotsMin: 2,
+  searchSpotsMax: 3,
+  /** 'search' act: feeling around; a player within this reach (m, frontal, no wall) is noticed. */
+  searchFeel: 1.1,
+  searchTime: [1.4, 2.2] as readonly [number, number],
+  sniffTime: [1.1, 1.7] as readonly [number, number],
+  /**
+   * 'sweep' act: a telegraphed long-armed swipe. `sweepWindup` s of wind-up (no catch: time to
+   * react), then the strike: for `sweepStrike` s any alive player within `sweepReach` m (XZ),
+   * inside +-`sweepArc` rad of where it faces and with no wall in between is caught. Then it
+   * recovers for `sweepRecover` s. actStart marks the start of the wind-up.
+   */
+  sweepWindup: 0.5,
+  sweepStrike: 0.3,
+  sweepRecover: 0.45,
+  sweepReach: 1.6,
+  sweepArc: 1.2,
+
+  // ---- lurking ----
+  /** Chance to lurk after a search turns up nothing (+ `lurkAfterChase` if it lost a chase). */
+  lurkChance: 0.3,
+  lurkAfterChase: 0.35,
+  lurkTime: [6, 12] as readonly [number, number],
+  /** While lurking it lunges (chase) at sounds with at least this hearing ratio. */
+  lurkChaseRatio: 1.6,
+
+  // ---- patrol ----
+  /** Chance to stop at a patrol point (listen / sniff) and for how long. */
+  patrolPauseChance: 0.35,
+  patrolPause: [1.2, 3] as readonly [number, number],
+  /** While it stands frozen listening (act 'listen') it hears this much farther. */
+  listenHearing: 1.25,
+
+  // ---- escalation ----
+  /**
+   * Escalation 0..1 = 65% fuses inserted + 35% round time (ramps from `escalationGrace` s to
+   * `escalationTime` s). It scales speeds by up to (1 + escalationSpeed), hearing range by up to
+   * (1 + escalationHearing) and shortens its pauses. Once the exit opens it is in a frenzy.
+   */
+  escalationSpeed: 0.15,
+  escalationHearing: 0.1,
+  escalationGrace: 120,
+  escalationTime: 600,
+  frenzySpeed: 1.2,
+  frenzyHearing: 1.15,
+  /** In a frenzy it charges at sounds with hearing ratio >= HEARING.chaseRatio * this. */
+  frenzyChaseRatio: 0.75,
+} as const;
+
+/**
+ * The monster's navigation grid (precomputed per level in src/core/navgrid.ts). Cells are classed
+ * by what its body must do there: walk tall, duck (under a lintel), crawl (squeeze on all fours)
+ * or climb (over low furniture). A* (octile) minimizes travel TIME: the monster passes per-meter
+ * costs of (its open-floor speed / its speed there) at its current pace, times a little
+ * reluctance, so it climbs over a bed while searching but runs around it in a chase.
+ * `cost*` are the fixed defaults used without a pace (tools, tests).
+ */
+export const NAV = {
+  cellSize: 0.2,
+  /** Extra clearance (m) a cell center needs beyond the body radius. */
+  margin: 0.04,
+  costDuck: 1.3,
+  costCrawl: 2.6,
+  costClimb: 2.8,
+  crawlReluctance: 1.1,
+  climbReluctance: 1.1,
+  /** Extra cost per meter for hugging walls/furniture closer than `hugDistance` (m) beyond the radius. */
+  costHug: 0.35,
+  hugDistance: 0.2,
+  /** A* gives up after this many expanded cells and walks toward the closest cell it found. */
+  maxExpansions: 14000,
+  /** Route planning budget: tokens per second and burst (one A* per token, at most one per tick). */
+  plansPerSecond: 6,
+  planBurst: 3,
 } as const;
 
 /**

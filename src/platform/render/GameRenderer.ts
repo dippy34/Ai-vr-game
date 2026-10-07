@@ -241,6 +241,7 @@ export class GameRenderer implements IGameRenderer {
       const next = new SkinnedMonster(monster, inst);
       // Wet, translucent skin + glossy keratin; casts / receives the flash shadows.
       applyMonsterSkin(next.object);
+      next.setLevel(this.levelData);
       this.dynamic.remove(old.object);
       old.dispose();
       this.monster = next;
@@ -306,6 +307,7 @@ export class GameRenderer implements IGameRenderer {
     this.flashFx.clearAfterimages();
     this.jumpscare.reset(this.monster);
     this.levelData = level;
+    this.monster.setLevel(level);
     this.level = new LevelView(level, this.models, this.surfaces);
     this.ctx.scene.add(this.level.group);
     this.motes.setWindows(this.level.moonWindows);
@@ -636,7 +638,11 @@ export class GameRenderer implements IGameRenderer {
     if (this.readableCache?.view !== view) {
       const notes = (view.decals?.placed ?? []).filter((p) => p.name.startsWith(NOTE_PREFIX));
       // A note's text reads upright when you face its yaw + 180 degrees.
-      const list = notes.map((n) => ({ position: { x: n.x, y: n.y, z: n.z }, readYaw: Math.atan2(Math.sin(n.yaw + Math.PI), Math.cos(n.yaw + Math.PI)) }));
+      const list = notes.map((n) => ({
+        position: { x: n.x, y: n.y, z: n.z },
+        readYaw: Math.atan2(Math.sin(n.yaw + Math.PI), Math.cos(n.yaw + Math.PI)),
+        upright: n.placement === 'wall' || n.placement === 'door',
+      }));
       this.readableCache = { view, list };
     }
     return this.readableCache.list;

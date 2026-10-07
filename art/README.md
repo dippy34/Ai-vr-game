@@ -38,7 +38,7 @@ with `node dev/models/shoot.cjs out.png "model=monster&anim=Walk&t=0.4"`.
 
 | File | Script | Budget (tris) | Notes / required nodes |
 |---|---|---|---|
-| `monster.glb` | `monster.py` | ≤ 14k | Rigged + skinned. Origin between the feet, top of head at ~2.3 m. Actions: `Idle`, `Walk`, `Run`, `Listen`, `Attack`, `Feed` (in place, no root motion). See monster section. |
+| `monster.glb` | `monster.py` | ≤ 30k | Rigged + skinned (one mesh, 2 materials). Origin between the feet, upright ~2.6 m (`extras.height` 2.62). Actions: `Idle`, `Walk`, `Run`, `Listen`, `Attack`, `Feed` (in place, no root motion). Per-vertex shader masks in `COLOR_0`. See monster section. |
 | `hand_left.glb`, `hand_right.glb` | `hands.py` | ≤ 3k each | Rigged hand. Origin = wrist. Canonical frame: fingers along −Z (three.js), back of hand +Y, thumb on −X (right) / +X (left). Bones: `wrist`, `thumb_1..3`, `index_1..3`, `middle_1..3`, `ring_1..3`, `pinky_1..3`. Curl = rotate each finger bone about its local X. |
 | `avatar_head.glb` | `avatar.py` | ≤ 3k | Player head (origin = eye center, faces −Z). A survivor in a knit hood/beanie with a cloth mask over the mouth. Node `tint` = the mesh whose material gets the player color. |
 | `avatar_body.glb` | `avatar.py` | ≤ 4k | Torso + shoulders, no arms (origin = neck base), worn jacket. Node `tint` as above. |
@@ -61,15 +61,41 @@ with `node dev/models/shoot.cjs out.png "model=monster&anim=Walk&t=0.4"`.
 
 ## Monster ("the Listener")
 
-Blind and very tall (2.3 m), emaciated and hunched. It has very long arms down past the knees and
-long fingers. **No eyes**: smooth skin is stretched over the sockets. It has **oversized ragged
-ears** and many small ear-holes across the skull (it hunts by sound), plus a lipless vertical mouth
-with too many teeth. Ribs and spine show through wet-looking, pale gray skin with dark veins. It
-should look *horrible* in the camera flash: glossy and pale against black.
+Blind and very tall (2.6 m upright, ~2.1 m hunched), starved and hunched. It has very long arms
+down past the knees and long knobby fingers with long, curved, cracked nails. **No eyes**: skin is
+stretched over the sockets and the lids are sealed shut, weeping. It has **oversized membrane
+ears** (thin, veined skin on cartilage struts, torn and scalloped) and many small ear-holes across
+the skull (it hunts by sound), plus a vertical mouth that splits sideways: ragged lips, swollen
+gums and three rows of needle teeth per side over a wet, ridged throat. Ribs with sunken spaces
+between them, winged shoulder blades and the spine show through pale, mottled, bruised skin with
+dark veins, sores and scars; knees, elbows and knuckles are dry and cracked, the mouth, gums and
+eye seams are wet. It should look *horrible* in the camera flash: pale and glossy against black.
 
 Animations loop except `Attack`. Stride is matched so that `Walk` plays at 1.0 m/s and `Run` at
 3.1 m/s with timeScale 1 (the game scales timeScale by actual speed). Write the speeds into the
 glTF extras (`extras.walkSpeed`, `extras.runSpeed`).
+
+**Mesh, textures, rig.** One skinned mesh, ≤ ~30k triangles: the body (decimated from a 2.5 mm
+SDF sculpt, denser at the face, hands, ears and joints) plus teeth and nails. Two materials:
+`monster_skin` (2048² color, tangent-space normal in the OpenGL convention, roughness; baked from
+the sculpt's procedural skin) and `monster_keratin` (512² color/normal/roughness, teeth + nails).
+Metallic 0. The 59-bone skeleton (names, hierarchy, bind pose) is fixed: the authored clips and the
+procedural IK rig read bones by name. The face point the catch uses is in the `jaw` bone's frame.
+Skin weights are analytic (blends across joint planes, wide over elbows/knees, narrow in the
+creases) so the IK can crawl, crouch and grip; `monster_stress_*.png` previews show those poses.
+
+**Shader masks (`COLOR_0`, per vertex, linear 0..1)** for the engine's skin shader:
+
+| Channel | Meaning | Values |
+|---|---|---|
+| R | thinness (fake subsurface translucency) | ear membranes ~0.85–1, finger webbing ~0.7, lip/nostril edges ~0.6, sealed eyelid seams ~0.4, fingertips ~0.3; general skin ~0.08, thin-skinned neck/inner forearms/temples ~0.2; teeth 0.35–0.6 (tips), nails 0.2–0.45 |
+| G | wetness | mouth cavity/throat/gums 1, lips ~0.8, sores ~0.9, eye-socket seepage/nostrils/ear canals/skull pits ~0.5–0.7, armpits/groin ~0.2, teeth 0.7, nails 0.12, dry skin 0 |
+| B | cavity / AO (multiply) | 1 = open skin, → 0 deep in creases, the mouth and throat, ear canals, between fingers and toes, armpits (bind-pose local AO × fine sculpt cavity) |
+| A | unused | 1 |
+
+Note: three's GLTFLoader turns `material.vertexColors` on whenever `COLOR_0` exists, which would
+multiply the base color by these masks; the renderer must switch it off for the monster (or read
+the attribute in its own shader).
 
 ## GPU texture compression (build step, not part of the Blender pipeline)
 

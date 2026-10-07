@@ -2,22 +2,24 @@
  * The Blender-made, rigged monster (public/models/monster.glb). Same role as MonsterModel (the
  * procedural fallback): follow MonsterState, animate, and bake its current pose for afterimages.
  *
- * Animation choice from the AI state:
- *   feeding            -> Attack once, then Feed (loop)
- *   chase              -> Run, timeScale by speed / runSpeed
- *   investigate + slow -> Listen
- *   barely moving      -> Idle (Listen when agitated)
- *   otherwise          -> Walk, timeScale by speed / walkSpeed
- *
- * The catch sequence (Jumpscare) overrides this per frame via setCatch(): Attack at a time it
- * drives, and a visual-only placement (in the local player's face, or lunging at another player).
+ * The body is procedural (monster/body.ts): steps planned one at a time onto the floor and
+ * furniture, hands that use the geometry around it (door jambs, corners, walls, table tops,
+ * windows), a trunk and head driven by the body-language contract (gait / posture / act / focus).
+ * Authored clips are kept where they are better than procedure:
+ *   Attack  the catch lunge (Jumpscare drives it through setCatch(), exactly as before), and the
+ *           lunge when the sim says it caught someone;
+ *   Feed    while it feeds (crossfaded with the procedural body in and out).
+ * A model without the rig's bone names falls back to playing the clips by mode/speed.
  */
 
 import * as THREE from 'three';
 import { MONSTER } from '../../config';
-import type { MonsterMode, MonsterState } from '../../core/types';
+import type { LevelData, MonsterMode, MonsterState } from '../../core/types';
 import { bakeObject, type ModelAsset } from './assets';
 import type { CatchPoser } from './Jumpscare';
+import { ProceduralBody } from './monster/body';
+import { MonsterRig, REQUIRED_BONES } from './monster/rig';
+import { MonsterWorld } from './monster/world';
 import { setV } from './util';
 
 type Clip = 'Idle' | 'Walk' | 'Run' | 'Listen' | 'Attack' | 'Feed';
@@ -29,6 +31,9 @@ const LUNGE_PEAK = 0.5;
 const FACE_IN_JAW = new THREE.Vector3(0, 0.05, 0.015);
 /** Its lunging face points ~18 degrees down; this lifts it to look straight at the camera. */
 const FACE_PITCH = 0.26;
+/** Clip layer fades (s): into an authored clip, back to the procedural body. */
+const CLIP_IN = 0.18;
+const CLIP_OUT = 0.55;
 const _v = new THREE.Vector3();
 const _f = new THREE.Vector3();
 const _box = new THREE.Box3();
@@ -43,6 +48,8 @@ export class SkinnedMonster implements CatchPoser {
   private readonly actions = new Map<Clip, THREE.AnimationAction>();
   private readonly head: THREE.Object3D | null;
   private readonly jaw: THREE.Object3D | null;
+  private readonly rig: MonsterRig | null;
+  private readonly body: ProceduralBody | null;
   /** Smoothed sim position (the object itself may be placed elsewhere by the catch). */
   private readonly pos = new THREE.Vector3();
   private readonly walkSpeed: number;
@@ -54,6 +61,9 @@ export class SkinnedMonster implements CatchPoser {
   private prevMode: MonsterMode | null = null;
   private attackUntil = 0;
   private time = 0;
+  /** Weight of the authored clip layer over the procedural body (0 = fully procedural). */
+  private clipW = 0;
+  private clipTarget = 0;
   // Catch override (Jumpscare), set every frame while active.
   private catchClip = -1;
   private catchPlace: 'face' | 'root' = 'face';
@@ -91,6 +101,14 @@ export class SkinnedMonster implements CatchPoser {
           m.frustumCulled = false;
         }
         m.castShadow = m.receiveShadow = false;
+        // COLOR_0 holds shader masks, not colors (R thinness, G wetness, B cavity: see
+        // art/blender/monster.py). GLTFLoader switches vertexColors on for it, which tints the skin.
+        for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+          if (mat?.vertexColors) {
+            mat.vertexColors = false;
+            mat.needsUpdate = true;
+          }
+        }
       }
     });
 
@@ -110,8 +128,10 @@ export class SkinnedMonster implements CatchPoser {
       }
       this.actions.set(name, action);
     }
+    this.rig = MonsterRig.build(instance);
+    this.body = this.rig ? new ProceduralBody(this.rig, 0x6d6f6e, instance.scale.x) : null;
     this.lungeReach = this.measureLungeReach();
-    this.play('Idle', 0);
+    if (!this.body) this.play('Idle', 0);
   }
 
   /** Pose the lunge peak once to measure how far ahead of its feet the face gets. */
@@ -124,6 +144,12 @@ export class SkinnedMonster implements CatchPoser {
     this.mixer.update(0);
     this.object.updateMatrixWorld(true);
     this.object.worldToLocal(this.facePoint(_f));
+    // The authored mandible split at the peak drives the procedural jaw's spread.
+    const rig = this.rig;
+    if (rig && this.body && rig.jawL >= 0 && rig.jawR >= 0) {
+      const d = (i: number) => rig.restQ[i].clone().invert().multiply(rig.bones[i].quaternion);
+      this.body.setJawSplit(d(rig.jawL), d(rig.jawR));
+    }
     attack.stop();
     this.mixer.update(0);
     const reach = Math.hypot(_f.x, _f.z);
@@ -136,10 +162,16 @@ export class SkinnedMonster implements CatchPoser {
     return this.headWorld(out);
   }
 
-  /** True when the GLB has the animations this class drives. */
+  /** True when the GLB can drive this class: the procedural rig, or the authored clips. */
   static usable(asset: ModelAsset): boolean {
+    if (REQUIRED_BONES.every((n) => !!asset.scene.getObjectByName(n))) return true;
     const names = new Set(asset.animations.map((a) => a.name));
     return ['Idle', 'Walk', 'Run'].every((n) => names.has(n));
+  }
+
+  /** The level the body reads (walls, doors, furniture, windows). */
+  setLevel(level: LevelData | null): void {
+    this.body?.setWorld(level ? new MonsterWorld(level) : null);
   }
 
   setCatch(clip: number, place: 'face' | 'root', target: THREE.Vector3, yaw: number, pitch: number, weight: number): void {
@@ -162,15 +194,24 @@ export class SkinnedMonster implements CatchPoser {
 
   update(m: MonsterState, dt: number): void {
     this.time += dt;
-    setV(_v, m.position);
-    if (!this.initialized || this.pos.distanceToSquared(_v) > 9) {
-      this.pos.copy(_v);
-      this.yaw = m.yaw;
+    const body = this.body;
+    if (body) {
+      // The body keeps tracking the sim even while a clip or the catch owns the pose.
+      body.update(m, dt);
+      this.pos.copy(body.root);
+      this.yaw = body.rootYaw;
       this.initialized = true;
     } else {
-      this.pos.lerp(_v, damp(12, dt));
-      const d = Math.atan2(Math.sin(m.yaw - this.yaw), Math.cos(m.yaw - this.yaw));
-      this.yaw += d * damp(10, dt);
+      setV(_v, m.position);
+      if (!this.initialized || this.pos.distanceToSquared(_v) > 9) {
+        this.pos.copy(_v);
+        this.yaw = m.yaw;
+        this.initialized = true;
+      } else {
+        this.pos.lerp(_v, damp(12, dt));
+        const d = Math.atan2(Math.sin(m.yaw - this.yaw), Math.cos(m.yaw - this.yaw));
+        this.yaw += d * damp(10, dt);
+      }
     }
     this.speed += (m.speed - this.speed) * damp(6, dt);
     if (this.catchClip >= 0) {
@@ -187,21 +228,32 @@ export class SkinnedMonster implements CatchPoser {
       const attack = this.actions.get('Attack')!;
       this.attackUntil = this.time + attack.getClip().duration * 0.92;
       attack.reset();
-      this.play('Attack', 0.12);
+      this.play('Attack', body ? 0 : 0.12);
     }
     this.prevMode = m.mode;
 
-    if (this.time >= this.attackUntil) {
-      const clip = this.choose(m);
-      this.play(clip, FADE);
-      const action = this.actions.get(clip);
-      if (action) {
-        if (clip === 'Walk') action.timeScale = THREE.MathUtils.clamp(this.speed / this.walkSpeed, 0.45, 2.2);
-        else if (clip === 'Run') action.timeScale = THREE.MathUtils.clamp(this.speed / this.runSpeed, 0.6, 1.5);
-        else action.timeScale = m.alert > 0.6 ? 1.25 : 1;
+    if (!body) {
+      this.updateClipsOnly(m);
+      this.mixer.update(dt);
+      return;
+    }
+
+    // Clip layer: Attack (once) then Feed while feeding; the procedural body otherwise.
+    const feeding = m.mode === 'feeding' && (this.actions.has('Feed') || this.time < this.attackUntil);
+    if (feeding && this.time >= this.attackUntil && this.current !== 'Feed') this.play('Feed', this.current ? FADE : 0);
+    const target = feeding ? 1 : 0;
+    if (target === 0 && this.clipTarget === 1) body.reset();
+    this.clipTarget = target;
+    this.clipW += (target - this.clipW) * damp(target > this.clipW ? 1 / CLIP_IN * 3 : 1 / CLIP_OUT * 3, dt);
+    if (this.clipW < 0.002 && target === 0) {
+      this.clipW = 0;
+      if (this.current) {
+        this.mixer.stopAllAction();
+        this.current = null;
       }
     }
-    this.mixer.update(dt);
+    if (this.clipW > 0) this.mixer.update(dt);
+    this.rig!.write(1 - this.clipW);
   }
 
   private updateCatch(dt: number): void {
@@ -215,7 +267,7 @@ export class SkinnedMonster implements CatchPoser {
         attack.setEffectiveWeight(1).play();
         attack.paused = true;
         // In your face: snap (the face appears at once). Lunging at someone else: a quick blend.
-        if (prev && this.catchPlace === 'root') prev.crossFadeTo(attack, 0.12, false);
+        if (prev && this.catchPlace === 'root' && !this.body) prev.crossFadeTo(attack, 0.12, false);
         else for (const a of this.actions.values()) if (a !== attack) a.stop();
         this.current = 'Attack';
       }
@@ -226,6 +278,7 @@ export class SkinnedMonster implements CatchPoser {
     const o = this.object;
     const w = this.catchWeight;
     if (this.catchPlace === 'face') {
+      // Exactly the authored lunge: the procedural body is off.
       o.rotation.set(this.catchPitch, this.catchYaw, 0, 'YXZ');
       o.updateMatrixWorld(true);
       // Face point in the object's frame, then move the object so it lands on the target.
@@ -233,9 +286,27 @@ export class SkinnedMonster implements CatchPoser {
       _f.multiply(o.scale).applyQuaternion(o.quaternion);
       o.position.copy(this.catchTarget).sub(_f);
     } else {
+      // Lunging at another player: the pose blends from the procedural body into the lunge.
+      if (this.rig) this.rig.write(1 - w);
       o.position.lerpVectors(this.pos, this.catchTarget, w);
       const d = Math.atan2(Math.sin(this.catchYaw - this.yaw), Math.cos(this.catchYaw - this.yaw));
       o.rotation.set(0, this.yaw + d * w, 0);
+    }
+    // Afterwards it feeds: the clip layer stays on (Feed) until the sim lets it go.
+    this.clipW = this.catchPlace === 'face' ? 1 : w;
+    this.clipTarget = 1;
+  }
+
+  /** No procedural rig: pick an authored clip by mode / speed (the original behavior). */
+  private updateClipsOnly(m: MonsterState): void {
+    if (this.time < this.attackUntil) return;
+    const clip = this.choose(m);
+    this.play(clip, FADE);
+    const action = this.actions.get(clip);
+    if (action) {
+      if (clip === 'Walk') action.timeScale = THREE.MathUtils.clamp(this.speed / this.walkSpeed, 0.45, 2.2);
+      else if (clip === 'Run') action.timeScale = THREE.MathUtils.clamp(this.speed / this.runSpeed, 0.6, 1.5);
+      else action.timeScale = m.alert > 0.6 ? 1.25 : 1;
     }
   }
 

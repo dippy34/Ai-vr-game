@@ -114,9 +114,9 @@ export interface CameraState {
 }
 
 export type MonsterMode =
-  /** Roaming between nav nodes, not aware of anyone. */
+  /** Patrolling the house, not aware of anyone. */
   | 'wander'
-  /** Heard something; walking to where the noise came from. */
+  /** Heard something: stalking or walking over to it, then searching around (maybe lurking). */
   | 'investigate'
   /** Heard something loud and close; running at it. */
   | 'chase'
@@ -277,7 +277,7 @@ export interface LevelData {
   bounds: { min: Vec3; max: Vec3 };
   /** All static geometry: walls, floors, ceilings, furniture. */
   boxes: Box[];
-  /** Waypoint graph the monster walks on. */
+  /** Coarse waypoint graph (spawn spots, debug). The monster navigates on a grid (navgrid.ts). */
   nav: NavNode[];
   /** Player spawn points (feet), at least 4. */
   playerSpawns: { position: Vec3; yaw: number }[];

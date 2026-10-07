@@ -1,4 +1,8 @@
-/** Waypoint-graph helpers for the monster (pure, engine-agnostic). */
+/**
+ * Coarse waypoint-graph helpers (pure, engine-agnostic). The graph marks open spots in every room
+ * (random monster spawns, debug views, level tests); the monster itself navigates on the fine
+ * grid in navgrid.ts.
+ */
 
 import type { LevelData, NavNode, Vec3 } from './types';
 import { distXZ } from './math';

@@ -100,7 +100,7 @@ async function monsterAway(page, x, z, d = 4) {
   await ctx.grantPermissions(['microphone']);
 
   // ------------------------------------------------------------ solo
-  // E2E_ONLY=multi skips the solo part (handy on slow machines when debugging multiplayer).
+  // E2E_ONLY=multi skips the solo part, E2E_ONLY=solo the multiplayer part (handy on slow machines).
   if (process.env.E2E_ONLY !== 'multi') {
   const page = await ctx.newPage();
   watch(page, 'solo');
@@ -125,6 +125,8 @@ async function monsterAway(page, x, z, d = 4) {
   await sleep(1500);
 
   // Desktop reading: aim at the tutorial note on the same table, E leans in over it, E stands up.
+  // (Notes come with the models, which stream in after the round starts.)
+  await page.waitForFunction(() => window.__mute.renderer.readables().length > 0, null, { timeout: 180000 }).catch(() => {});
   const note = await page.evaluate(([x, z]) => {
     const notes = window.__mute.renderer.readables();
     let best = null;
@@ -205,6 +207,13 @@ async function monsterAway(page, x, z, d = 4) {
   await page.waitForSelector('text=Start round', { state: 'visible' });
   await page.click('text=Start round');
   s = await waitState(page, (s) => s.st.phase === 'playing' && s.st.fusesInserted === 0, null, 'second round start');
+  // This part tests carrying, not survival: the (good) monster would hunt the robot down while it
+  // teleports between fuses, so park it frozen in the far corner.
+  await page.evaluate(() => {
+    const s = window.__mute.game.current;
+    s.sim.setMonsterFrozen(true);
+    s.state.monster.position = { x: 10.2, y: 0, z: -7.2 };
+  });
   const box = { x: 1.5, z: 7.3 }; // stand here facing +Z (yaw 180): both desktop hands are at the fuse box
   let inserted = 0;
   for (let k = 0; k < s.st.fusesRequired; k++) {
@@ -215,12 +224,25 @@ async function monsterAway(page, x, z, d = 4) {
     if (!spot) { console.log('no spot next to fuse', fuse.position); break; }
     await monsterAway(page, spot.x, spot.z);
     await teleport(page, spot.x, spot.z, spot.yawDeg);
+    // Look down at it like a player would (E reads a note in the middle of the view instead).
+    await page.evaluate(([fy, h]) => { window.__mute.input.pitch = Math.atan2(fy - 1.6, h); },
+      [fuse.position.y, Math.hypot(fuse.position.x - spot.x, fuse.position.z - spot.z)]);
     await sleep(800);
     await page.keyboard.press('e');
     const held = await waitState(page, (s) => s.st.items.some((i) => i.kind === 'fuse' && i.where === 'held' && i.holder === s.id),
       null, 'fuse grabbed', 30000).catch((e) => (console.log(e.message, 'at', spot, 'fuse', fuse.position), null));
+    if (!held) console.log('why:', JSON.stringify(await page.evaluate(() => {
+      const m = window.__mute, g = m.game, s = g.current, st = s.state, me = st.players[s.localId];
+      const look = g.lookDirection();
+      return {
+        phase: st.phase, status: me.status, held: me.held, paused: g.paused, reading: !!g.reading, leaning: m.input.leaning,
+        enabled: m.input.enabled, target: g.desktopUseTarget(st, me.held, look), head: g.localPose.head.position, look,
+        aim: document.querySelector('.hud .aim')?.textContent, menuOpen: !!document.querySelector('.screen:not([hidden])'),
+      };
+    })));
     if (!held) break;
     await monsterAway(page, box.x, box.z);
+    await page.evaluate(() => { window.__mute.input.pitch = 0; });
     await teleport(page, box.x, box.z, 180);
     const after = await waitState(page, (s, n) => s.st.fusesInserted > n, inserted, 'fuse inserted', 30000)
       .catch((e) => (console.log(e.message), null));
@@ -235,6 +257,13 @@ async function monsterAway(page, x, z, d = 4) {
   check(!!s && s.st.phase === 'won' && s.st.players[s.id].status === 'escaped', `walking out the open door wins (${s && s.st.phase})`);
   await page.screenshot({ path: `${out}/g-escaped.png` });
   await page.close();
+  }
+
+  if (process.env.E2E_ONLY === 'solo') {
+    await browser.close();
+    console.log(`\n${failures} failures, ${errors.length} console errors`);
+    for (const e of errors.slice(0, 30)) console.log(e);
+    process.exit(failures ? 1 : 0);
   }
 
   // ------------------------------------------------------------ two tabs, local transport
