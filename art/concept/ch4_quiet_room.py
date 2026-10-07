@@ -158,7 +158,6 @@ def shot_vault():
     for i, x in enumerate((-2.6, -1.4, 1.2, 2.5)):
         box('crt', (0.5, 0.48, 0.46), (x, -0.85, 1.2), (0, 0, 0.08 * (1 if x < 0 else -1)), mat=beige, bevel=0.03)
         uv_plane('screen', 0.4, 0.32, (x + 0.0, -1.1, 1.22), (0, 0, 0.08 * (1 if x < 0 else -1)), crt_screen(f'scr{i}', seed=i * 3.1))
-        point('crtglow', (x, -1.6, 1.25), 6, color=(0.3, 1.0, 0.5), radius=0.2)
     box('leverbase', (0.4, 0.3, 0.18), (0.1, -0.9, 1.05), mat=dark_steel)
     tube_between('lever', (0.1, -0.9, 1.1), (0.1, -1.25, 1.55), 0.03, steel)
     sphere('knob', 0.075, (0.1, -1.27, 1.58), mat=plain('red', (0.5, 0.02, 0.01), 0.3, noise=0.1))
@@ -170,7 +169,6 @@ def shot_vault():
         box('paper', (0.21, 0.297, 0.001), (random.uniform(-3.2, 3.2), random.uniform(-1.3, -0.6), 0.962), (0, 0, random.uniform(-0.6, 0.6)), mat=pap)
     # the creature standing right behind the camera: only its reflection shows in the glass
     mon, arm, body = monster('Listen', 40, loc=(0.9, -4.3, 0.0), rot=(0, 0, 0))
-    point('behind', (0.7, -2.9, 1.6), 6, color=(0.3, 1.0, 0.5), radius=0.4)
     cam = camera((-0.35, -2.4, 1.62), (0.0, HY, 7.6), lens=24, dof=None)
     render('ch4_quiet_room_vault')
 
@@ -201,7 +199,7 @@ def shot_boss():
     cyl('platform', 3.4, 0.9, C + Vector((0, 0, 0.45)), mat=con, seg=64)
     torus('platrim', 3.4, 0.06, C + Vector((0, 0, 0.9)), mat=stripes('haz2', scale=3.0), seg=64, rseg=8)
     # the monster, rearing up and screaming
-    mon, arm, body = monster('Attack', 8, loc=C + Vector((0, 0.6, 0.9)), rot=(math.radians(-8), 0, math.radians(180)), scale=1.35,
+    mon, arm, body = monster('Attack', 8, loc=C + Vector((0, 0.6, 0.9)), rot=(math.radians(-8), 0, math.radians(180)), scale=1.7,
                              pose={'jaw': (38, 0, 0), 'head': (-25, 0, 0), 'neck': (-12, 0, 0)})
     # sound shockwaves: thin glowing rings rippling out from it and from the speaker wall
     wave = emissive('wave', (0.75, 0.85, 1.0), 6.0)
@@ -216,8 +214,8 @@ def shot_boss():
     # the Echo blast from the players: a cone of rings toward the monster
     E = Vector((0.55, -2.0, 1.3))
     d = (C + Vector((0, 0, 2.6)) - E)
-    for k in range(9):
-        t = (k + 1) / 10
+    for k in range(6):
+        t = (k + 1) / 11
         p = E + d * t
         o = torus('blast', 0.15 + 1.1 * t, 0.01 + 0.012 * t, p, (0, 0, 0), mat=emissive('blastm', (1.0, 0.75, 0.35), 8.0 - 5 * t), seg=48, rseg=5)
         o.rotation_mode = 'QUATERNION'

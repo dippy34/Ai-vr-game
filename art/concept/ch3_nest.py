@@ -104,7 +104,7 @@ def shot_tunnel():
 
     wm = water_mat()
     water_block('water', -R + 0.01, R - 0.01, -6, LEN, -1.0, WATER, wm, res=0.06, disp=wake)
-    mon, arm, body = monster('Run', 10, loc=(0.15, HY + 2.15, 0.9), rot=(math.radians(-84), 0, math.radians(180)))
+    mon, arm, body = monster('Run', 10, loc=(0.15, HY + 2.15, 1.04), rot=(math.radians(-84), 0, math.radians(180)))
     # floating junk
     wood = plain('wood', (0.16, 0.11, 0.07), 0.8, noise=0.4)
     for (x, y, yaw, L) in ((-1.4, 3.5, 0.4, 1.4), (1.5, 11.0, -0.9, 1.1), (-0.8, 15.0, 1.3, 0.9), (1.2, 22, 0.2, 1.6)):
@@ -123,7 +123,7 @@ def shot_tunnel():
     mist = fog('mist', 0.003, (0.82, 0.86, 0.88), 0.4, 0.6, 0.7, falloff=0.5)
     box('mistbox', (2 * R - 0.05, LEN + 6, 3.4), (0, LEN / 2 - 3, WATER + 1.7), mat=mist)
     cam = camera((0.45, -0.6, 1.62), (0.0, 9.0, 0.95), lens=22, roll_deg=2.0, dof=7.0, fstop=5.6)
-    flashlight(cam, (0.1, 7.5, 1.0), power=650, angle=24, blend=0.6)
+    flashlight(cam, (0.1, 7.5, 1.0), power=1300, angle=24, blend=0.6)
     render('ch3_nest_tunnel')
 
 
@@ -247,12 +247,14 @@ def shot_den():
     mats = [coat, coat, insul, blanket, blanket, coat]
     for k in range(70):
         a = random.uniform(0, 2 * math.pi)
+        if abs(((a - math.radians(-125)) + math.pi) % (2 * math.pi) - math.pi) < math.radians(75):
+            continue  # keep the camera side open so you can see it sleeping
         rr2 = random.uniform(1.8, 2.8)
         p = C + Vector((math.cos(a) * rr2 * 1.15, math.sin(a) * rr2, random.uniform(0.2, 0.7)))
         rag('rag', (random.uniform(0.5, 1.3), random.uniform(0.4, 1.0)), p,
             (random.uniform(-0.9, 0.9), random.uniform(-0.9, 0.9), random.uniform(0, 6.3)), random.choice(mats), k)
     # sleeping monster curled up in the middle
-    mon, arm, body = monster('Feed', 30, loc=C + Vector((0.55, -0.1, 0.32)), rot=(0, math.radians(84), math.radians(-60)))
+    mon, arm, body = monster('Feed', 30, loc=C + Vector((0.55, -0.1, 0.5)), rot=(0, math.radians(84), math.radians(-60)))
     # recorders and boomboxes around the nest (its bait)
     silver = plain('silver', (0.35, 0.35, 0.36), 0.35, metallic=0.6, noise=0.3)
     blackp = plain('blackp', (0.02, 0.02, 0.022), 0.45, noise=0.3)
@@ -312,10 +314,10 @@ def shot_den():
     point('cardl', K + Vector((0.02, -0.08, 0.66)), 0.6, color=(0.2, 0.8, 1.0), radius=0.02)
     # hanging bulb above the nest
     bulb = emissive('bulb', (1.0, 0.68, 0.38), 30.0)
-    B = C + Vector((-0.6, 0.4, 3.9))
+    B = C + Vector((0.2, -0.4, 3.2))
     sphere('bulb', 0.06, B, mat=bulb, sub=2)
     curve_path('cord', [B, B + Vector((0.05, 0.0, RZ - B.z))], 0.006, plain('cord', (0.02, 0.02, 0.02), 0.5, noise=0))
-    point('bulbl', B - Vector((0, 0, 0.05)), 70, color=(1.0, 0.66, 0.36), radius=0.05)
+    point('bulbl', B - Vector((0, 0, 0.05)), 140, color=(1.0, 0.66, 0.36), radius=0.05)
     sphere('red', 0.06, (-RX + 0.3, -2.0, 3.0), mat=emissive('redb', (1, 0.08, 0.03), 60), sub=2)
     point('redl', (-RX + 0.5, -2.0, 3.0), 25, color=(1.0, 0.1, 0.04))
     box('haze', (2 * RX, 2 * RY + 4, RZ), (0, 0, RZ / 2), mat=fog('haze', 0.012, (0.85, 0.85, 0.85), 0.4, 0.5, 0.5))
