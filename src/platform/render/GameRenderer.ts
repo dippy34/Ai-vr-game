@@ -199,6 +199,7 @@ export class GameRenderer implements IGameRenderer {
     if (monster && inst) {
       const old = this.monster;
       const next = new SkinnedMonster(monster, inst);
+      next.setLevel(this.levelData);
       this.dynamic.remove(old.object);
       old.dispose();
       this.monster = next;
@@ -263,6 +264,7 @@ export class GameRenderer implements IGameRenderer {
     this.flashFx.clearAfterimages();
     this.jumpscare.reset(this.monster);
     this.levelData = level;
+    this.monster.setLevel(level);
     this.level = new LevelView(level, this.models, this.surfaces);
     this.ctx.scene.add(this.level.group);
     // Compile every shader now (incl. afterimage + whiteout) so the first flash doesn't hitch.

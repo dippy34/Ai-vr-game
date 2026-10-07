@@ -8,7 +8,7 @@
 
 import * as THREE from 'three';
 import { MONSTER } from '../../config';
-import type { MonsterState } from '../../core/types';
+import type { LevelData, MonsterState } from '../../core/types';
 import type { CatchPoser } from './Jumpscare';
 import { damp, positionNormalOnly, setV, unitCapsule } from './util';
 
@@ -60,6 +60,8 @@ export class MonsterModel implements CatchPoser {
   private listenK = 0;
   private chaseK = 0;
   private feedK = 0;
+  /** Body-language contract: 0 tall, ~0.5 ducking, 1 crawling low (smoothed). */
+  private lowK = 0;
   private alert = 0;
   private yaw = 0;
   private initialized = false;
@@ -252,7 +254,10 @@ export class MonsterModel implements CatchPoser {
     }
     this.speed += (m.speed - this.speed) * damp(6, dt);
     this.alert += (m.alert - this.alert) * damp(4, dt);
-    const listening = m.mode === 'feeding' || (m.mode === 'investigate' && m.speed < 0.35);
+    const act = m.act;
+    const listening = m.mode === 'feeding' || act === 'listen' || act === 'sniff' || act === 'lurk' || (m.mode === 'investigate' && m.speed < 0.35);
+    const low = m.posture === 'crawl' ? 1 : m.posture === 'duck' || act === 'lurk' || act === 'sniff' ? 0.5 : 0;
+    this.lowK += (low - this.lowK) * damp(3, dt);
     this.listenK += ((listening ? 1 : 0) - this.listenK) * damp(2.5, dt);
     this.chaseK += ((m.mode === 'chase' ? 1 : 0) - this.chaseK) * damp(3, dt);
     this.feedK += ((m.mode === 'feeding' ? 1 : 0) - this.feedK) * damp(2, dt);
@@ -317,11 +322,11 @@ export class MonsterModel implements CatchPoser {
     J.hipR.rotation.z = -0.03;
 
     // Body: bob, sway, hunch (more when chasing / feeding).
-    const crouch = fkc * 0.36;
+    const crouch = fkc * 0.36 + this.lowK * 0.32;
     J.hips.position.y = this.hipHeight - amp * 0.045 * sinP * sinP - crouch + 0.006 * breathe;
     J.hips.rotation.y = sinP * 0.12 * amp;
     J.hips.rotation.z = cosP * 0.05 * amp;
-    J.spine.rotation.x = -0.22 - 0.32 * ck - 0.55 * fkc + tw.sp;
+    J.spine.rotation.x = -0.22 - 0.32 * ck - 0.55 * fkc - 0.5 * this.lowK + tw.sp;
     J.spine.rotation.y = -sinP * 0.1 * amp;
     J.chest.rotation.x = -0.16 - 0.12 * ck + 0.015 * breathe;
     J.neck.rotation.x = -0.62 - 0.2 * ck + 0.2 * fkc;
@@ -394,6 +399,11 @@ export class MonsterModel implements CatchPoser {
       if (inflate !== 1) _m.multiply(_m2);
       out.push(positionNormalOnly(base.clone()).applyMatrix4(_m));
     }
+  }
+
+  /** The fallback body doesn't read the level (SkinnedMonster's procedural body does). */
+  setLevel(level: LevelData | null): void {
+    void level;
   }
 
   dispose(): void {
