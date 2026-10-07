@@ -19,12 +19,12 @@ const SKIN = {
   /** Warm subsurface colour (what bleeds through thin skin). */
   scatter: new THREE.Color(1.0, 0.36, 0.26),
   /** Wrap amount (0 = Lambert) and translucency strength. */
-  wrap: 0.55,
+  wrap: 0.35,
   translucency: 2.2,
-  clearcoat: 0.7,
-  clearcoatRoughness: 0.1,
+  clearcoat: 0.55,
+  clearcoatRoughness: 0.08,
   /** Fine wet film / fuzz: edge brightening under frontal light (the flash). */
-  sheen: 0.18,
+  sheen: 0.06,
   sheenColor: new THREE.Color(1.0, 0.8, 0.76),
   sheenRoughness: 0.45,
   /** Albedo tint: sallow, bloodless. */
