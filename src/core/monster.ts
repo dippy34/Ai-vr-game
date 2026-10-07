@@ -38,6 +38,7 @@ import {
   nearestCell,
   planRoute,
   regionAt,
+  segmentClearFor,
   surfaceTop,
   underLintel,
   type ClassCosts,
@@ -191,6 +192,10 @@ export class MonsterBrain {
   private earshotAt = 0;
   private earshotPos: Vec3 = v3(1e9, 0, 1e9);
 
+  /** The room with the fuse box (players must go there) and the one by the exit door. */
+  private readonly objectiveRegion: number;
+  private readonly exitRegion: number;
+
   // Escalation.
   private readonly roundStart: number;
   private frenzy = false;
@@ -201,6 +206,14 @@ export class MonsterBrain {
     this.lastPos = copy3(host.state.monster.position);
     this.stuckRef = copy3(host.state.monster.position);
     this.heardAt = new Float64Array(this.g.listen.n).fill(this.roundStart - BRAIN_TUNING.earshotStale);
+    const g = this.g;
+    const roomNear = (p: Vec3, sight: boolean): number => {
+      const c = nearestCell(g, p.x, p.z, 2.5, sight, (i) => g.region[i] >= 0);
+      return c >= 0 ? g.region[c] : -1;
+    };
+    const door = host.level.exit.door;
+    this.objectiveRegion = roomNear(host.level.fuseBox.position, true);
+    this.exitRegion = roomNear(v3((door.min.x + door.max.x) / 2, 0, (door.min.z + door.max.z) / 2), false);
   }
 
   private get m(): MonsterState {
@@ -239,10 +252,6 @@ export class MonsterBrain {
     return (1 + MONSTER.escalationHearing * this.escalation()) * (this.frenzy ? MONSTER.frenzyHearing : 1) * listening;
   }
 
-  get inFrenzy(): boolean {
-    return this.frenzy;
-  }
-
   /** What it is doing internally (tests / debugging). */
   debug(): { task: string; route: readonly RoutePoint[]; goal: Vec3 | null; stalk: boolean; frenzy: boolean } {
     return { task: this.task.kind, route: this.route, goal: this.routeGoal, stalk: this.stalk, frenzy: this.frenzy };
@@ -270,13 +279,13 @@ export class MonsterBrain {
         if (this.stalk && this.sameSource(pos, pid)) {
           // Heard the sound it is stalking again: commit.
           if (distXZ(m.position, pos) <= MONSTER.lungeRange) this.enterChase(pos, pid, out, true);
-          else this.investigateAgain(pos, pid, ratio, false);
+          else this.investigateAgain(pos, pid, false);
           this.setStim(Math.max(ratio, cur));
           return;
         }
         const idle = this.task.kind !== 'approach' && this.task.kind !== 'orient';
         if (idle || ratio >= cur) {
-          this.investigateAgain(pos, pid, ratio, ratio < MONSTER.stalkRatio && (idle || this.stalk));
+          this.investigateAgain(pos, pid, ratio < MONSTER.stalkRatio && (idle || this.stalk));
           this.setStim(ratio);
         }
         return;
@@ -424,7 +433,7 @@ export class MonsterBrain {
     return this.noisePos !== null && distXZ(pos, this.noisePos) < 2.5;
   }
 
-  enterWander(): void {
+  private enterWander(): void {
     const m = this.m;
     this.want('none', null);
     m.mode = 'wander';
@@ -472,7 +481,7 @@ export class MonsterBrain {
   }
 
   /** A new noise while already investigating: go there instead (no new alert). */
-  private investigateAgain(pos: Vec3, pid: PlayerId | null, ratio: number, stalk: boolean): void {
+  private investigateAgain(pos: Vec3, pid: PlayerId | null, stalk: boolean): void {
     const wasIdle = this.task.kind !== 'approach' && this.task.kind !== 'orient';
     this.stalk = stalk && !this.frenzy;
     this.stalkPid = pid;
@@ -488,7 +497,6 @@ export class MonsterBrain {
     this.setGoal(pos);
     this.beginStalkLeg();
     if (wasIdle) this.task = { kind: 'orient', until: this.now + (stalk ? MONSTER.stalkOrientMin : MONSTER.orientTime) };
-    void ratio;
   }
 
   private enterChase(pos: Vec3, pid: PlayerId | null, out: SimEvent[], alert: boolean): void {
@@ -620,8 +628,8 @@ export class MonsterBrain {
     if (here && cur === this.patrolRegion && this.patrolLeft > 0) {
       pts = here.patrol.filter((p) => distXZ(p, m.position) > 1.0);
     } else {
-      const objective = regionAt(g, this.host.level.fuseBox.position.x, this.host.level.fuseBox.position.z - 0.6);
-      const exitR = regionAt(g, this.host.level.exit.door.min.x + 0.6, this.host.level.exit.door.min.z - 0.8);
+      const objective = this.objectiveRegion;
+      const exitR = this.exitRegion;
       const cands = g.regions.filter((r) => r.patrol.length > 0);
       const stale = this.staleness();
       const reg = this.weightedPick(cands, (r) => {
@@ -811,7 +819,7 @@ export class MonsterBrain {
         }
       }
     }
-    return this.weightedPick(cands, (l) => (l.focus.y > 1.45 ? 2 : 1) / (1 + distXZ(l.position, m.position)));
+    return this.weightedPick(cands, (l) => (l.door ? 2 : 1) / (1 + distXZ(l.position, m.position)));
   }
 
   // =============================================================================================
@@ -968,7 +976,8 @@ export class MonsterBrain {
       if (!tp || tp.status !== 'alive') m.targetPlayer = null;
     }
     if (this.routeDirty && this.now - this.replanAt >= BRAIN_TUNING.chaseReplanInterval) {
-      this.setGoal(this.chaseGoal());
+      const goal = this.chaseGoal();
+      if (!this.retarget(goal)) this.setGoal(goal);
       this.replanAt = this.now;
       this.routeDirty = false;
     }
@@ -1011,6 +1020,21 @@ export class MonsterBrain {
     this.stuckCount = 0;
     this.m.target = v3(p.x, 0, p.z);
     this.resetStuck();
+  }
+
+  /** Move the end of the current route to a nearby new goal without re-planning, if that leg stays clear. */
+  private retarget(goal: Vec3): boolean {
+    if (!this.routeGoal || this.needPlan || this.route.length === 0) return false;
+    if (distXZ(goal, this.routeGoal) > 0.75) return false;
+    const last = this.route[this.route.length - 1];
+    const prev = this.route.length >= 2 ? this.route[this.route.length - 2] : this.m.position;
+    const to = v3(goal.x, 0, goal.z);
+    if (!segmentClearFor(this.g, last.kind, v3(prev.x, 0, prev.z), to, this.host.state.exitOpen)) return false;
+    last.x = to.x;
+    last.z = to.z;
+    this.routeGoal = to;
+    this.m.target = copy3(to);
+    return true;
   }
 
   private onTeleport(): void {
@@ -1094,8 +1118,9 @@ export class MonsterBrain {
     if (c < 0) return;
     this.route = [{ x: cellX(g, c), z: cellZ(g, c), kind: 'upright' }];
     this.needPlan = false;
+    // Walk there for a moment, then re-plan to the quarry.
     this.routeDirty = true;
-    this.replanAt = NEVER;
+    this.replanAt = this.now + 0.6;
   }
 
   private turnToward(yaw: number, dt: number): void {

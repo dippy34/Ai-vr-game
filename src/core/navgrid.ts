@@ -40,6 +40,8 @@ export interface LurkSpot {
   /** Where it listens while waiting there (the doorway, or the room). */
   focus: Vec3;
   region: number;
+  /** Beside a doorway (else in a corner). */
+  door: boolean;
 }
 
 export interface NavRegion {
@@ -331,7 +333,7 @@ function listenPoints(g: NavGrid): NavGrid['listen'] {
       if (best < 0) continue;
       const x = cellX(g, best);
       const z = cellZ(g, best);
-      const c = nearestCell(g, x, z, 1.5, true, (i) => g.region[i] >= 0);
+      const c = g.region[best] >= 0 ? best : nearestCell(g, x, z, 1.5, true, (i) => g.region[i] >= 0);
       if (c < 0) continue;
       xs.push(x);
       zs.push(z);
@@ -495,6 +497,7 @@ function buildLurks(g: NavGrid): void {
           position: { x: cellX(g, best), y: 0, z: cellZ(g, best) },
           focus: { x: d.center.x, y: 1.5, z: d.center.z },
           region: r,
+          door: true,
         });
       }
     }
@@ -517,6 +520,7 @@ function buildLurks(g: NavGrid): void {
         position: { x: cellX(g, i), y: 0, z: cellZ(g, i) },
         focus: { x: reg.center.x, y: 1.4, z: reg.center.z },
         region: r,
+        door: false,
       });
     }
   });

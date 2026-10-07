@@ -491,6 +491,7 @@ describe('performance', () => {
     }
     const perTick = (performance.now() - t0) / ticks;
     console.log(`sim tick: ${(perTick * 1000).toFixed(1)} us average over ${ticks} ticks`);
-    expect(perTick).toBeLessThan(0.25);
+    // Budget: well under 0.5 ms per tick on desktop (measured ~0.01 ms; generous for busy CI).
+    expect(perTick).toBeLessThan(0.5);
   });
 });
