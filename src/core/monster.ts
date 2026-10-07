@@ -426,6 +426,7 @@ export class MonsterBrain {
 
   enterWander(): void {
     const m = this.m;
+    this.want('none', null);
     m.mode = 'wander';
     m.target = null;
     m.targetPlayer = null;
@@ -451,6 +452,7 @@ export class MonsterBrain {
     afterChase: boolean,
   ): void {
     const m = this.m;
+    this.want('listen', pos);
     m.mode = 'investigate';
     m.targetPlayer = null;
     this.afterChase = afterChase;
@@ -491,6 +493,7 @@ export class MonsterBrain {
 
   private enterChase(pos: Vec3, pid: PlayerId | null, out: SimEvent[], alert: boolean): void {
     const m = this.m;
+    this.want('none', pos);
     m.mode = 'chase';
     m.targetPlayer = pid;
     this.stalk = false;
@@ -815,10 +818,16 @@ export class MonsterBrain {
   // Acts: search (feel around), sniff, sweep (telegraphed swipe that can catch)
   // =============================================================================================
 
-  private startAct(act: ProbeAct, spot: Vec3): void {
+  private startAct(act: ProbeAct, at: Vec3): void {
+    const m = this.m;
     this.route = [];
     this.needPlan = false;
-    this.m.target = null;
+    m.target = null;
+    // Standing on the spot already (e.g. where it last heard its quarry): swipe straight ahead.
+    const spot =
+      act === 'sweep' && distXZ(at, m.position) < 0.6
+        ? v3(m.position.x - Math.sin(m.yaw), at.y, m.position.z - Math.cos(m.yaw))
+        : at;
     const p = this.patience();
     const dur =
       act === 'sweep'
@@ -1039,7 +1048,10 @@ export class MonsterBrain {
     let s = base * this.speedMul();
     if (kind === 'climb' || m.position.y > 0.02) s = Math.min(s * MONSTER.climbSpeedMul, MONSTER.climbSpeedMax);
     else if (kind === 'crawl' || this.crawling) s = Math.min(s * MONSTER.crawlSpeedMul, MONSTER.crawlSpeedMax);
-    else if (m.posture === 'duck') s *= MONSTER.duckSpeedMul;
+    // Ducks a step early (lookahead) so a whole step that ends under the lintel is slowed.
+    else if (underLintel(this.g, m.position.x, m.position.z, MONSTER.radius + 0.15, m.position.y + MONSTER.standHeight)) {
+      s *= MONSTER.duckSpeedMul;
+    }
     return s;
   }
 
