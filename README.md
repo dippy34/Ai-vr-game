@@ -13,6 +13,10 @@ Every flash clicks. Film runs out. Find the fuses, open the front door, get out.
 See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design and
 [`docs/PORTING.md`](docs/PORTING.md) for the path from web to a store app.
 
+**Picking the project up?** Read [`docs/HANDOFF.md`](docs/HANDOFF.md) first: project state, the code
+map, known traps and the next steps. The future story, chapters, tools and difficulty are in
+[`docs/STORY.md`](docs/STORY.md), and the concept art is in [`docs/concept/`](docs/concept/).
+
 ## Play it
 
 | | VR (Quest) | Desktop |

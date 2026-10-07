@@ -3,6 +3,11 @@
 > A co-op VR horror game. The monster is blind, but it hears **everything**, including your real voice.
 > You *can* talk. You just probably shouldn't. Your hands do the talking.
 
+> **Direction update (Oct 2026):** this doc describes the game as it plays today (one house). The
+> agreed future, a chapter-based story game with big maps and chases, the **Crank Light**
+> replacing the camera flash (and no more afterimages), the **Echo** gadget and near-impossible
+> difficulty, is in [`STORY.md`](STORY.md). The build plan is in [`HANDOFF.md`](HANDOFF.md).
+
 ## Pitch
 
 1–4 players wake up in a dark, abandoned house. Something tall and eyeless lives here. It can't see
@@ -131,6 +136,8 @@ fists, open palm "stop", thumbs up/down, counting 1–5, "come here" waves and s
 - Small, dark scope: one house, a few rooms, darkness hides simple art.
 
 ## Roadmap after this prototype
+
+> Superseded by [`STORY.md`](STORY.md) and [`HANDOFF.md`](HANDOFF.md) §6. Kept for reference.
 
 1. Playtest the core: is signing in flashes fun? Tune `src/config.ts`.
 2. **A map board, not a linear campaign.** Pick which house to enter; escaping unlocks bigger ones
