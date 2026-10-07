@@ -185,9 +185,9 @@ def shot_boss():
     cone = plain('cone', (0.015, 0.015, 0.015), 0.85, noise=0.3, scale=20.0)
     grill = metal('grill', steel=(0.14, 0.14, 0.14), amount=0.3, scale=6.0)
     spk = speaker_template(cab, cone, grill, steel, w=1.3, d=0.9, h=1.7, bracket=False)
-    C = Vector((0, 12.0, 0))
+    C = Vector((0, 8.0, 0))
     R = 15.0
-    box('floor', (60, 60, 0.2), (0, 10, -0.1), mat=floor_m)
+    box('floor', (60, 60, 0.2), (0, 8, -0.1), mat=floor_m)
     # curved wall of stacked speaker cabinets around the arena
     rows, cols = 8, 34
     for r in range(rows):
@@ -240,12 +240,12 @@ def shot_boss():
     # sparks from a blown speaker
     spark = emissive('spark', (1.0, 0.55, 0.15), 40)
     for k in range(60):
-        o = box('spark', (0.006, 0.006, random.uniform(0.05, 0.18)), (random.uniform(-9, -6.5), random.uniform(8, 10), random.uniform(3, 6)),
+        o = box('spark', (0.006, 0.006, random.uniform(0.05, 0.18)), (random.uniform(-9, -6.5), random.uniform(4, 6), random.uniform(3, 6)),
                 (random.uniform(-1, 1), random.uniform(-1, 1), 0), mat=spark)
-    point('sparkl', (-8, 9, 5), 300, color=(1.0, 0.55, 0.2), radius=0.3)
-    box('haze', (40, 40, 20), (0, 10, 10), mat=fog('haze', 0.012, (0.85, 0.85, 0.9), 0.4, 0.15, 0.6))
+    point('sparkl', (-8, 5, 5), 300, color=(1.0, 0.55, 0.2), radius=0.3)
+    box('haze', (40, 40, 20), (0, 8, 10), mat=fog('haze', 0.012, (0.85, 0.85, 0.9), 0.4, 0.15, 0.6))
     scatter_dust('dust', (0, 6, 4), (20, 14, 7), 2500, emissive('dustm', (0.9, 0.88, 0.85), 1.0), r=0.008)
-    cam = camera((0.9, -6.4, 1.35), (0.0, 12.0, 3.6), lens=20, roll_deg=-4)
+    cam = camera((0.9, -5.2, 1.35), (0.0, 8.0, 3.4), lens=20, roll_deg=-4)
     render('ch4_quiet_room_boss')
 
 

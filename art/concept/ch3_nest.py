@@ -5,7 +5,7 @@ from mlib import *
 from mlib import _mat
 
 
-def water_mat(name='water', murk=(0.30, 0.33, 0.26), density=0.9, rough=0.035):
+def water_mat(name='water', murk=(0.55, 0.6, 0.5), density=0.35, rough=0.035):
     m, nt, n, l, p = _mat(name)
     p.inputs['Base Color'].default_value = (1, 1, 1, 1)
     p.inputs['Transmission Weight'].default_value = 1.0
@@ -104,7 +104,7 @@ def shot_tunnel():
 
     wm = water_mat()
     water_block('water', -R + 0.01, R - 0.01, -6, LEN, -1.0, WATER, wm, res=0.06, disp=wake)
-    mon, arm, body = monster('Run', 10, loc=(0.15, HY + 2.15, 0.78), rot=(math.radians(-84), 0, math.radians(180)))
+    mon, arm, body = monster('Run', 10, loc=(0.15, HY + 2.15, 0.9), rot=(math.radians(-84), 0, math.radians(180)))
     # floating junk
     wood = plain('wood', (0.16, 0.11, 0.07), 0.8, noise=0.4)
     for (x, y, yaw, L) in ((-1.4, 3.5, 0.4, 1.4), (1.5, 11.0, -0.9, 1.1), (-0.8, 15.0, 1.3, 0.9), (1.2, 22, 0.2, 1.6)):
@@ -113,17 +113,17 @@ def shot_tunnel():
     box('cassette', (0.1, 0.064, 0.012), (-0.6, 2.2, WATER + 0.003), (0, 0, 0.6), mat=tape)
     # lights: far caged work lamp, red emergency lamp, flashlight
     warm = emissive('worklamp', (1.0, 0.72, 0.4), 80.0)
-    for (y, pw) in ((34.0, 260), (58.0, 140)):
+    for (y, pw) in ((17.0, 160), (34.0, 260), (58.0, 140)):
         sphere('bulb', 0.07, (0.6, y, 4.35), mat=warm, sub=2)
         torus('cage', 0.11, 0.01, (0.6, y, 4.35), (0, 0, 0), mat=rust, seg=16, rseg=4)
         curve_path('cord', [(0.6, y, 4.42), (0.6, y, 4.75)], 0.008, cab)
         point('work', (0.6, y, 4.3), pw, color=(1.0, 0.7, 0.4), radius=0.06)
     sphere('red', 0.06, (R - 0.12, 14.0, 3.2), mat=emissive('redb', (1, 0.08, 0.03), 60), sub=2)
     point('redl', (R - 0.25, 14.0, 3.2), 18, color=(1.0, 0.1, 0.04))
-    mist = fog('mist', 0.007, (0.82, 0.86, 0.88), 0.4, 0.6, 0.7, falloff=0.5)
+    mist = fog('mist', 0.003, (0.82, 0.86, 0.88), 0.4, 0.6, 0.7, falloff=0.5)
     box('mistbox', (2 * R - 0.05, LEN + 6, 3.4), (0, LEN / 2 - 3, WATER + 1.7), mat=mist)
     cam = camera((0.45, -0.6, 1.62), (0.0, 9.0, 0.95), lens=22, roll_deg=2.0, dof=7.0, fstop=5.6)
-    flashlight(cam, (0.1, 7.5, 1.0), power=240, angle=26, blend=0.6)
+    flashlight(cam, (0.1, 7.5, 1.0), power=650, angle=24, blend=0.6)
     render('ch3_nest_tunnel')
 
 
@@ -247,8 +247,8 @@ def shot_den():
     mats = [coat, coat, insul, blanket, blanket, coat]
     for k in range(70):
         a = random.uniform(0, 2 * math.pi)
-        rr2 = random.uniform(1.1, 2.6)
-        p = C + Vector((math.cos(a) * rr2 * 1.15, math.sin(a) * rr2, random.uniform(0.25, 1.0)))
+        rr2 = random.uniform(1.8, 2.8)
+        p = C + Vector((math.cos(a) * rr2 * 1.15, math.sin(a) * rr2, random.uniform(0.2, 0.7)))
         rag('rag', (random.uniform(0.5, 1.3), random.uniform(0.4, 1.0)), p,
             (random.uniform(-0.9, 0.9), random.uniform(-0.9, 0.9), random.uniform(0, 6.3)), random.choice(mats), k)
     # sleeping monster curled up in the middle
@@ -287,8 +287,8 @@ def shot_den():
         a = random.uniform(0, 2 * math.pi)
         recorder(C + Vector((math.cos(a) * 1.9 * 1.1, math.sin(a) * 1.9, 0.95)), random.uniform(0, 6.3))
     # kids' backpacks and toys, faded
-    for k, colr in enumerate(((0.4, 0.06, 0.05), (0.06, 0.12, 0.35), (0.42, 0.33, 0.05), (0.35, 0.12, 0.25), (0.1, 0.25, 0.12))):
-        a = 0.9 + k * 1.15
+    for k, colr in enumerate(((0.4, 0.06, 0.05), (0.06, 0.12, 0.35), (0.42, 0.33, 0.05), (0.2, 0.08, 0.14), (0.1, 0.25, 0.12))):
+        a = 0.3 + k * 0.75
         p = C + Vector((math.cos(a) * 3.2 * 1.1, math.sin(a) * 3.2, 0.2))
         bag = fabric(f'bag{k}', [colr, tuple(c * 0.7 for c in colr)], 8.0, rough=0.8)
         b = box('pack', (0.32, 0.18, 0.4), p, (random.uniform(-1.2, 1.2), 0.2, random.uniform(0, 6)), mat=bag, bevel=0.06)

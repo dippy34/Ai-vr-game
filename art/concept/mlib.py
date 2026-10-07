@@ -430,6 +430,8 @@ def point(name, loc, power, color=(1, 1, 1), radius=0.05):
     ld.shadow_soft_size = radius
     o = bpy.data.objects.new(name, ld)
     o.location = loc
+    o.visible_camera = False
+    o.visible_glossy = False
     return link(o)
 
 
