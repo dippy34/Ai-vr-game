@@ -135,7 +135,44 @@ export interface MonsterState {
   speed: number;
   /** 0..1 agitation, rises with what it hears, decays over time. Drives growls/heartbeat. */
   alert: number;
+  // ---- body language (set by the sim, drives the procedural animation and its sounds) ----
+  /** How it is moving its body right now. */
+  gait: MonsterGait;
+  /** Body height for the space it is in (it is taller than the doorways). */
+  posture: MonsterPosture;
+  /** What it is doing besides moving (a listen, a sniff, an arm sweep...). */
+  act: MonsterAct;
+  /** Sim time `act` started (animation phase; also restarts when the same act repeats). */
+  actStart: number;
+  /** Where its attention (head) is aimed: the sound it is listening for, the spot it searches. */
+  focus: Vec3 | null;
 }
+
+/**
+ * still  standing or crouched in place
+ * creep  slow, deliberate, near-silent steps (stalking a faint sound)
+ * walk   hunched, roaming pace
+ * run    charging (all fours allowed)
+ */
+export type MonsterGait = 'still' | 'creep' | 'walk' | 'run';
+
+/**
+ * tall   full height, open rooms
+ * duck   head and back bent low under something overhead (door lintels are 2.4 m, it is ~2.6 m)
+ * crawl  on all fours: squeezing through a doorway, under or over furniture
+ */
+export type MonsterPosture = 'tall' | 'duck' | 'crawl';
+
+/**
+ * none    just moving
+ * listen  frozen, head turned toward `focus`
+ * sniff   head low, breathing in toward `focus`
+ * search  feeling around the area near `focus`
+ * sweep   a long-armed swipe across `focus` (it can catch a silent player this way)
+ * lurk    waiting motionless (e.g. beside a doorway)
+ * climb   getting onto / over low furniture (position.y follows the surface)
+ */
+export type MonsterAct = 'none' | 'listen' | 'sniff' | 'search' | 'sweep' | 'lurk' | 'climb';
 
 export type GamePhase = 'lobby' | 'playing' | 'won' | 'lost';
 

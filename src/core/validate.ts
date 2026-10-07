@@ -15,7 +15,10 @@ import type {
   HandPose,
   HeldRef,
   ItemState,
+  MonsterAct,
+  MonsterGait,
   MonsterMode,
+  MonsterPosture,
   PlayerPose,
   PlayerState,
   PlayerStatus,
@@ -50,6 +53,9 @@ export interface Bounds {
 const PHASES: readonly GamePhase[] = ['lobby', 'playing', 'won', 'lost'];
 const MODES: readonly MonsterMode[] = ['wander', 'investigate', 'chase', 'feeding'];
 const STATUSES: readonly PlayerStatus[] = ['alive', 'caught', 'escaped'];
+const GAITS: readonly MonsterGait[] = ['still', 'creep', 'walk', 'run'];
+const POSTURES: readonly MonsterPosture[] = ['tall', 'duck', 'crawl'];
+const ACTS: readonly MonsterAct[] = ['none', 'listen', 'sniff', 'search', 'sweep', 'lurk', 'climb'];
 const HANDS: readonly Handedness[] = ['left', 'right'];
 const REST_CURL = 0.3;
 
@@ -240,6 +246,7 @@ export function sanitizeWorldState(x: unknown, bounds: Bounds): WorldState | nul
   const cPos = readVec3(own(c, 'position'));
   if (!mPos || !mode || !cPos) return null;
   const target = readVec3(own(m, 'target'));
+  const focus = readVec3(own(m, 'focus'));
 
   const players: Record<string, PlayerState> = {};
   const rawPlayers = own(x, 'players');
@@ -274,6 +281,11 @@ export function sanitizeWorldState(x: unknown, bounds: Bounds): WorldState | nul
       targetPlayer: readStr(own(m, 'targetPlayer')),
       speed: clampN(readNum(own(m, 'speed')) ?? 0, 0, 20),
       alert: clampN(readNum(own(m, 'alert')) ?? 0, 0, 1),
+      gait: oneOf(own(m, 'gait'), GAITS) ?? 'still',
+      posture: oneOf(own(m, 'posture'), POSTURES) ?? 'tall',
+      act: oneOf(own(m, 'act'), ACTS) ?? 'none',
+      actStart: readNum(own(m, 'actStart')) ?? 0,
+      focus: focus ? clampToBounds(focus, bounds, LIMITS.worldMargin) : null,
     },
     items,
     camera: {

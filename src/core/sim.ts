@@ -217,6 +217,11 @@ export class GameSim {
         targetPlayer: null,
         speed: 0,
         alert: 0,
+        gait: 'still',
+        posture: 'tall',
+        act: 'none',
+        actStart: 0,
+        focus: null,
       },
       items: [],
       camera: {
@@ -528,6 +533,11 @@ export class GameSim {
       targetPlayer: null,
       speed: 0,
       alert: 0,
+      gait: 'still',
+      posture: 'tall',
+      act: 'none',
+      actStart: 0,
+      focus: null,
     };
     this.brain = this.freshBrain();
   }

@@ -28,7 +28,7 @@ function world(): WorldState {
     phase: 'playing',
     levelSeed: 1,
     players: { me: player('me', 0, 0), a: player('a', 3, 0), b: player('b', -4, 2) },
-    monster: { position: { x: 10, y: 0, z: 0 }, yaw: 0, mode: 'wander', target: null, targetPlayer: null, speed: 1, alert: 0 },
+    monster: { position: { x: 10, y: 0, z: 0 }, yaw: 0, mode: 'wander', target: null, targetPlayer: null, speed: 1, alert: 0, gait: 'walk', posture: 'tall', act: 'none', actStart: 0, focus: null },
     items: [],
     camera: { holder: null, hand: null, position: { x: 0, y: 1, z: 0 }, yaw: 0, film: 6, lastFlashTime: -1e9 },
     fusesInserted: 0,
