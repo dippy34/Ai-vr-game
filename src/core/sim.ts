@@ -6,7 +6,7 @@ import type {
   ItemKind,
   ItemState,
   LevelData,
-  NavNode,
+  MonsterState,
   NoiseEvent,
   PlayerAction,
   PlayerId,
@@ -18,14 +18,12 @@ import type {
 } from './types';
 import {
   add3,
-  angleDelta,
   clamp,
   copy3,
   copyQuat,
   dist3,
   distXZ,
   isFiniteVec3,
-  lerp,
   lerp3,
   makeRng,
   mixSeed,
@@ -35,21 +33,17 @@ import {
   v3,
   wrapAngle,
   yawFromQuat,
-  yawTowards,
 } from './math';
 import {
-  moveCircle,
   pointInBox,
-  pushOut,
   pushOutOf,
-  segmentClear,
   supportHeight,
   SUPPORT_TOLERANCE,
   wallBoxes,
   wallsBetween,
   type CollisionOptions,
 } from './physics';
-import { findPath, nearestNavNode } from './nav';
+import { BRAIN_TUNING, MonsterBrain, type MonsterHost } from './monster';
 import { clampToward, hasOwn, LIMITS, sanitizePose } from './validate';
 
 export interface SimOptions {
@@ -64,31 +58,20 @@ export interface SimOptions {
   randomMonsterSpawn?: boolean;
 }
 
-/** Sim-private tunables (shared "feel" numbers live in config.ts). */
+/** Sim-private tunables (shared "feel" numbers live in config.ts; the monster's own in monster.ts). */
 export const SIM_TUNING = {
-  /** Monster body radius on the XZ plane. */
-  monsterRadius: 0.35,
-  /** Clearance used for the monster's own straight-line checks (slightly under its radius). */
-  pathClearance: 0.33,
-  /** Distance at which a waypoint counts as reached. */
-  waypointRadius: 0.3,
+  /** Monster body radius on the XZ plane (standing; MONSTER.crawlRadius on all fours). */
+  monsterRadius: MONSTER.radius,
   /** A held fuse this close (m, 3D) to the fuse box goes in. */
   fuseInsertDistance: 0.6,
   /** Alert decays from 1 to 0 over this many seconds. */
   alertDecaySeconds: 8,
   /** How fast the "priority" of the current stimulus fades (s), so newer noises can override. */
-  stimulusDecaySeconds: 4,
+  stimulusDecaySeconds: BRAIN_TUNING.stimulusDecaySeconds,
   /** Hearing the chased player again after this long a silence re-emits a 'monsterAlert'. */
-  chaseRegainGap: 1.5,
+  chaseRegainGap: BRAIN_TUNING.chaseRegainGap,
   /** Min seconds between chase re-plans. */
-  chaseReplanInterval: 0.25,
-  /** Chance to pause at each wander node, and pause duration range. */
-  wanderPauseChance: 0.22,
-  wanderPauseMin: 1.2,
-  wanderPauseMax: 3.5,
-  /** If the monster moves less than stuckDistance in stuckWindow seconds while walking, it re-plans. */
-  stuckWindow: 1.25,
-  stuckDistance: 0.12,
+  chaseReplanInterval: BRAIN_TUNING.chaseReplanInterval,
   /** The sim advances in ticks of at most this many seconds. */
   maxTick: 1 / 30,
   /** Loudness of a dry trigger click. */
@@ -102,19 +85,6 @@ export const SIM_TUNING = {
   exitDoorAlwaysAlerts: true,
   /** Random monster spawns are at least this far (m, XZ) from every player spawn. */
   monsterSpawnMinDistance: 10,
-  /**
-   * Noise memory: every noise the monster hears warms up the nav nodes around it (gaussian of
-   * this radius, m), the warmth halves every `noiseMemoryHalfLife` s, and while wandering the
-   * monster favors neighbours closer to warm spots (`noiseMemoryPull`). Teams that keep making
-   * noise in one room find it lurking there.
-   */
-  noiseMemoryRadius: 2.5,
-  noiseMemoryHalfLife: 90,
-  noiseMemoryPerNoise: 0.15,
-  noiseMemoryCap: 10,
-  noiseMemoryPull: 0.8,
-  /** Distance falloff (m) of a warm spot's pull on a wander candidate. */
-  noiseMemoryReach: 4,
   /**
    * Remote clients' heads may move at most this fast (m/s, XZ) on the host, with a burst budget
    * of `moveBurst` m for bunched-up packets. Sprinting is 3.3 m/s, so legit play never hits it;
@@ -146,37 +116,24 @@ export function makeSpawnPose(feet: Vec3, yaw: number): PlayerPose {
 }
 
 const flat = (p: Vec3): Vec3 => ({ x: p.x, y: 0, z: p.z });
+const freshMonster = (position: Vec3, yaw: number): MonsterState => ({
+  position,
+  yaw,
+  mode: 'wander',
+  target: null,
+  targetPlayer: null,
+  speed: 0,
+  alert: 0,
+  gait: 'still',
+  posture: 'tall',
+  act: 'none',
+  actStart: 0,
+  focus: null,
+});
 /** Player by id; ids come off the network, so 'constructor' & co. must not hit Object.prototype. */
 const playerOf = (s: WorldState, id: PlayerId | null): PlayerState | undefined =>
   id !== null && hasOwn(s.players, id) ? s.players[id] : undefined;
 const isHand = (h: unknown): h is Handedness => h === 'left' || h === 'right';
-
-/** Monster AI memory that is not part of the networked state. */
-interface Brain {
-  /** Remaining waypoints (XZ) for investigate / chase. */
-  route: Vec3[];
-  /** Final destination of investigate / chase. */
-  goal: Vec3 | null;
-  wanderNode: number;
-  prevNode: number;
-  pause: number;
-  listening: boolean;
-  listen: number;
-  feed: number;
-  chasePos: Vec3 | null;
-  chaseHeardAt: number;
-  replanAt: number;
-  routeDirty: boolean;
-  stimScore: number;
-  stimTime: number;
-  stuckT: number;
-  stuckRef: Vec3;
-  stuckCount: number;
-  /** Last time each nav node (by index) was visited while wandering. */
-  visited: number[];
-  /** Noise memory per nav node (by index): how much it has heard around there lately. */
-  heat: number[];
-}
 
 /**
  * Authoritative game simulation. Runs only on the host (or locally in solo play).
@@ -187,42 +144,36 @@ export class GameSim {
   readonly state: WorldState;
 
   private readonly opts: SimOptions;
-  private readonly nodeIndex: Record<number, number> = {};
   private round = 0;
   private rng: () => number;
   private nextItemId = 1;
   private joinOrder: PlayerId[] = [];
   private spawnOf: Record<PlayerId, number> = {};
   private pending: SimEvent[] = [];
-  private brain: Brain;
+  private ai: MonsterBrain;
+  private readonly host: MonsterHost;
   /** Per remote player: how far (m) their head may still move right now, and when that was. */
   private moveBudget: Record<PlayerId, { left: number; time: number }> = {};
 
   constructor(level: LevelData, opts: SimOptions = {}) {
     this.level = level;
     this.opts = { ...opts };
-    level.nav.forEach((n, i) => (this.nodeIndex[n.id] = i));
     this.rng = makeRng(mixSeed(level.seed, 0));
-    this.brain = this.freshBrain();
+    const host = {
+      level,
+      state: null as unknown as WorldState,
+      rng: () => this.rng(),
+      coll: () => this.coll(),
+      catchPlayer: (p: PlayerState, out: SimEvent[]) => this.catchPlayer(p, out),
+      noiseMemory: opts.noiseMemory !== false,
+    };
+    this.host = host;
     this.state = {
       time: 0,
       phase: 'lobby',
       levelSeed: level.seed,
       players: {},
-      monster: {
-        position: flat(level.monsterSpawn),
-        yaw: 0,
-        mode: 'wander',
-        target: null,
-        targetPlayer: null,
-        speed: 0,
-        alert: 0,
-        gait: 'still',
-        posture: 'tall',
-        act: 'none',
-        actStart: 0,
-        focus: null,
-      },
+      monster: freshMonster(flat(level.monsterSpawn), 0),
       items: [],
       camera: {
         holder: null,
@@ -237,6 +188,8 @@ export class GameSim {
       exitOpen: false,
       lastHeard: null,
     };
+    host.state = this.state;
+    this.ai = new MonsterBrain(host);
     this.resetWorld();
   }
 
@@ -410,34 +363,6 @@ export class GameSim {
     return { exitOpen: this.state.exitOpen };
   }
 
-  private node(id: number): NavNode {
-    return this.level.nav[this.nodeIndex[id]];
-  }
-
-  private freshBrain(): Brain {
-    return {
-      route: [],
-      goal: null,
-      wanderNode: -1,
-      prevNode: -1,
-      pause: 0,
-      listening: false,
-      listen: 0,
-      feed: 0,
-      chasePos: null,
-      chaseHeardAt: NEVER,
-      replanAt: NEVER,
-      routeDirty: false,
-      stimScore: 0,
-      stimTime: NEVER,
-      stuckT: 0,
-      stuckRef: flat(this.level.monsterSpawn),
-      stuckCount: 0,
-      visited: this.level.nav.map(() => NEVER),
-      heat: this.level.nav.map(() => 0),
-    };
-  }
-
   private resetMoveBudget(id: PlayerId): void {
     this.moveBudget[id] = { left: SIM_TUNING.moveBurst, time: this.state.time };
   }
@@ -525,21 +450,8 @@ export class GameSim {
     };
 
     const yaw = this.rng() * Math.PI * 2 - Math.PI;
-    s.monster = {
-      position: flat(this.pickMonsterSpawn()),
-      yaw,
-      mode: 'wander',
-      target: null,
-      targetPlayer: null,
-      speed: 0,
-      alert: 0,
-      gait: 'still',
-      posture: 'tall',
-      act: 'none',
-      actStart: 0,
-      focus: null,
-    };
-    this.brain = this.freshBrain();
+    s.monster = freshMonster(flat(this.pickMonsterSpawn()), yaw);
+    this.ai = new MonsterBrain(this.host);
   }
 
   // ---- held things ----------------------------------------------------------------------------
@@ -718,9 +630,14 @@ export class GameSim {
     const head = v3(m.position.x, m.position.y + MONSTER.height, m.position.z);
     const walls = wallsBetween(this.level, pos, head, this.coll());
     const eff = dist3(pos, head) * (1 + HEARING.wallOcclusion * walls);
-    const range = loudness * HEARING.rangeMeters;
+    const range = loudness * HEARING.rangeMeters * this.ai.hearingMul();
     if (eff > range) return 0;
     return range / Math.max(eff, 1e-3);
+  }
+
+  /** What the monster is up to internally (tests / debugging; not networked). */
+  monsterDebug(): ReturnType<MonsterBrain['debug']> & { escalation: number; speedMul: number } {
+    return { ...this.ai.debug(), escalation: this.ai.escalation(), speedMul: this.ai.speedMul() };
   }
 
   private hear(noise: NoiseEvent, out: SimEvent[]): void {
@@ -737,410 +654,10 @@ export class GameSim {
     if (m.mode === 'feeding') return;
     const ratio = this.hearingRatio(noise.position, loudness);
     if (ratio <= 0) return;
-    this.remember(noise.position, ratio);
     s.lastHeard = { position: copy3(noise.position), loudness, time: s.time };
     const t = clamp((ratio - 1) / (HEARING.chaseRatio - 1), 0, 1);
     m.alert = Math.max(m.alert, 0.25 + 0.75 * t);
-    this.react(noise.position, pid, ratio, out);
-  }
-
-  /** Warm up the nav nodes around a heard noise (see SIM_TUNING.noiseMemory*). */
-  private remember(pos: Vec3, ratio: number): void {
-    if (this.opts.noiseMemory === false) return;
-    const T = SIM_TUNING;
-    const amount = T.noiseMemoryPerNoise * Math.min(3, ratio);
-    const r2 = 2 * T.noiseMemoryRadius * T.noiseMemoryRadius;
-    const heat = this.brain.heat;
-    this.level.nav.forEach((n, i) => {
-      const d = distXZ(pos, n.position);
-      if (d > T.noiseMemoryRadius * 3) return;
-      heat[i] = Math.min(T.noiseMemoryCap, heat[i] + amount * Math.exp(-(d * d) / r2));
-    });
-  }
-
-  /** How strongly the remembered noise pulls toward nav node `id`. */
-  private memoryPull(id: number): number {
-    const heat = this.brain.heat;
-    const here = this.level.nav[this.nodeIndex[id]].position;
-    let p = 0;
-    this.level.nav.forEach((n, i) => {
-      if (heat[i] > 0.01) p += heat[i] * Math.exp(-distXZ(here, n.position) / SIM_TUNING.noiseMemoryReach);
-    });
-    return p;
-  }
-
-  private currentStim(): number {
-    const b = this.brain;
-    const age = this.state.time - b.stimTime;
-    return b.stimScore * Math.max(0, 1 - age / SIM_TUNING.stimulusDecaySeconds);
-  }
-
-  private setStim(score: number): void {
-    this.brain.stimScore = score;
-    this.brain.stimTime = this.state.time;
-  }
-
-  /** Decide what a heard noise does to the monster (priority: chase > investigate > wander). */
-  private react(pos: Vec3, pid: PlayerId | null, ratio: number, out: SimEvent[]): void {
-    const m = this.state.monster;
-    const b = this.brain;
-    const chaseLevel = ratio >= HEARING.chaseRatio;
-    const cur = this.currentStim();
-    switch (m.mode) {
-      case 'feeding':
-        return;
-      case 'wander':
-        if (chaseLevel) this.enterChase(pos, pid, out, true);
-        else this.enterInvestigate(pos, out, true);
-        this.setStim(ratio);
-        return;
-      case 'investigate':
-        if (chaseLevel) {
-          this.enterChase(pos, pid, out, true);
-          this.setStim(ratio);
-        } else if (b.listening || ratio >= cur) {
-          this.retargetInvestigate(pos);
-          this.setStim(ratio);
-        }
-        return;
-      case 'chase':
-        if (pid === m.targetPlayer && (pid !== null || chaseLevel)) {
-          // The chased player (or the same unattributed source) keeps making noise: refresh.
-          const gap = this.state.time - b.chaseHeardAt;
-          b.chasePos = flat(pos);
-          b.chaseHeardAt = this.state.time;
-          b.routeDirty = true;
-          this.setStim(Math.max(cur, ratio));
-          if (gap > SIM_TUNING.chaseRegainGap) {
-            out.push({ type: 'monsterAlert', mode: 'chase', position: copy3(m.position) });
-          }
-        } else if (chaseLevel && ratio >= cur) {
-          this.enterChase(pos, pid, out, true);
-          this.setStim(ratio);
-        }
-        return;
-    }
-  }
-
-  // ---- monster modes --------------------------------------------------------------------------
-
-  private resetStuck(): void {
-    this.brain.stuckT = 0;
-    this.brain.stuckRef = copy3(this.state.monster.position);
-  }
-
-  private isStuck(dt: number): boolean {
-    const b = this.brain;
-    b.stuckT += dt;
-    if (b.stuckT < SIM_TUNING.stuckWindow) return false;
-    const moved = distXZ(this.state.monster.position, b.stuckRef);
-    this.resetStuck();
-    return moved < SIM_TUNING.stuckDistance;
-  }
-
-  private enterWander(): void {
-    const m = this.state.monster;
-    const b = this.brain;
-    m.mode = 'wander';
-    m.target = null;
-    m.targetPlayer = null;
-    b.route = [];
-    b.goal = null;
-    b.wanderNode = -1;
-    b.prevNode = -1;
-    b.pause = 0;
-    b.listening = false;
-    b.chasePos = null;
-    b.stimScore = 0;
-    this.resetStuck();
-  }
-
-  private enterInvestigate(pos: Vec3, out: SimEvent[], alert: boolean): void {
-    const m = this.state.monster;
-    m.mode = 'investigate';
-    m.targetPlayer = null;
-    this.retargetInvestigate(pos);
-    if (alert) out.push({ type: 'monsterAlert', mode: 'investigate', position: copy3(m.position) });
-  }
-
-  private retargetInvestigate(pos: Vec3): void {
-    const m = this.state.monster;
-    const b = this.brain;
-    const goal = this.reachable(pos);
-    if (m.mode === 'investigate' && !b.listening && b.goal && b.route.length > 0 && distXZ(goal, b.goal) < 0.5) {
-      // Same spot again (e.g. continuous talking): keep walking the current route.
-      b.goal = goal;
-      b.route[b.route.length - 1] = copy3(goal);
-      m.target = copy3(goal);
-      return;
-    }
-    b.goal = goal;
-    b.route = this.planRoute(m.position, b.goal, false);
-    b.listening = false;
-    b.listen = 0;
-    b.pause = 0;
-    b.stuckCount = 0;
-    m.target = copy3(b.goal);
-    this.resetStuck();
-  }
-
-  private enterChase(pos: Vec3, pid: PlayerId | null, out: SimEvent[], alert: boolean): void {
-    const s = this.state;
-    const m = s.monster;
-    const b = this.brain;
-    m.mode = 'chase';
-    m.targetPlayer = pid;
-    b.chasePos = flat(pos);
-    b.chaseHeardAt = s.time;
-    b.goal = this.reachable(pos);
-    b.route = this.planRoute(m.position, b.goal, false);
-    b.replanAt = s.time;
-    b.routeDirty = false;
-    b.listening = false;
-    b.pause = 0;
-    m.target = copy3(b.goal);
-    this.resetStuck();
-    if (alert) out.push({ type: 'monsterAlert', mode: 'chase', position: copy3(m.position) });
-  }
-
-  private enterFeeding(): void {
-    const m = this.state.monster;
-    const b = this.brain;
-    m.mode = 'feeding';
-    m.speed = 0;
-    m.target = null;
-    m.targetPlayer = null;
-    b.route = [];
-    b.goal = null;
-    b.chasePos = null;
-    b.listening = false;
-    b.feed = GAME.feedingTime;
-    b.stimScore = 0;
-  }
-
-  private startListening(): void {
-    const m = this.state.monster;
-    const b = this.brain;
-    b.listening = true;
-    b.listen = MONSTER.listenTime;
-    b.route = [];
-    m.speed = 0;
-    m.target = null;
-  }
-
-  /** Closest spot to `pos` (on the floor) that the monster's body can actually stand on. */
-  private reachable(pos: Vec3): Vec3 {
-    const bnd = this.level.bounds;
-    const p = v3(clamp(pos.x, bnd.min.x, bnd.max.x), 0, clamp(pos.z, bnd.min.z, bnd.max.z));
-    const c = pushOut(this.level, p, SIM_TUNING.monsterRadius + 0.03, this.coll());
-    return v3(p.x + c.x, 0, p.z + c.z);
-  }
-
-  /** Waypoints from `from` to `goal`: straight if clear, else via the nav graph (string-pulled). */
-  private planRoute(from: Vec3, goal: Vec3, forceNav: boolean): Vec3[] {
-    const L = this.level;
-    const opts = this.coll();
-    const r = SIM_TUNING.pathClearance;
-    if (!forceNav && segmentClear(L, from, goal, r, opts)) return [copy3(goal)];
-    const s = nearestNavNode(L, from, r, opts);
-    const g = nearestNavNode(L, goal, r, opts);
-    const ids = s >= 0 && g >= 0 ? findPath(L.nav, s, g) : null;
-    if (!ids) return [copy3(goal)];
-    const route = ids.map((id) => flat(this.node(id).position));
-    route.push(copy3(goal));
-    if (!forceNav) this.pull(route, from);
-    return route;
-  }
-
-  /** Skip waypoints that can be bypassed in a straight line from `from`. Mutates `route`. */
-  private pull(route: Vec3[], from: Vec3): void {
-    const opts = this.coll();
-    for (let i = route.length - 1; i > 0; i--) {
-      if (segmentClear(this.level, from, route[i], SIM_TUNING.pathClearance, opts)) {
-        route.splice(0, i);
-        return;
-      }
-    }
-  }
-
-  private turnToward(yaw: number, dt: number): void {
-    const m = this.state.monster;
-    const d = angleDelta(m.yaw, yaw);
-    const maxTurn = MONSTER.turnSpeed * dt;
-    m.yaw = wrapAngle(m.yaw + clamp(d, -maxTurn, maxTurn));
-  }
-
-  /**
-   * Walk toward `p` (XZ) at up to `speed`. Turns smoothly; moves along the straight line to the
-   * target, slower while still facing away from it. Returns true once within waypointRadius.
-   */
-  private moveToward(p: Vec3, speed: number, dt: number): boolean {
-    const m = this.state.monster;
-    const dx = p.x - m.position.x;
-    const dz = p.z - m.position.z;
-    const dist = Math.hypot(dx, dz);
-    if (dist <= SIM_TUNING.waypointRadius) {
-      m.speed = 0;
-      return true;
-    }
-    this.turnToward(yawTowards(m.position, p), dt);
-    const facing = Math.max(0, Math.cos(angleDelta(m.yaw, yawTowards(m.position, p))));
-    const stepLen = Math.min(speed * facing * dt, dist);
-    if (stepLen > 1e-6) {
-      const np = moveCircle(
-        this.level,
-        m.position,
-        v3((dx / dist) * stepLen, 0, (dz / dist) * stepLen),
-        SIM_TUNING.monsterRadius,
-        this.coll(),
-      );
-      m.speed = distXZ(np, m.position) / dt;
-      m.position = v3(np.x, 0, np.z);
-    } else {
-      m.speed = 0;
-    }
-    return distXZ(m.position, p) <= SIM_TUNING.waypointRadius;
-  }
-
-  private pickWanderNext(node: NavNode, prev: number): number {
-    let cands = node.links.filter((l) => l !== prev);
-    if (cands.length === 0) cands = node.links.slice();
-    if (cands.length === 0) return node.id;
-    const now = this.state.time;
-    // Prefer nodes not visited for a while, so it roams the whole house.
-    const weights = cands.map(
-      (id) =>
-        (1 + Math.min(60, now - this.brain.visited[this.nodeIndex[id]]) / 10) *
-        (1 + SIM_TUNING.noiseMemoryPull * this.memoryPull(id)),
-    );
-    const total = weights.reduce((a, w) => a + w, 0);
-    let pick = this.rng() * total;
-    for (let i = 0; i < cands.length; i++) {
-      pick -= weights[i];
-      if (pick <= 0) return cands[i];
-    }
-    return cands[cands.length - 1];
-  }
-
-  private updateMonster(dt: number, out: SimEvent[]): void {
-    const m = this.state.monster;
-    switch (m.mode) {
-      case 'feeding':
-        m.speed = 0;
-        this.brain.feed -= dt;
-        if (this.brain.feed <= 0) this.enterWander();
-        return;
-      case 'wander':
-        this.updateWander(dt);
-        return;
-      case 'investigate':
-        this.updateInvestigate(dt);
-        return;
-      case 'chase':
-        this.updateChase(dt, out);
-        return;
-    }
-  }
-
-  private updateWander(dt: number): void {
-    const m = this.state.monster;
-    const b = this.brain;
-    if (b.pause > 0) {
-      b.pause -= dt;
-      m.speed = 0;
-      m.target = null;
-      this.resetStuck();
-      return;
-    }
-    if (b.wanderNode < 0) {
-      b.wanderNode = nearestNavNode(this.level, m.position, SIM_TUNING.pathClearance, this.coll());
-      b.prevNode = -1;
-      if (b.wanderNode < 0) {
-        m.speed = 0;
-        return;
-      }
-    }
-    const node = this.node(b.wanderNode);
-    m.target = flat(node.position);
-    if (this.moveToward(node.position, MONSTER.wanderSpeed, dt)) {
-      b.visited[this.nodeIndex[node.id]] = this.state.time;
-      const next = this.pickWanderNext(node, b.prevNode);
-      b.prevNode = node.id;
-      b.wanderNode = next;
-      this.resetStuck();
-      if (this.rng() < SIM_TUNING.wanderPauseChance) {
-        b.pause = lerp(SIM_TUNING.wanderPauseMin, SIM_TUNING.wanderPauseMax, this.rng());
-        m.speed = 0;
-        m.target = null;
-      }
-    } else if (this.isStuck(dt)) {
-      const blocked = b.wanderNode;
-      b.wanderNode = nearestNavNode(this.level, m.position, SIM_TUNING.pathClearance, this.coll(), blocked);
-      b.prevNode = blocked;
-    }
-  }
-
-  private updateInvestigate(dt: number): void {
-    const m = this.state.monster;
-    const b = this.brain;
-    if (b.listening) {
-      m.speed = 0;
-      m.target = null;
-      b.listen -= dt;
-      // Slowly sweep the head around while listening.
-      m.yaw = wrapAngle(m.yaw + Math.sin(b.listen * 1.7) * 0.9 * dt);
-      if (b.listen <= 0) this.enterWander();
-      return;
-    }
-    if (b.route.length === 0 || !b.goal) {
-      this.startListening();
-      return;
-    }
-    if (this.moveToward(b.route[0], MONSTER.investigateSpeed, dt)) {
-      b.route.shift();
-      this.resetStuck();
-      if (b.route.length === 0) this.startListening();
-      else this.pull(b.route, m.position);
-    } else if (this.isStuck(dt)) {
-      b.stuckCount++;
-      if (b.stuckCount >= 2 || distXZ(m.position, b.goal) < 1.5) this.startListening();
-      else b.route = this.planRoute(m.position, b.goal, true);
-    }
-  }
-
-  private updateChase(dt: number, out: SimEvent[]): void {
-    const s = this.state;
-    const m = s.monster;
-    const b = this.brain;
-    if (!b.chasePos || s.time - b.chaseHeardAt > HEARING.chaseForget) {
-      // Lost them: go check the last place we heard them.
-      this.enterInvestigate(b.chasePos ?? m.position, out, true);
-      return;
-    }
-    if (m.targetPlayer !== null) {
-      const tp = playerOf(s, m.targetPlayer);
-      if (!tp || tp.status !== 'alive') m.targetPlayer = null;
-    }
-    if (b.routeDirty && s.time - b.replanAt >= SIM_TUNING.chaseReplanInterval) {
-      b.goal = this.reachable(b.chasePos);
-      b.route = this.planRoute(m.position, b.goal, false);
-      b.replanAt = s.time;
-      b.routeDirty = false;
-    }
-    m.target = b.goal ? copy3(b.goal) : null;
-    if (b.route.length === 0) {
-      // At the last spot we heard them: stand still and listen.
-      m.speed = 0;
-      this.resetStuck();
-      return;
-    }
-    if (this.moveToward(b.route[0], MONSTER.chaseSpeed, dt)) {
-      b.route.shift();
-      this.resetStuck();
-      if (b.route.length > 0) this.pull(b.route, m.position);
-    } else if (this.isStuck(dt) && b.goal) {
-      b.route = this.planRoute(m.position, b.goal, true);
-    }
+    this.ai.onHeard(noise.position, pid, ratio, out);
   }
 
   // ---- per-tick rules -------------------------------------------------------------------------
@@ -1149,11 +666,8 @@ export class GameSim {
     const s = this.state;
     s.time += dt;
     s.monster.alert = Math.max(0, s.monster.alert - dt / SIM_TUNING.alertDecaySeconds);
-    const fade = Math.pow(0.5, dt / SIM_TUNING.noiseMemoryHalfLife);
-    const heat = this.brain.heat;
-    for (let i = 0; i < heat.length; i++) heat[i] *= fade;
     this.checkFuses(out);
-    this.updateMonster(dt, out);
+    this.ai.update(dt, out);
     this.checkContacts(out);
     this.checkEscapes(out);
     this.checkEnd(out);
@@ -1196,10 +710,7 @@ export class GameSim {
     const inside = v3(center.x, 1.5, d.min.z - 0.3);
     const before = s.monster.mode;
     this.hear({ source: 'door', position: inside, loudness: NOISE.exitDoor, playerId: null }, out);
-    if (SIM_TUNING.exitDoorAlwaysAlerts && before === 'wander' && s.monster.mode === 'wander') {
-      this.enterInvestigate(inside, out, true);
-      this.setStim(1);
-    }
+    this.ai.onExitOpened(inside, SIM_TUNING.exitDoorAlwaysAlerts && before === 'wander', out);
   }
 
   private checkContacts(out: SimEvent[]): void {
@@ -1218,17 +729,8 @@ export class GameSim {
         this.catchPlayer(p, out);
         return;
       }
-      if (d <= HEARING.touchRadius) {
-        // Bumped into a silent player.
-        if (m.mode !== 'chase' || m.targetPlayer !== p.id) {
-          this.enterChase(head, p.id, out, true);
-          this.setStim(HEARING.chaseRatio);
-        } else {
-          this.brain.chasePos = flat(head);
-          this.brain.chaseHeardAt = s.time;
-          this.brain.routeDirty = true;
-        }
-      }
+      // Bumped into a silent player.
+      if (d <= HEARING.touchRadius) this.ai.onTouch(head, p.id, out);
     }
   }
 
@@ -1236,7 +738,7 @@ export class GameSim {
     p.status = 'caught';
     this.dropAll(p, out, false);
     out.push({ type: 'playerCaught', id: p.id, position: copy3(p.pose.head.position) });
-    this.enterFeeding();
+    this.ai.onCaught(p.pose.head.position);
   }
 
   private checkEscapes(out: SimEvent[]): void {
