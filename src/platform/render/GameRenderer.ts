@@ -559,7 +559,11 @@ export class GameRenderer implements IGameRenderer {
     if (this.readableCache?.view !== view) {
       const notes = (view.decals?.placed ?? []).filter((p) => p.name.startsWith(NOTE_PREFIX));
       // A note's text reads upright when you face its yaw + 180 degrees.
-      const list = notes.map((n) => ({ position: { x: n.x, y: n.y, z: n.z }, readYaw: Math.atan2(Math.sin(n.yaw + Math.PI), Math.cos(n.yaw + Math.PI)) }));
+      const list = notes.map((n) => ({
+        position: { x: n.x, y: n.y, z: n.z },
+        readYaw: Math.atan2(Math.sin(n.yaw + Math.PI), Math.cos(n.yaw + Math.PI)),
+        upright: n.placement === 'wall' || n.placement === 'door',
+      }));
       this.readableCache = { view, list };
     }
     return this.readableCache.list;

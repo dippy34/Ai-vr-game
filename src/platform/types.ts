@@ -77,10 +77,12 @@ export interface IGameRenderer {
   render(): void;
 }
 
-/** A note lying on a surface: its center, and the yaw to face for its text to read upright. */
+/** A note: its center, and the yaw to face for its text to read upright. */
 export interface Readable {
   position: Vec3;
   readYaw: number;
+  /** Pinned on a wall (read straight on) rather than lying flat (read looking down). */
+  upright: boolean;
 }
 
 // ---------------------------------------------------------------------------------------------

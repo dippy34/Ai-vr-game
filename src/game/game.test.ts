@@ -171,7 +171,7 @@ describe('Game', () => {
 
     it('E on a note in your sights leans in over it; E again stands you up', () => {
       const { notes, next, frames, input, ui, at } = reading();
-      notes.push({ position: at(1.1), readYaw: 0.5 });
+      notes.push({ position: at(1.1), readYaw: 0.5, upright: false });
       frames(1);
       expect(ui.hud.setAim).toHaveBeenLastCalledWith('E · read', false);
       next.use = true;
@@ -186,9 +186,46 @@ describe('Game', () => {
       expect(input.setLean).toHaveBeenLastCalledWith(null);
     });
 
+    it('a note pinned on a wall is read straight on: eyes level with it, just in front', () => {
+      const { notes, next, frames, input, camera } = reading();
+      camera.rotation.x = 0;
+      frames(1);
+      // Level view, spawn yaw 0: straight ahead is -Z.
+      const eye = camera.getWorldPosition(new THREE.Vector3());
+      const p = { x: eye.x, y: eye.y, z: eye.z - 1.2 };
+      notes.push({ position: p, readYaw: 0, upright: true });
+      next.use = true;
+      frames(1);
+      const lean = input.setLean.mock.calls.at(-1)![0] as { position: { x: number; y: number; z: number }; pitch: number; yaw: number };
+      expect(lean.position.y).toBeCloseTo(p.y, 5);
+      expect(lean.position.z - p.z).toBeCloseTo(0.32, 5); // readYaw 0 faces -Z: you stand on its +Z side
+      expect(Math.abs(lean.pitch)).toBeLessThan(0.2);
+    });
+
+    it('the wall a note is pinned to does not hide it; a note behind a wall is hidden', () => {
+      const { notes, next, frames, input, camera, rig } = reading();
+      // In the hallway, facing the north wall (inner face z = -1.1), eyes 1 m from it.
+      rig.position.set(0.57, 0, -0.1);
+      rig.rotation.y = 0;
+      camera.rotation.x = -0.1;
+      frames(2);
+      notes.push({ position: { x: 0.57, y: 1.5, z: -1.1 }, readYaw: 0, upright: true });
+      next.use = true;
+      frames(1);
+      expect(input.setLean).toHaveBeenLastCalledWith(expect.objectContaining({ yaw: 0 }));
+      next.use = true;
+      frames(1);
+      input.setLean.mockClear();
+      notes.length = 0;
+      notes.push({ position: { x: 0.57, y: 1.5, z: -1.33 }, readYaw: Math.PI, upright: true });
+      next.use = true;
+      frames(1);
+      expect(input.setLean).not.toHaveBeenCalled();
+    });
+
     it('moving stands you up; far, off-center or no notes: E does not read', () => {
       const { notes, next, frames, input, at } = reading();
-      notes.push({ position: at(1.1), readYaw: 0 });
+      notes.push({ position: at(1.1), readYaw: 0, upright: false });
       next.use = true;
       frames(1);
       next.move = { x: 0, y: 1 };
@@ -197,7 +234,7 @@ describe('Game', () => {
 
       input.setLean.mockClear();
       notes.length = 0;
-      notes.push({ position: at(2.5), readYaw: 0 }, { position: at(1.1, 0.6), readYaw: 0 });
+      notes.push({ position: at(2.5), readYaw: 0, upright: false }, { position: at(1.1, 0.6), readYaw: 0, upright: false });
       next.use = true;
       frames(1);
       expect(input.setLean).not.toHaveBeenCalled();
@@ -223,7 +260,7 @@ describe('Game', () => {
     it('a pickup more in the middle of your view wins over a note next to it', () => {
       const { notes, next, frames, input, session, sim, at } = reading();
       sim.state.camera.position = at(1.0);
-      notes.push({ position: at(1.0, 0.12), readYaw: 0 });
+      notes.push({ position: at(1.0, 0.12), readYaw: 0, upright: false });
       next.use = true;
       frames(1);
       expect(input.setLean).not.toHaveBeenCalled();

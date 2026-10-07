@@ -224,12 +224,16 @@ async function monsterAway(page, x, z, d = 4) {
     if (!spot) { console.log('no spot next to fuse', fuse.position); break; }
     await monsterAway(page, spot.x, spot.z);
     await teleport(page, spot.x, spot.z, spot.yawDeg);
+    // Look down at it like a player would (E reads a note in the middle of the view instead).
+    await page.evaluate(([fy, h]) => { window.__mute.input.pitch = Math.atan2(fy - 1.6, h); },
+      [fuse.position.y, Math.hypot(fuse.position.x - spot.x, fuse.position.z - spot.z)]);
     await sleep(800);
     await page.keyboard.press('e');
     const held = await waitState(page, (s) => s.st.items.some((i) => i.kind === 'fuse' && i.where === 'held' && i.holder === s.id),
       null, 'fuse grabbed', 30000).catch((e) => (console.log(e.message, 'at', spot, 'fuse', fuse.position), null));
     if (!held) break;
     await monsterAway(page, box.x, box.z);
+    await page.evaluate(() => { window.__mute.input.pitch = 0; });
     await teleport(page, box.x, box.z, 180);
     const after = await waitState(page, (s, n) => s.st.fusesInserted > n, inserted, 'fuse inserted', 30000)
       .catch((e) => (console.log(e.message), null));

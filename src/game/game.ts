@@ -29,7 +29,7 @@ const HANDS: Handedness[] = ['left', 'right'];
  * E, and the eyes lean in `above` m over it looking down at `pitch` (what a VR player does with
  * their real head). E again, moving or the menu stands you back up.
  */
-const READ = { reach: 1.9, aim: 0.2, above: 0.3, pitch: -1.35 } as const;
+const READ = { reach: 1.9, aim: 0.2, above: 0.3, pitch: -1.35, wallDistance: 0.32, wallPitch: -0.06 } as const;
 
 /** What desktop E would do right now. */
 type UseTarget =
@@ -405,7 +405,15 @@ export class Game {
       if (dist3(eye, note.position) > READ.reach) continue;
       const angle = aimAngle(eye, look, note.position);
       if (angle > READ.aim || (best && angle >= best.angle)) continue;
-      if (wallsBetween(session.level, eye, note.position) > 0) continue;
+      // Line of sight to a point just in front of it (a note pinned on a wall touches that wall).
+      const d = dist3(eye, note.position);
+      const k = Math.min(1, 0.08 / Math.max(d, 1e-6));
+      const front = v3(
+        note.position.x + (eye.x - note.position.x) * k,
+        note.position.y + (eye.y - note.position.y) * k,
+        note.position.z + (eye.z - note.position.z) * k,
+      );
+      if (wallsBetween(session.level, eye, front) > 0) continue;
       best = { note, angle };
     }
     return best;
@@ -413,13 +421,17 @@ export class Game {
 
   private startReading(note: Readable): void {
     this.reading = note;
-    // Eyes over the note, a little back so the downward view centers on it.
-    const back = (READ.above / Math.tan(-READ.pitch)) * 1.0;
-    const position = v3(
-      note.position.x + Math.sin(note.readYaw) * back,
-      note.position.y + READ.above,
-      note.position.z + Math.cos(note.readYaw) * back,
-    );
+    const s = Math.sin(note.readYaw);
+    const c = Math.cos(note.readYaw);
+    if (note.upright) {
+      // Pinned on a wall: eyes level with it, a hand's length in front.
+      const d = READ.wallDistance;
+      this.input.setLean({ position: v3(note.position.x + s * d, note.position.y, note.position.z + c * d), yaw: note.readYaw, pitch: READ.wallPitch });
+      return;
+    }
+    // Lying flat: eyes over it, a little back so the downward view centers on it.
+    const back = READ.above / Math.tan(-READ.pitch);
+    const position = v3(note.position.x + s * back, note.position.y + READ.above, note.position.z + c * back);
     this.input.setLean({ position, yaw: note.readYaw, pitch: READ.pitch });
   }
 

@@ -51,6 +51,8 @@ interface Piece {
 export interface DecalPlacementInfo {
   name: string;
   room: string;
+  /** How it is mounted: 'wall' / 'door' pieces hang upright; the rest lie flat. */
+  placement: Placement;
   x: number;
   y: number;
   z: number;
@@ -714,7 +716,7 @@ export class DecalSet {
   }
 
   private log(p: Piece, room: string, x: number, y: number, z: number, yaw: number): void {
-    this.placed.push({ name: p.name, room, x: +x.toFixed(2), y: +y.toFixed(3), z: +z.toFixed(2), yaw: +yaw.toFixed(2) });
+    this.placed.push({ name: p.name, room, placement: p.placement, x: +x.toFixed(2), y: +y.toFixed(3), z: +z.toFixed(2), yaw: +yaw.toFixed(2) });
   }
 }
 
