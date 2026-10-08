@@ -16,7 +16,10 @@ today) and `docs/STORY.md` (the agreed future direction: story, chapters, tools,
 - **Where it's going:** a Poppy Playtime-style chapter game with big maps, chase scenes, a
   signature gadget (the Echo) and near-impossible difficulty. See `docs/STORY.md`.
 - **Done:** the **Crank Light** replaced the camera flash, and the house is truly dark again
-  (§6, step 1). **Next job:** the **Echo** gadget (§6, step 2).
+  (§6, step 1). A **71 s Kickstarter trailer** is finished (§8).
+- **Money plan:** the owner is launching a **Kickstarter** (and maybe more) to pay for a bigger AI
+  plan. The trailer is for that campaign. The free web demo is the proof the game is real.
+- **Next job:** the **Echo** gadget (§6, step 2).
 
 ## 2. Run, test, ship
 
@@ -24,7 +27,7 @@ today) and `docs/STORY.md` (the agreed future direction: story, chapters, tools,
 npm install
 npm run dev            # http://localhost:5173  (desktop)   ?net=local = multiplayer across tabs
 npm run dev:https      # LAN HTTPS so a Quest headset can open it
-npm test               # vitest: 275 unit tests (core rules, AI, nav, input math, audio math, net)
+npm test               # vitest: ~283 unit tests (core rules, AI, nav, input math, audio math, net)
 npm run build          # typecheck + production build (+ KTX2 texture compression) into dist/
 npm run test:e2e       # Playwright smoke playtest (solo + multiplayer); E2E_ONLY=solo for solo only
 npm run assets         # rebuild all GLB models from the Blender scripts (needs .blender-venv, below)
@@ -64,19 +67,19 @@ there and run only on the host. Platform code sits behind interfaces in `src/pla
 | `src/core/deadspots.test.ts` | Proves there are no spots where the monster can't reach you (an 899-spot scan: 0 unreachable within 60 s). |
 | `src/game/game.ts` | The client game loop: input → actions, desktop interactions (E to grab or read; `READ` constants for leaning in to read notes), messages, HUD. |
 | `src/game/session.ts`, `xr.ts` | Session/round flow, WebXR session setup. |
-| `src/net/` | Star topology through the host (PeerJS/WebRTC, or `local.ts` BroadcastChannel for tabs). Voice is a peer-to-peer mesh. `protocol.ts` has `PROTOCOL_VERSION` (currently **2**; bump it when messages change). `star.ts` has `joinGraceMs` (60 s). |
-| `src/platform/render/GameRenderer.ts` | three.js renderer: level, props, avatars, flash, decals, readable notes (`readables()`), avatar shader warm-up. |
+| `src/net/` | Star topology through the host (PeerJS/WebRTC, or `local.ts` BroadcastChannel for tabs). Voice is a peer-to-peer mesh. `protocol.ts` has `PROTOCOL_VERSION` (currently **3**, bumped for the Crank Light; bump it when messages change). `star.ts` has `joinGraceMs` (60 s). |
+| `src/platform/render/GameRenderer.ts` | three.js renderer: level, props, avatars, Crank Light beams (`updateLights()`), decals, readable notes (`readables()`), avatar shader warm-up. |
 | `src/platform/render/SkinnedMonster.ts` + `monster/` | The monster's **procedural animation**: rig, IK, footstep planning (`steps`), world probing and affordances (door frames, low gaps, furniture to climb), body, motion, gait, springs. Every step is computed live from the world, so no two walks look the same. Authored clips are kept only for the jumpscare (Attack) and Feed. |
-| `src/platform/render/fx/` | Lighting look: `pipeline.ts` (AgX-style tone curve, grain, dither, vignette), `roomAO.ts`, `moonlight.ts`, `monsterSkin.ts` (custom skin shader), `flashGlare.ts`. Height fog. |
+| `src/platform/render/fx/` | Lighting look: `pipeline.ts` (AgX-style tone curve, grain, dither, vignette), `roomAO.ts`, `moonlight.ts`, `monsterSkin.ts` (custom skin shader), `flashGlare.ts` (the old name: it's now the glare when another player's beam points at you). Height fog. |
 | `src/platform/render/CrankLights.ts` | The Crank Light: one spot light per player made at load (slot 0 = yours: PCF shadows + lens cookie + bounce + haze), `beamBrightness()` (low-battery flicker, winding surge), and `LightProp`, the flashlight model. `GameRenderer.updateLights()` aims them (VR: left wrist; desktop: low right, aimed at the view centre). |
 | `src/platform/render/Afterimages.ts` | Pale burned-in ghosts; only the jumpscare's face uses them now. |
 | `src/platform/audio/` | All-procedural WebAudio: HRTF voices, monster sounds, ambience, heartbeat, mic loudness. |
 | `src/platform/input/` | `InputManager` (VR controllers, hand tracking, desktop; `setLean()` for reading notes), `signs.ts` (hand-sign recognition), `handMath.ts`. |
 | `src/ui/` | HUD, menus, toasts (`hud.setAim(text, reading)`). |
 | `art/blender/` | Generators for every model in `public/models/` (monster, hands, avatars, furniture, props, decals, notes). |
-| `art/concept/` | Scripts for the concept-art renders in `docs/concept/`. |
+| `art/concept/` | Blender scripts for the chapter pictures in `docs/concept/` (Chapters 2–4, using the real monster model). |
 | `dev/capture/` | Frame-stepped gameplay video capture (`harness.cjs` drives the game 1/30 s per step; `encode.sh` makes the mp4). |
-| `dev/anim/` | Monster animation test scenes and capture (`capture.cjs --game --hemi --flash N`). |
+| `dev/anim/` | Monster animation test scenes and capture (`capture.cjs --game --hemi`). |
 | `dev/models/`, `dev/render/`, `dev/hands/` | Model viewer, lighting preview, hand-tracking test pages. |
 | `tests/e2e/smoke.cjs` | Full playtest in a headless browser: reads the tutorial note with real E presses, grabs all fuses (monster frozen), escapes; then multiplayer. Prints a "why:" line when a fuse step fails. |
 
@@ -97,6 +100,14 @@ there and run only on the host. Platform code sits behind interfaces in `src/pla
 - **e2e flakiness = CPU load.** Rerun on a quiet machine before believing a failure.
 - **GitHub Pages "Deploy from a branch" serves raw source** (blank page). It must be "GitHub
   Actions".
+- **Multiplayer e2e can time out** at "host sees 2 players": in software GL the guest takes about
+  87–105 s to join and `waitState` gives up at 120 s (`tests/e2e/smoke.cjs`). Not fixed yet. Raise
+  that one wait to ~240 s, and/or update the beam shadow maps less often in the lobby (which also
+  helps Quest).
+- **Don't run Blender renders while capturing trailer frames.** They fight for the CPU and the
+  capture drops from ~2.25 s to ~6 s per frame.
+- **Edits under `src/` reload the normal dev server (HMR)** and kill a running e2e test or capture.
+  Captures use the no-HMR server (`dev/anim/vite.capture.config.ts`, port 5320).
 - **Blender Python:** don't name a script `inspect.py` (it shadows the stdlib and crashes `bpy`
   on import). Armatures imported from glTF use quaternion rotation, so set
   `rotation_mode = 'XYZ'` before using `rotation_euler`.
@@ -118,7 +129,13 @@ there and run only on the host. Platform code sits behind interfaces in `src/pla
 - **Real darkness:** with your light off you barely see a doorway.
 - Multiplayer (PeerJS star + voice mesh), 60 s join grace.
 - Notes and decals that tell the story; a tutorial note.
+- Monster "hunch": when it hears nothing for a while, its roaming drifts toward the players' rooms
+  (`BRAIN_TUNING.hunch*` in `monster.ts`).
 - Deploy pipeline, unit tests, e2e playtest, capture tools.
+- **The story, chapters, tools and difficulty** are decided (`docs/STORY.md`, story v3).
+- **Chapter pictures:** 6 Blender renders for Chapters 2–4 (`docs/concept/`), 4 Canva images for
+  the Prologue and Chapter 1 (links in `docs/STORY.md`).
+- **The Kickstarter trailer** (§8).
 
 ## 6. What to build next (in this order)
 
@@ -173,3 +190,71 @@ Lobby, offices, anechoic labs, getting the Echo, sound-lock puzzles, the elevato
 - They decide story and design direction. Pitch, then let them choose (see the rejected versions at
   the bottom of `docs/STORY.md`).
 - They wanted **no model IDs or AI names in repo files**.
+
+## 8. The Kickstarter trailer
+
+**Files:** `dev/trailer/out/mute_trailer.mp4` (master, 1080p30, ~31 MB, for Kickstarter) and
+`mute_trailer_web.mp4` (~14 MB, for sharing). `out/` and `fonts/` are git-ignored, so rebuild them
+with the commands below. Everything that makes it is in `dev/trailer/` (see the comments at the top
+of each file).
+
+**The cut (71 s), as the owner asked for it:** *show the real game first, straight away, then the
+chapters still to come, and never call those pictures "concept art".*
+1. **The real game** (0–38 s, all captured from the game itself, with a small top-left tag
+   "Prologue · The Hale House / Real gameplay. Playable now."). Captions sit low over the footage,
+   with no black cards in between:
+   - hallway, the light clicks on and finds it: "It can't see you." / "But it hears everything."
+   - it ducks through a doorway toward you: "Every footstep."
+   - it crawls over the coffee table: "Every breath." / "Even your real voice. MUTE listens to
+     your microphone."
+   - a teammate signs in your beam: "So you talk with your hands."
+   - the light dies, you wind it, it hears the ratchet, charges, the real jumpscare: "Your only
+     light is dying." / "Winding it is loud."
+2. **Title:** MUTE, "Don't make a sound."
+3. **The chapters:** "The house is only the beginning. Hollow Creek, 1996. Something got out of
+   Halcyon Acoustics." Then six pictures labelled **Chapter 2 · The Echo Halls**, **Chapter 3 ·
+   The Nest**, **Chapter 4 · The Quiet Room**, ending on the boss: "Or make it scream."
+4. **Features** (1–4 players co-op · Meta Quest VR · PC · plays in your browser) and the **end
+   card** ("Coming to Kickstarter", dippy34.github.io/Ai-vr-game, "Play the free demo now.").
+
+The sound is the game's own effects (rendered offline with the real audio code) plus a score:
+drones, braams, risers, hits, a heartbeat and the crank ratchet.
+
+**Rebuild:**
+```bash
+PORT=5320 npx vite --config dev/anim/vite.capture.config.ts &   # the no-HMR server
+node dev/trailer/shots.cjs            # capture the gameplay frames (slow: ~2.25 s a frame at 720p
+                                      # in software GL, ~40 min for all five shots; --test = 3 samples)
+sh dev/trailer/fonts.sh && node dev/trailer/cards.cjs   # the text cards
+node dev/trailer/trailer.cjs          # edit + soundtrack + both mp4s (~4 min once frames exist)
+node dev/trailer/trailer.cjs --audio  # soundtrack only; --preview N = only the first N segments
+```
+
+**Changing it:** wording lives in `cards.cjs`; the order, timings and pictures in the `EDIT` list in
+`trailer.cjs`; sound cues in `cues()` (keyed by segment name, so reordering is safe); camera moves
+and the monster's scripted path in `shots.cjs`. Only `shots.cjs` changes need a re-capture.
+
+**Still to do for the campaign:**
+- Put the real Kickstarter URL on the end card once the page exists.
+- Chapter 4's two pictures and the Chapter 2 chase / Chapter 3 tunnel are the 960×540 previews
+  (slightly soft). Re-render them at 1920×1080 with `art/concept/` and save them to
+  `docs/concept/raw/<name>.png`; the trailer uses those automatically.
+- Kickstarter requires projects to disclose AI use. The code, art scripts and trailer were made
+  with AI assistants, so say so on the page.
+
+## 9. Timeline of decisions (October 2026)
+
+1. **Story v3 agreed:** Dad (Dr. Martin Hale, turned into the Listener by Halcyon's Project
+   CLARITY) is a brutal killer. The kids are dead (implied, never shown), nobody is rescued, no
+   sympathetic monster. Earlier versions were rejected (end of `docs/STORY.md`).
+2. **The camera flash was cut:** players couldn't figure it out, the house was too bright to need
+   it, and the frozen afterimage was confusing. **Replaced by the Crank Light** (built), with
+   **the Echo** as the signature gadget next.
+3. **Progression:** Prologue (Hale House, free) → Ch1 Halcyon Acoustics (free) → Ch2 Echo Halls
+   (Hums, Hush) → Ch3 The Nest (heist, Feedback) → Ch4 The Quiet Room (Sealed or Feedback ending).
+4. **Difficulty: near impossible**, gentle only at the start.
+5. **Pictures of each map** (Canva for Prologue/Ch1 until its credits ran out, Blender for Ch2–4).
+6. **Crank Light built and deployed**, with real darkness and the monster hunch.
+7. **Kickstarter trailer made**, then **remade** on the owner's notes: real gameplay first, then
+   the chapters, and the chapter pictures are never called concept art.
+
