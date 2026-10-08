@@ -22,6 +22,7 @@ html,body{margin:0;width:1920px;height:1080px;background:transparent;overflow:hi
 .card{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#ece6da;text-align:center}
 .card.black{background:#000}
 .card.low{justify-content:flex-end;padding-bottom:150px;box-sizing:border-box}
+.card.top{justify-content:flex-start;padding-top:70px;box-sizing:border-box;background:linear-gradient(180deg,rgba(0,0,0,.75),rgba(0,0,0,0) 28%)}
 .card.left{align-items:flex-start;justify-content:flex-end;padding:0 0 120px 140px;box-sizing:border-box;text-align:left}
 .line{font:400 66px/1.25 'Special Elite',monospace;letter-spacing:.01em;text-shadow:0 0 18px #000,0 0 6px #000,0 3px 4px #000}
 .small{font:400 italic 40px/1.4 'Cormorant',serif;color:#b9b0a2;margin-top:22px;letter-spacing:.02em;text-shadow:0 0 10px #000}
@@ -55,7 +56,7 @@ const CARDS = {
   ch2: `<div class="card left"><div class="chap">Halcyon Acoustics</div><div class="chapname">The Echo Halls</div></div>`,
   ch3: `<div class="card left"><div class="chap">Halcyon Acoustics</div><div class="chapname">The Nest</div></div>`,
   ch4: `<div class="card left"><div class="chap">Halcyon Acoustics</div><div class="chapname">The Quiet Room</div></div>`,
-  boss: `<div class="card low"><div class="line">Or make it <span class="red">scream.</span></div></div>`,
+  boss: `<div class="card top"><div class="line">Or make it <span class="red">scream.</span></div></div>`,
   features: `<div class="card black"><div class="feat">1–4 players<span class="dot">·</span>co-op</div><div class="feat">Meta Quest VR<span class="dot">·</span>PC</div><div class="feat">Plays in your browser</div></div>`,
   end: `<div class="card black"><div class="endtitle">MUTE</div><div class="cta">Coming to Kickstarter</div><div class="url">dippy34.github.io/Ai-vr-game</div><div class="urlsub">Play the free demo now.</div></div>`,
 };
