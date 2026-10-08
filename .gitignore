@@ -12,3 +12,5 @@ __pycache__/
 # Parallel workers' git worktrees (never commit)
 .claude/worktrees/
 docs/concept/raw/
+dev/trailer/fonts/
+dev/trailer/out/

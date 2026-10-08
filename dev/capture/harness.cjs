@@ -106,6 +106,14 @@ async function setup({ width = 960, height = 540, base = 'http://localhost:5302/
         const preset = cmd.sign ? signs.SIGN_PRESETS.find((p) => p.id === cmd.sign) : null;
         m.input.sign = preset ? { preset, start: m.input.time, held: true } : null;
       }
+      // The local Crank Light: switch it (straight through the sim), set its charge, wind it (R).
+      const me0 = s.state.players[s.localId];
+      if (cmd.light !== undefined && me0 && me0.light.on !== cmd.light) sim.handleAction(s.localId, { type: 'light', on: cmd.light });
+      if (cmd.charge !== undefined && me0) me0.light.charge = cmd.charge;
+      if (cmd.crank !== undefined) {
+        if (cmd.crank) m.input.keys.add('KeyR');
+        else m.input.keys.delete('KeyR');
+      }
       window.__mic = cmd.mic ?? 0;
       if (cmd.bot && s.state.players.bot) {
         const pose = botPose(cmd.bot, nowMs / 1000);

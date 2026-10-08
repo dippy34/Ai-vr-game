@@ -219,3 +219,4 @@ module.exports = {
     follow(3.4, 1.9, -0.8, 0.7, 55),
   ),
 };
+module.exports.build = build;

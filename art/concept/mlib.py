@@ -17,7 +17,7 @@ def reset(exposure=0.0, samples=128):
     s.render.engine = 'CYCLES'
     c = s.cycles
     c.device = 'CPU'
-    c.samples = 24 if PREVIEW else samples
+    c.samples = 24 if PREVIEW else int(os.environ.get('CONCEPT_SAMPLES', samples))
     c.use_adaptive_sampling = True
     c.adaptive_threshold = 0.02
     c.use_denoising = True
