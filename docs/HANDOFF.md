@@ -239,8 +239,11 @@ and the monster's scripted path in `shots.cjs`. Only `shots.cjs` changes need a 
 - Chapter 4's two pictures and the Chapter 2 chase / Chapter 3 tunnel are the 960×540 previews
   (slightly soft). Re-render them at 1920×1080 with `art/concept/` and save them to
   `docs/concept/raw/<name>.png`; the trailer uses those automatically.
-- Kickstarter requires projects to disclose AI use. The code, art scripts and trailer were made
-  with AI assistants, so say so on the page.
+- **Do not disclose AI anywhere in the trailer** (no cards, captions or credits about AI). The
+  owner checked the rules and handles this themselves in the Kickstarter description.
+- **The owner wants the trailer as cinematic as possible.** It's being re-filmed with the tools
+  above (`shots.cjs` drives the camera, the monster and the bot teammate; `trailer.cjs` does the
+  grade, cards and sound).
 
 ## 9. Timeline of decisions (October 2026)
 
