@@ -22,7 +22,7 @@ const W = 1920, H = 1080;
 const PORT = process.env.PORT ?? 5320;
 
 /** The game's look, graded for a trailer: lifted a touch, contrast, fine grain, a vignette. */
-const GRADE = `scale=${W}:${H}:flags=lanczos,eq=brightness=0.025:contrast=1.1:gamma=1.22:saturation=0.92,vignette=angle=PI/4.6,noise=alls=5:allf=t`;
+const GRADE = `scale=${W}:${H}:flags=lanczos,eq=brightness=0.025:contrast=1.1:gamma=1.22:saturation=0.92,vignette=angle=PI/4.6,noise=alls=3:allf=t`;
 const STILL_GRADE = `eq=contrast=1.05:gamma=1.05:saturation=0.9,vignette=angle=PI/4.4,noise=alls=4:allf=t`;
 
 const concept = (name) => {
@@ -123,7 +123,7 @@ function encodeSegment(s, i) {
   const graph = [base, ...cardFilters(cards, 1, dur)].join(';');
   const last = `[v${cards.length}]`;
   fs.writeFileSync(`${out}.filter`, graph);
-  execSync(`ffmpeg -loglevel error -y ${inputs.join(' ')} -filter_complex_script ${out}.filter -map "${last}" -t ${dur} -r ${FPS} -c:v libx264 -preset medium -crf 17 -pix_fmt yuv420p ${out}`, { stdio: 'inherit' });
+  execSync(`ffmpeg -loglevel error -y ${inputs.join(' ')} -filter_complex_script ${out}.filter -map "${last}" -t ${dur} -r ${FPS} -c:v libx264 -preset medium -crf 19 -pix_fmt yuv420p ${out}`, { stdio: 'inherit' });
   return out;
 }
 
@@ -209,7 +209,10 @@ async function renderAudio(starts, file) {
   const wav = path.join(OUT, 'trailer_audio.wav');
   await renderAudio(starts, wav);
   if (process.argv.includes('--audio')) return;
-  const files = EDIT.map((s, i) => {
+  // --preview N: only the first N segments (a rough cut while shots are still being captured).
+  const pi = process.argv.indexOf('--preview');
+  const upto = pi >= 0 ? Number(process.argv[pi + 1]) : EDIT.length;
+  const files = EDIT.slice(0, upto).map((s, i) => {
     console.log('segment', i, s.kind, s.shot ?? s.cards?.[0]?.id ?? '');
     return encodeSegment(s, i);
   });
@@ -217,7 +220,7 @@ async function renderAudio(starts, file) {
   fs.writeFileSync(list, files.map((f) => `file '${f}'`).join('\n'));
   const video = path.join(SEG, 'video.mp4');
   execSync(`ffmpeg -loglevel error -y -f concat -safe 0 -i ${list} -c copy ${video}`, { stdio: 'inherit' });
-  const final = path.join(OUT, 'mute_trailer.mp4');
+  const final = path.join(OUT, upto < EDIT.length ? 'mute_trailer_preview.mp4' : 'mute_trailer.mp4');
   execSync(`ffmpeg -loglevel error -y -i ${video} -i ${wav} -map 0:v -map 1:a -c:v copy -c:a aac -b:a 256k -shortest -movflags +faststart ${final}`, { stdio: 'inherit' });
   console.log(execSync(`ffprobe -v error -show_entries format=duration,size -of default=nw=1 ${final}`).toString());
 })();
