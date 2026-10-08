@@ -96,16 +96,16 @@ const climb = {
 
 // D. Talking with your hands: Sam signs "stop", then "come here", in your beam.
 const hands = {
-  frames: 165,
+  frames: 120,
   cmd: (f) => {
     const t = f / 30;
     const s = sway(f, 0.5);
-    const sign = t < 0.6 ? null : t < 2.8 ? 'stop' : 'comeHere';
-    const signStart = sign === 'stop' ? 0.6 : 2.8;
+    const sign = t < 0.4 ? null : t < 2.2 ? 'stop' : 'comeHere';
+    const signStart = sign === 'stop' ? 0.4 : 2.2;
     return {
       x: 0.0, z: 6.35, yaw: 4 + s.yaw, pitch: -15 + s.pitch, light: true,
       bot: { x: 0.08, z: 5.4, yaw: 180, pitch: -10, sign, signStart },
-      sign: t > 3.6 ? 'thumbsUp' : null,
+      sign: t > 2.9 ? 'thumbsUp' : null,
       mon: { x: -9.5, z: -6.5, yaw: 0, gait: 'still', act: 'none' },
     };
   },
@@ -120,7 +120,7 @@ const windMon = build({ x: RUN_FROM, z: 0.1, yaw: -90 }, [
   { path: [[4.0, -0.15], [6.6, 0.05], [7.75, 0.0]], speed: 3.3, accel: 6 },
 ]);
 const wind = {
-  frames: 330,
+  frames: 280,
   cmd: (f) => {
     const t = f / 30;
     const s = sway(f, t > 4 ? 1.6 : 1);

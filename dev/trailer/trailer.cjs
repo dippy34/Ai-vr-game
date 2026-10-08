@@ -41,7 +41,7 @@ const EDIT = [
   { kind: 'shot', shot: 'door', from: 20, to: 243, cards: [{ id: 'footstep', from: 0.9, to: 3.5 }] },
   { kind: 'shot', shot: 'climb', from: 10, to: 219, cards: [{ id: 'breath', from: 0.8, to: 3.4 }], fadeOut: 0.4 },
   { kind: 'black', dur: 3.5, cards: [{ id: 'voice', from: 0.3, to: 3.2 }] },
-  { kind: 'shot', shot: 'hands', from: 0, to: 164, fadeIn: 0.3, cards: [{ id: 'hands', from: 0.7, to: 3.9 }] },
+  { kind: 'shot', shot: 'hands', from: 0, to: 119, fadeIn: 0.3, cards: [{ id: 'hands', from: 0.5, to: 3.7 }] },
   { kind: 'shot', shot: 'wind', from: 0, to: 'jumpscare', cards: [{ id: 'dying', from: 0.3, to: 2.3 }, { id: 'loud', from: 2.6, to: 4.4 }] },
   { kind: 'black', dur: 1.3 },
   { kind: 'black', dur: 5.4, cards: [{ id: 'title', from: 0.05, to: 5.1, fade: 0.08 }] },
@@ -59,7 +59,7 @@ const EDIT = [
 function jumpscareCut() {
   const dir = path.join(OUT, 'wind');
   const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.jpg')).sort() : [];
-  if (files.length < 300) return 290; // not captured yet (audio-only runs): a typical cut
+  if (files.length < 240) return 262; // not captured yet (audio-only runs): a typical cut
   // Mean luma of each frame after the run starts; the first nearly black one (after a bright
   // jumpscare frame) is where the game cuts to black.
   let lit = false;
