@@ -17,7 +17,9 @@ export type Cue =
   | { t: number; k: 'heart'; dur: number; bpm0: number; bpm1: number; gain?: number }
   | { t: number; k: 'crank'; dur: number; pos?: Vec3; gain?: number }
   | { t: number; k: 'steps'; dur: number; every: number; from: Vec3; to: Vec3; weight?: number; gain?: number }
-  | { t: number; k: 'tone'; dur: number; freq: number; gain?: number };
+  | { t: number; k: 'tone'; dur: number; freq: number; gain?: number }
+  | { t: number; k: 'whoosh'; dur: number; gain?: number }
+  | { t: number; k: 'silence'; dur: number };
 
 function noiseBuffer(ctx: BaseAudioContext, seconds: number): AudioBuffer {
   const b = ctx.createBuffer(1, Math.ceil(seconds * ctx.sampleRate), ctx.sampleRate);
@@ -74,11 +76,11 @@ function wav(buf: AudioBuffer): string {
   data.setUint32(24, buf.sampleRate, true); data.setUint32(28, buf.sampleRate * ch * 2, true);
   data.setUint16(32, ch * 2, true); data.setUint16(34, 16, true); w(36, 'data'); data.setUint32(40, len * ch * 2, true);
   const chans = Array.from({ length: ch }, (_, c) => buf.getChannelData(c));
-  // Leave 1 dB of peak headroom before converting the float mix to PCM/AAC.
+  // Leave 1.5 dB of peak headroom before converting the float mix to PCM/AAC.
   // The score's overlapping hits can otherwise exceed full scale and hard-clip here.
   let peak = 0;
   for (const channel of chans) for (const sample of channel) peak = Math.max(peak, Math.abs(sample));
-  const scale = peak > 0 ? Math.min(1, Math.pow(10, -1 / 20) / peak) : 1;
+  const scale = peak > 0 ? Math.min(1, Math.pow(10, -1.5 / 20) / peak) : 1;
   let o = 44;
   for (let i = 0; i < len; i++) {
     for (let c = 0; c < ch; c++) {
@@ -216,7 +218,7 @@ async function render(cues: Cue[], seconds: number): Promise<string> {
       }
       case 'riser': {
         const g = ctx.createGain();
-        g.gain.setValueAtTime(0, t);
+        g.gain.setValueAtTime(0.0001, t);
         g.gain.exponentialRampToValueAtTime(c.gain ?? 0.3, t + c.dur);
         g.gain.linearRampToValueAtTime(0, t + c.dur + 0.05);
         const n = ctx.createBufferSource();
@@ -242,6 +244,30 @@ async function render(cues: Cue[], seconds: number): Promise<string> {
         o.start(t);
         o.stop(t + c.dur + 0.1);
         g.connect(score);
+        break;
+      }
+      case 'whoosh': {
+        const n = ctx.createBufferSource();
+        n.buffer = noise;
+        n.loop = true;
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.Q.value = 0.8;
+        bp.frequency.setValueAtTime(350, t);
+        bp.frequency.exponentialRampToValueAtTime(2400, t + c.dur * 0.65);
+        bp.frequency.exponentialRampToValueAtTime(550, t + c.dur);
+        const g = ctx.createGain();
+        env(g.gain, t, t + c.dur, c.gain ?? 0.1, c.dur * 0.6, c.dur * 0.4);
+        n.connect(bp).connect(g).connect(score);
+        n.start(t);
+        n.stop(t + c.dur);
+        break;
+      }
+      case 'silence': {
+        eng.master.gain.setValueAtTime(0.9, t);
+        eng.master.gain.linearRampToValueAtTime(0, t + 0.04);
+        eng.master.gain.setValueAtTime(0, t + c.dur - 0.02);
+        eng.master.gain.linearRampToValueAtTime(0.9, t + c.dur);
         break;
       }
       case 'hit': {
@@ -297,6 +323,8 @@ async function render(cues: Cue[], seconds: number): Promise<string> {
       }
     }
   }
+  eng.master.gain.setValueAtTime(0.9, seconds - 0.45);
+  eng.master.gain.linearRampToValueAtTime(0, seconds);
   const out = await ctx.startRendering();
   return wav(out);
 }

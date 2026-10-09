@@ -200,24 +200,32 @@ into the repository. The renderer writes to `dev/trailer/out/`; that scratch dir
 downloaded `fonts/` remain git-ignored. Rebuild with the commands below, then copy approved
 exports to `docs/trailer/`. Everything that makes it is in `dev/trailer/` (see its `README.md`).
 
-**The cut (48 s), following the owner's latest revision:** open with action, keep the
+**The cut (46 s), following the owner's latest revision:** open with action, keep the
 gameplay moving, and use plain place names. The owner chose **Locations** instead of chapters;
 there are no chapter/location numbers on screen. These notes supersede the older chapter cards.
 1. **The real game** (about 0–25 s, all captured from the game itself):
    - a close hallway chase as you back away, without a caption.
    - hallway, the light clicks on and finds it: "It can hear you." A small top-left tag says
-     "The Hale House / Gameplay preview".
+     "The House / Gameplay preview".
    - it ducks through a doorway toward you, without a caption.
    - it crawls over the coffee table: "Keep your voice down."
    - a teammate signs in your beam: "Use hand signals."
    - the light dies, you wind it, it hears the ratchet, charges, the real jumpscare:
      "It heard that." The caption lands when the monster reacts to the crank.
 2. **Title:** MUTE, without a tagline.
-3. **Location status:** **Halcyon Acoustics / In development**. Then six pictures labelled
-   **The Echo Halls**, **The Nest**, and **The Quiet Room**. Every image, including the second
+3. **Location status:** **The Lab / In development**. Then six pictures labelled
+   **The Tunnels**, **The Nest**, and **The Quiet Room**. Every image, including the second
    shot of each location, carries **Soon to come** and the smaller **Concept preview**.
 4. **Features** (1–4 players co-op · Meta Quest VR) and the **end card** (MUTE). No Kickstarter
    announcement, website, free-demo call to action, PC line or browser claim.
+
+**Latest polish (October 9):** these five plain place names are the owner's approved trailer
+names. The Quiet Room stays; do not rename it The Vault. Restrained camera pushes keep the
+monster and hand signs prominent, with a consistent widescreen matte. Captions rise briefly,
+titles settle into place, and paired concept images crossfade over six frames with varied
+push/pull framing. Sound accents follow the cuts, the catch is followed by a real silence in
+the mix, and the final title and sound fade cleanly. Footage runs at normal speed. Segment
+starts and overlaps are written to `dev/trailer/out/edit.json` (`trailer.cjs --plan`).
 
 **Animation repair:** the owner spotted arm/wrist twitching on the doorway and table shots.
 The IK aim frames now use the bend-plane normal, avoiding 180° bone rolls. Elbow bend direction

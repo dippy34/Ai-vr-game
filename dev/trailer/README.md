@@ -1,9 +1,10 @@
 # MUTE development trailer
 
 The cut follows the owner's latest notes in `docs/HANDOFF.md` section 8: a close chase opens
-the trailer, followed by real gameplay and the catch. Halcyon Acoustics is marked as in
+the trailer, followed by real gameplay and the catch. The Lab is marked as in
 development; future locations say "Soon to come" with a smaller "Concept preview" label.
 Place names have no chapter or location numbers. Captions use short, plain wording.
+The approved names are The House, The Lab, The Tunnels, The Nest, and The Quiet Room.
 The end card has no campaign, demo, website or PC/browser claims. The gameplay is captured
 from the game renderer with scripted camera, monster and teammate movement. The soundtrack
 uses the game's procedural effects plus the offline score in `audio.ts`.
@@ -42,10 +43,18 @@ The outputs are `out/mute_trailer.mp4` (1080p30 master) and `out/mute_trailer_we
 (smaller sharing copy). `out/` and downloaded `fonts/` are ignored by Git. The approved exports
 are saved in [`docs/trailer/`](../../docs/trailer/):
 
-- [`mute_trailer.mp4`](../../docs/trailer/mute_trailer.mp4): 48-second 1080p30 master.
+- [`mute_trailer.mp4`](../../docs/trailer/mute_trailer.mp4): 46-second 1080p30 master.
 - [`mute_trailer_web.mp4`](../../docs/trailer/mute_trailer_web.mp4): smaller sharing copy.
 
 After an approved revision, copy the two exports there to publish them with the source changes.
+
+The polish pass adds restrained camera reframing, a consistent 72-pixel top/bottom matte,
+short caption rises and title scale settles. Paired concept images crossfade over six frames;
+each place keeps its status label throughout. Place names use plain sans-serif type, while
+MUTE keeps its existing display face. Transition sweeps, impacts, a silence after the catch,
+and a final audio fade follow the frame-aligned edit. Playback stays at normal speed.
+`trailer.cjs --plan` writes `out/edit.json` with segment starts, lengths and overlaps without
+rendering audio or video. The audio render leaves 1.5 dB of peak headroom before AAC encoding.
 
 The current chapter images are 960x540 previews. Full-HD renders in `docs/concept/raw/`
 are used automatically when available; see `art/concept/README.md`.

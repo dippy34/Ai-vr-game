@@ -182,8 +182,12 @@ The owner wants it **near impossible**: the beginning can be easier, but it has 
 ## Chapter pictures
 
 Six Blender renders of Chapters 2–4 (made with the real monster model) are in `docs/concept/`.
-In anything public (the trailer, the Kickstarter page) they're shown as the chapters themselves,
-labelled "Chapter 2 · The Echo Halls" and so on, **never as "concept art"** (the owner's call). The scripts that make them are in `art/concept/` (see its README).
+The latest approved trailer names are **The House**, **The Lab**, **The Tunnels**, **The Nest**,
+and **The Quiet Room**, corresponding to the five areas above. These display names supersede
+the older trailer chapter cards. The Lab says **In development**; the last three areas say
+**Soon to come / Concept preview**, because they are planned and have not been built yet.
+No chapter numbers or campaign announcement appear in the trailer. The scripts that make
+the pictures are in `art/concept/` (see its README).
 
 Four AI concept images for the Prologue and Chapter 1 were made in the owner's Canva account (the
 Canva credits ran out after these four):
