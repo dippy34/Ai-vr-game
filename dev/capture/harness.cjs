@@ -1,9 +1,17 @@
 // Gameplay-footage harness: a solo round on the no-HMR dev server (port 5302) with a bot
 // teammate ("Sam"), a directable monster, and one game frame (1/30 s of game time) per call.
-const { chromium } = require(require('child_process').execSync('npm root -g').toString().trim() + '/playwright');
+function loadPlaywright() {
+  try { return require('playwright'); } catch {}
+  return require(require('child_process').execSync('npm root -g').toString().trim() + '/playwright');
+}
+const { chromium } = loadPlaywright();
 
 async function setup({ width = 960, height = 540, base = 'http://localhost:5302/' } = {}) {
-  const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-watchdog', '--disable-renderer-backgrounding'] });
+  console.log(`capture: loading ${width}x${height} (${process.env.CAPTURE_GPU === '1' ? 'GPU' : 'software'})`);
+  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, args: [
+    ...(process.env.CAPTURE_GPU === '1' ? [] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader']),
+    '--disable-gpu-watchdog', '--disable-renderer-backgrounding',
+  ] });
   const ctx = await browser.newContext({ viewport: { width, height } });
   const page = await ctx.newPage();
   page.setDefaultTimeout(400000);
@@ -16,13 +24,16 @@ async function setup({ width = 960, height = 540, base = 'http://localhost:5302/
     if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = () => Promise.reject(new Error('no mic'));
   });
   await page.goto(base);
+  console.log('capture: opening solo lobby');
   await page.click('text=Play solo');
   await page.waitForSelector('text=Start round', { state: 'visible' });
   await page.waitForFunction(() => !!window.__mute.renderer.monster.mixer && window.__mute.renderer.surfaces.loaded, null, { timeout: 380000 });
+  console.log('capture: models and surfaces ready');
   await page.waitForTimeout(2500);
   // Sam joins in the lobby, then the round starts.
   await page.evaluate(() => window.__mute.game.current.sim.addPlayer('bot', 'Sam', false));
   await page.click('text=Start round');
+  console.log('capture: starting round');
   await page.waitForTimeout(1500);
   await page.evaluate(async () => {
     const m = window.__mute;

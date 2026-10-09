@@ -16,7 +16,7 @@ today) and `docs/STORY.md` (the agreed future direction: story, chapters, tools,
 - **Where it's going:** a Poppy Playtime-style chapter game with big maps, chase scenes, a
   signature gadget (the Echo) and near-impossible difficulty. See `docs/STORY.md`.
 - **Done:** the **Crank Light** replaced the camera flash, and the house is truly dark again
-  (§6, step 1). A **71 s Kickstarter trailer** is finished (§8).
+  (§6, step 1). A **70 s development trailer** is finished (§8).
 - **Money plan:** the owner is launching a **Kickstarter** (and maybe more) to pay for a bigger AI
   plan. The trailer is for that campaign. The free web demo is the proof the game is real.
 - **Next job:** the **Echo** gadget (§6, step 2).
@@ -191,31 +191,34 @@ Lobby, offices, anechoic labs, getting the Echo, sound-lock puzzles, the elevato
   the bottom of `docs/STORY.md`).
 - They wanted **no model IDs or AI names in repo files**.
 
-## 8. The Kickstarter trailer
+## 8. The development trailer
 
-**Files:** `dev/trailer/out/mute_trailer.mp4` (master, 1080p30, ~31 MB, for Kickstarter) and
-`mute_trailer_web.mp4` (~14 MB, for sharing). `out/` and `fonts/` are git-ignored, so rebuild them
-with the commands below. Everything that makes it is in `dev/trailer/` (see the comments at the top
-of each file).
+**Published files:** [`docs/trailer/mute_trailer.mp4`](trailer/mute_trailer.mp4) (master, 1080p30)
+and [`mute_trailer_web.mp4`](trailer/mute_trailer_web.mp4) (smaller sharing copy) are checked
+into the repository. The renderer writes to `dev/trailer/out/`; that scratch directory and
+downloaded `fonts/` remain git-ignored. Rebuild with the commands below, then copy approved
+exports to `docs/trailer/`. Everything that makes it is in `dev/trailer/` (see its `README.md`).
 
-**The cut (71 s), as the owner asked for it:** *show the real game first, straight away, then the
-chapters still to come, and never call those pictures "concept art".*
-1. **The real game** (0–38 s, all captured from the game itself, with a small top-left tag
-   "Prologue · The Hale House / Real gameplay. Playable now."). Captions sit low over the footage,
+**The cut (70 s), following the owner's latest revision:** show the real game first, straight
+away, then clearly distinguish development from concepts. These notes supersede the earlier
+request to avoid the words "concept art" and the campaign/demo calls to action.
+1. **The real game** (0–34 s, all captured from the game itself, with a small top-left tag
+   "Prologue · The Hale House / Gameplay · Work in progress"). Captions sit low over the footage,
    with no black cards in between:
-   - hallway, the light clicks on and finds it: "It can't see you." / "But it hears everything."
-   - it ducks through a doorway toward you: "Every footstep."
-   - it crawls over the coffee table: "Every breath." / "Even your real voice. MUTE listens to
-     your microphone."
-   - a teammate signs in your beam: "So you talk with your hands."
-   - the light dies, you wind it, it hears the ratchet, charges, the real jumpscare: "Your only
-     light is dying." / "Winding it is loud."
-2. **Title:** MUTE, "Don't make a sound."
-3. **The chapters:** "The house is only the beginning. Hollow Creek, 1996. Something got out of
-   Halcyon Acoustics." Then six pictures labelled **Chapter 2 · The Echo Halls**, **Chapter 3 ·
-   The Nest**, **Chapter 4 · The Quiet Room**, ending on the boss: "Or make it scream."
-4. **Features** (1–4 players co-op · Meta Quest VR · PC · plays in your browser) and the **end
-   card** ("Coming to Kickstarter", dippy34.github.io/Ai-vr-game, "Play the free demo now.").
+   - hallway, the light clicks on and finds it: "It hunts by sound."
+   - it ducks through a doorway toward you: no caption, let the scene breathe.
+   - it crawls over the coffee table: "Your mic can give you away."
+   - a teammate signs in your beam: "Use hand signals."
+   - the light dies, you wind it, it hears the ratchet, charges, the real jumpscare:
+     "Winding the light makes noise."
+2. **Title:** MUTE, without a tagline.
+3. **Chapter status:** **Chapter 1 · Halcyon Acoustics / Still in development**. Then six
+   pictures labelled **Chapter 2 · The Echo Halls**, **Chapter 3 · The Nest**, **Chapter 4 ·
+   The Quiet Room**. Every image, including the second shot of each chapter, carries the
+   persistent label **Concept art · Not built yet**. No boss slogan.
+4. **Features** (1–4 players co-op · Meta Quest VR) and the **end card** (MUTE / Chapter 1 in
+   development). No Kickstarter announcement, website, free-demo call to action, PC line or
+   browser claim.
 
 The sound is the game's own effects (rendered offline with the real audio code) plus a score:
 drones, braams, risers, hits, a heartbeat and the crank ratchet.
@@ -234,16 +237,15 @@ node dev/trailer/trailer.cjs --audio  # soundtrack only; --preview N = only the 
 `trailer.cjs`; sound cues in `cues()` (keyed by segment name, so reordering is safe); camera moves
 and the monster's scripted path in `shots.cjs`. Only `shots.cjs` changes need a re-capture.
 
-**Still to do for the campaign:**
-- Put the real Kickstarter URL on the end card once the page exists.
+**Remaining visual polish and standing preferences:**
 - Chapter 4's two pictures and the Chapter 2 chase / Chapter 3 tunnel are the 960×540 previews
   (slightly soft). Re-render them at 1920×1080 with `art/concept/` and save them to
   `docs/concept/raw/<name>.png`; the trailer uses those automatically.
 - **Do not disclose AI anywhere in the trailer** (no cards, captions or credits about AI). The
   owner checked the rules and handles this themselves in the Kickstarter description.
-- **The owner wants the trailer as cinematic as possible.** It's being re-filmed with the tools
-  above (`shots.cjs` drives the camera, the monster and the bot teammate; `trailer.cjs` does the
-  grade, cards and sound).
+- **The owner wants the trailer as cinematic as possible.** Gameplay was recaptured at 1080p
+  with the tools above (`shots.cjs` drives the camera, the monster and the bot teammate;
+  `trailer.cjs` does the grade, cards and sound).
 
 ## 9. Timeline of decisions (October 2026)
 
@@ -259,5 +261,9 @@ and the monster's scripted path in `shots.cjs`. Only `shots.cjs` changes need a 
 5. **Pictures of each map** (Canva for Prologue/Ch1 until its credits ran out, Blender for Ch2–4).
 6. **Crank Light built and deployed**, with real darkness and the monster hunch.
 7. **Kickstarter trailer made**, then **remade** on the owner's notes: real gameplay first, then
-   the chapters, and the chapter pictures are never called concept art.
+   the chapters; that earlier version avoided calling the chapter pictures concept art.
+8. **Trailer revised again:** remove the Kickstarter announcement, demo URL and invitation,
+   and PC/browser claims. Chapter 1 is still in development; every Chapter 2–4 image is
+   labelled "Concept art · Not built yet". Use fewer, plainer captions instead of repeated
+   slogans. This supersedes the earlier trailer wording.
 

@@ -103,7 +103,9 @@ const hands = {
     const sign = t < 0.4 ? null : t < 2.2 ? 'stop' : 'comeHere';
     const signStart = sign === 'stop' ? 0.4 : 2.2;
     return {
-      x: 0.0, z: 6.35, yaw: 4 + s.yaw, pitch: -15 + s.pitch, light: true,
+      // At this distance the flashlight sits below the eyes. Aim up slightly so its
+      // beam reaches Sam's raised palm rather than only lighting his chest.
+      x: 0.0, z: 6.35, yaw: 4 + s.yaw, pitch: 10 + s.pitch, light: true,
       bot: { x: 0.08, z: 5.4, yaw: 180, pitch: -10, sign, signStart },
       sign: t > 2.9 ? 'thumbsUp' : null,
       mon: { x: -9.5, z: -6.5, yaw: 0, gait: 'still', act: 'none' },
@@ -117,7 +119,8 @@ const windMon = build({ x: RUN_FROM, z: 0.1, yaw: -90 }, [
   { gait: 'still', act: 'none', alert: 0.3, wait: 3.9 },
   { act: 'listen', focus: { x: 8.6, y: 1.5, z: 0 }, mode: 'investigate', alert: 0.8, wait: 0.8 },
   { act: 'none', gait: 'run', mode: 'chase', alert: 1, focus: { x: 8.6, y: 1.4, z: 0 } },
-  { path: [[4.0, -0.15], [6.6, 0.05], [7.75, 0.0]], speed: 3.3, accel: 6 },
+  // Finish inside the real 0.75 m catch radius before handing control back to the sim.
+  { path: [[4.0, -0.15], [6.6, 0.05], [8.2, 0.0]], speed: 3.3, accel: 6 },
 ]);
 const wind = {
   frames: 280,
@@ -158,6 +161,7 @@ const SHOTS = { hall, door, climb, hands, wind };
     const dir = path.join(OUT, name);
     fs.mkdirSync(dir, { recursive: true });
     const t0 = Date.now();
+    let caught = false;
     if (TEST) {
       // Sample frames: warm up 12 frames before each one so the body has settled.
       for (const [n, k] of [0.25, 0.5, 0.85].entries()) {
@@ -168,11 +172,13 @@ const SHOTS = { hall, door, climb, hands, wind };
     } else {
       for (let f = 0; f < shot.frames; f++) {
         const info = await step(shot.cmd(f), path.join(dir, `f_${String(f).padStart(5, '0')}.jpg`));
+        caught ||= info.status === 'caught';
         if (f % 30 === 0) console.log(`${name} ${f}/${shot.frames} ${((Date.now() - t0) / 1000).toFixed(0)}s`, JSON.stringify(info));
       }
     }
     console.log(`== ${name} done in ${((Date.now() - t0) / 1000).toFixed(0)} s`);
     if (logs.length) console.log(logs.slice(0, 5).join('\n'));
     await browser.close();
+    if (!TEST && name === 'wind' && !caught) throw new Error('The wind shot did not reach the real catch. Re-capture before exporting the trailer.');
   }
 })();

@@ -74,10 +74,15 @@ function wav(buf: AudioBuffer): string {
   data.setUint32(24, buf.sampleRate, true); data.setUint32(28, buf.sampleRate * ch * 2, true);
   data.setUint16(32, ch * 2, true); data.setUint16(34, 16, true); w(36, 'data'); data.setUint32(40, len * ch * 2, true);
   const chans = Array.from({ length: ch }, (_, c) => buf.getChannelData(c));
+  // Leave 1 dB of peak headroom before converting the float mix to PCM/AAC.
+  // The score's overlapping hits can otherwise exceed full scale and hard-clip here.
+  let peak = 0;
+  for (const channel of chans) for (const sample of channel) peak = Math.max(peak, Math.abs(sample));
+  const scale = peak > 0 ? Math.min(1, Math.pow(10, -1 / 20) / peak) : 1;
   let o = 44;
   for (let i = 0; i < len; i++) {
     for (let c = 0; c < ch; c++) {
-      const v = Math.max(-1, Math.min(1, chans[c][i]));
+      const v = Math.max(-1, Math.min(1, chans[c][i] * scale));
       data.setInt16(o, v < 0 ? v * 0x8000 : v * 0x7fff, true);
       o += 2;
     }

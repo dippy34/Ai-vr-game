@@ -25,9 +25,9 @@ html,body{margin:0;width:1920px;height:1080px;background:transparent;overflow:hi
 .card.top{justify-content:flex-start;padding-top:70px;box-sizing:border-box;background:linear-gradient(180deg,rgba(0,0,0,.75),rgba(0,0,0,0) 28%)}
 .card.tag{align-items:flex-start;justify-content:flex-start;padding:64px 0 0 84px;box-sizing:border-box;text-align:left}
 .tagtop{font:600 30px/1 'Cinzel',serif;letter-spacing:.32em;color:#d2453a;text-shadow:0 0 10px #000,0 2px 3px #000}
-.tagsub{font:400 italic 32px/1.2 'Cormorant',serif;color:#cfc6b6;margin-top:12px;letter-spacing:.03em;text-shadow:0 0 10px #000}
-.card.left{align-items:flex-start;justify-content:flex-end;padding:0 0 120px 140px;box-sizing:border-box;text-align:left}
-.line{font:400 66px/1.25 'Special Elite',monospace;letter-spacing:.01em;text-shadow:0 0 18px #000,0 0 6px #000,0 3px 4px #000}
+.tagsub{font:400 30px/1.3 Arial,sans-serif;color:#e0d8ca;margin-top:14px;letter-spacing:.02em;text-shadow:0 0 10px #000}
+.card.left{align-items:flex-start;justify-content:flex-end;padding:0 0 100px 140px;box-sizing:border-box;text-align:left;background:linear-gradient(0deg,rgba(0,0,0,.72),rgba(0,0,0,0) 45%)}
+.line{font:400 58px/1.25 Arial,sans-serif;letter-spacing:.01em;text-shadow:0 0 18px #000,0 0 6px #000,0 3px 4px #000}
 .small{font:400 italic 40px/1.4 'Cormorant',serif;color:#b9b0a2;margin-top:22px;letter-spacing:.02em;text-shadow:0 0 10px #000}
 .red{color:#c4362b}
 .title{font:400 300px/1 'Cinzel',serif;letter-spacing:.42em;margin-left:.42em;color:#f2ede4;text-shadow:0 0 40px rgba(0,0,0,.9)}
@@ -35,41 +35,34 @@ html,body{margin:0;width:1920px;height:1080px;background:transparent;overflow:hi
 .tag{font:400 italic 54px/1.2 'Cormorant',serif;color:#cfc6b6;letter-spacing:.04em}
 .chap{font:600 46px/1 'Cinzel',serif;letter-spacing:.45em;color:#d2453a;text-shadow:0 0 10px #000,0 2px 3px #000}
 .chapname{font:400 92px/1.1 'Cinzel',serif;letter-spacing:.18em;margin-top:18px;text-shadow:0 0 24px #000,0 3px 6px #000}
+.status{font:400 40px/1.3 Arial,sans-serif;color:#ece6da;margin-top:34px;letter-spacing:.02em}
+.concept{font:400 32px/1.3 Arial,sans-serif;color:#ece6da;margin-top:22px;letter-spacing:.04em;text-shadow:0 0 12px #000,0 2px 4px #000}
 .feat{font:400 64px/1.7 'Cinzel',serif;letter-spacing:.14em}
 .feat .dot{color:#c4362b;margin:0 .35em}
 .endtitle{font:400 170px/1 'Cinzel',serif;letter-spacing:.42em;margin-left:.42em}
-.cta{font:600 52px/1 'Cinzel',serif;letter-spacing:.32em;color:#c4362b;margin-top:44px}
-.url{font:400 46px/1.3 'Special Elite',monospace;margin-top:56px;color:#ece6da}
-.urlsub{font:400 italic 38px/1.3 'Cormorant',serif;color:#9e9586;margin-top:10px}
-.foot{font:400 30px/1 'Cinzel',serif;letter-spacing:.3em;color:#857c6e;margin-top:70px}
 `;
 
 const CARDS = {
-  // Part 1: the real game.
-  tag_real: `<div class="card tag"><div class="tagtop">Prologue · The Hale House</div><div class="tagsub">Real gameplay. Playable now.</div></div>`,
-  cant_see: `<div class="card low"><div class="line">It can't see you.</div></div>`,
-  hears: `<div class="card low"><div class="line">But it hears <span class="red">everything.</span></div></div>`,
-  footstep: `<div class="card low"><div class="line">Every footstep.</div></div>`,
-  breath: `<div class="card low"><div class="line">Every breath.</div></div>`,
-  voice: `<div class="card low"><div class="line">Even your <span class="red">real voice.</span></div><div class="small">MUTE listens to your microphone.</div></div>`,
-  hands: `<div class="card low"><div class="line">So you talk with your hands.</div></div>`,
-  dying: `<div class="card low"><div class="line">Your only light is dying.</div></div>`,
-  loud: `<div class="card low"><div class="line">Winding it is <span class="red">loud.</span></div></div>`,
-  title: `<div class="card black"><div class="title">MUTE</div><div class="rule"></div><div class="tag">Don't make a sound.</div></div>`,
-  // Part 2: the chapters to come.
-  story: `<div class="card black"><div class="line">The house is only the beginning.</div><div class="small">Hollow Creek, 1996. Something got out of Halcyon Acoustics.</div></div>`,
-  ch2: `<div class="card left"><div class="chap">Chapter 2</div><div class="chapname">The Echo Halls</div></div>`,
-  ch3: `<div class="card left"><div class="chap">Chapter 3</div><div class="chapname">The Nest</div></div>`,
-  ch4: `<div class="card left"><div class="chap">Chapter 4</div><div class="chapname">The Quiet Room</div></div>`,
-  boss: `<div class="card top"><div class="line">Or make it <span class="red">scream.</span></div></div>`,
-  features: `<div class="card black"><div class="feat">1–4 players<span class="dot">·</span>co-op</div><div class="feat">Meta Quest VR<span class="dot">·</span>PC</div><div class="feat">Plays in your browser</div></div>`,
-  end: `<div class="card black"><div class="endtitle">MUTE</div><div class="cta">Coming to Kickstarter</div><div class="url">dippy34.github.io/Ai-vr-game</div><div class="urlsub">Play the free demo now.</div></div>`,
+  // Part 1: captured prologue gameplay, with fewer, direct captions.
+  tag_real: `<div class="card tag"><div class="tagtop">Prologue · The Hale House</div><div class="tagsub">Gameplay · Work in progress</div></div>`,
+  sound: `<div class="card low"><div class="line">It hunts by sound.</div></div>`,
+  voice: `<div class="card low"><div class="line">Your mic can give you away.</div></div>`,
+  hands: `<div class="card low"><div class="line">Use hand signals.</div></div>`,
+  wind: `<div class="card low"><div class="line">Winding the light makes noise.</div></div>`,
+  title: `<div class="card black"><div class="title">MUTE</div></div>`,
+  // Part 2: chapter status. These are concepts, not completed levels.
+  story: `<div class="card black"><div class="chap">Chapter 1</div><div class="chapname">Halcyon Acoustics</div><div class="status">Still in development</div></div>`,
+  ch2: `<div class="card left"><div class="chap">Chapter 2</div><div class="chapname">The Echo Halls</div><div class="concept">Concept art · Not built yet</div></div>`,
+  ch3: `<div class="card left"><div class="chap">Chapter 3</div><div class="chapname">The Nest</div><div class="concept">Concept art · Not built yet</div></div>`,
+  ch4: `<div class="card left"><div class="chap">Chapter 4</div><div class="chapname">The Quiet Room</div><div class="concept">Concept art · Not built yet</div></div>`,
+  features: `<div class="card black"><div class="feat">1–4 players<span class="dot">·</span>co-op</div><div class="feat">Meta Quest VR</div></div>`,
+  end: `<div class="card black"><div class="endtitle">MUTE</div><div class="status">Chapter 1 in development</div></div>`,
 };
 
 (async () => {
   const { chromium } = loadPlaywright();
   fs.mkdirSync(OUT, { recursive: true });
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH });
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
   const only = process.argv.slice(2);
   for (const [id, html] of Object.entries(CARDS)) {

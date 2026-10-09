@@ -5,14 +5,14 @@
 // capture server).
 //
 // Two parts, on the owner's call: first the real game, straight away (no black cards between the
-// shots), then the title, then the chapters still to come. On screen the chapter pictures are just
-// "Chapter 2 / 3 / 4", never "concept art".
+// shots), then the title, Chapter 1's development status and the chapter concepts. Every concept
+// image is labelled as not built yet; there are no campaign or demo calls to action.
 //
 //   node dev/trailer/trailer.cjs            (needs the frames, the cards and the server on :5320)
 //   node dev/trailer/trailer.cjs --audio    (soundtrack only)
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 function loadPlaywright() {
   try { return require('playwright'); } catch {}
   return require(require('child_process').execSync('npm root -g').toString().trim() + '/playwright');
@@ -42,23 +42,23 @@ const frame = (shot, f) => path.join(OUT, shot, `f_${String(f).padStart(5, '0')}
 // ---------------------------------------------------------------------------------------------
 const EDIT = [
   // Part 1: the real game, straight away.
-  { name: 'hall', kind: 'shot', shot: 'hall', from: 0, to: 199, fadeIn: 0.4, cards: [{ id: 'tag_real', from: 0.3, to: 5.4 }, { id: 'cant_see', from: 0.6, to: 3.0 }, { id: 'hears', from: 3.4, to: 6.4 }] },
+  { name: 'hall', kind: 'shot', shot: 'hall', from: 0, to: 199, fadeIn: 0.4, cards: [{ id: 'tag_real', from: 0.3, to: 6.6 }, { id: 'sound', from: 2.3, to: 6.4 }] },
   { name: 'cut1', kind: 'black', dur: 0.25 },
-  { name: 'door', kind: 'shot', shot: 'door', from: 20, to: 243, cards: [{ id: 'footstep', from: 0.9, to: 3.5 }] },
-  { name: 'climb', kind: 'shot', shot: 'climb', from: 10, to: 219, fadeOut: 0.4, cards: [{ id: 'breath', from: 0.6, to: 3.0 }, { id: 'voice', from: 3.4, to: 6.9 }] },
+  { name: 'door', kind: 'shot', shot: 'door', from: 20, to: 243 },
+  { name: 'climb', kind: 'shot', shot: 'climb', from: 10, to: 219, fadeOut: 0.4, cards: [{ id: 'voice', from: 3.4, to: 6.9 }] },
   { name: 'cut2', kind: 'black', dur: 0.3 },
   { name: 'hands', kind: 'shot', shot: 'hands', from: 0, to: 119, fadeIn: 0.3, cards: [{ id: 'hands', from: 0.5, to: 3.7 }] },
-  { name: 'wind', kind: 'shot', shot: 'wind', from: 0, to: 'jumpscare', cards: [{ id: 'dying', from: 0.3, to: 2.3 }, { id: 'loud', from: 2.6, to: 4.4 }] },
+  { name: 'wind', kind: 'shot', shot: 'wind', from: 0, to: 'jumpscare', cards: [{ id: 'wind', from: 1.6, to: 4.6 }] },
   { name: 'after', kind: 'black', dur: 1.3 },
   { name: 'title', kind: 'black', dur: 5.4, cards: [{ id: 'title', from: 0.05, to: 5.1, fade: 0.08 }] },
-  // Part 2: the chapters still to come.
+  // Part 2: Chapter 1 is in development; Chapters 2–4 are unbuilt concepts.
   { name: 'story', kind: 'black', dur: 3.6, cards: [{ id: 'story', from: 0.3, to: 3.3 }] },
-  { name: 'ch2', kind: 'still', image: art('ch2_echo_halls_wide'), dur: 2.8, zoom: 0.06, cards: [{ id: 'ch2', from: 0.3, to: 2.6 }] },
-  { name: 'ch2b', kind: 'still', image: art('ch2_echo_halls_chase'), dur: 2.0, zoom: 0.05 },
-  { name: 'ch3', kind: 'still', image: art('ch3_nest_tunnel'), dur: 2.8, zoom: 0.06, cards: [{ id: 'ch3', from: 0.3, to: 2.6 }] },
-  { name: 'ch3b', kind: 'still', image: art('ch3_nest_den'), dur: 2.0, zoom: 0.05 },
-  { name: 'ch4', kind: 'still', image: art('ch4_quiet_room_vault'), dur: 2.8, zoom: 0.06, cards: [{ id: 'ch4', from: 0.3, to: 2.6 }] },
-  { name: 'boss', kind: 'still', image: art('ch4_quiet_room_boss'), dur: 2.8, zoom: 0.08, cards: [{ id: 'boss', from: 0.4, to: 2.6 }] },
+  { name: 'ch2', kind: 'still', image: art('ch2_echo_halls_wide'), dur: 2.8, zoom: 0.06, cards: [{ id: 'ch2', from: 0, to: 2.8, fade: 0, fadeOutDur: 0 }] },
+  { name: 'ch2b', kind: 'still', image: art('ch2_echo_halls_chase'), dur: 2.0, zoom: 0.05, cards: [{ id: 'ch2', from: 0, to: 2.0, fade: 0, fadeOutDur: 0 }] },
+  { name: 'ch3', kind: 'still', image: art('ch3_nest_tunnel'), dur: 2.8, zoom: 0.06, cards: [{ id: 'ch3', from: 0, to: 2.8, fade: 0, fadeOutDur: 0 }] },
+  { name: 'ch3b', kind: 'still', image: art('ch3_nest_den'), dur: 2.0, zoom: 0.05, cards: [{ id: 'ch3', from: 0, to: 2.0, fade: 0, fadeOutDur: 0 }] },
+  { name: 'ch4', kind: 'still', image: art('ch4_quiet_room_vault'), dur: 2.8, zoom: 0.06, cards: [{ id: 'ch4', from: 0, to: 2.8, fade: 0, fadeOutDur: 0 }] },
+  { name: 'boss', kind: 'still', image: art('ch4_quiet_room_boss'), dur: 2.8, zoom: 0.08, cards: [{ id: 'ch4', from: 0, to: 2.8, fade: 0, fadeOutDur: 0 }] },
   { name: 'features', kind: 'black', dur: 4.2, cards: [{ id: 'features', from: 0.3, to: 3.9 }] },
   { name: 'end', kind: 'black', dur: 6.5, cards: [{ id: 'end', from: 0.4, to: 6.5, fadeOutDur: 0 }] },
 ];
@@ -72,7 +72,8 @@ function jumpscareCut() {
   // jumpscare frame) is where the game cuts to black.
   let lit = false;
   for (let i = 200; i < files.length; i++) {
-    const y = Number(execSync(`ffmpeg -loglevel error -i ${path.join(dir, files[i])} -vf scale=64:36,format=gray -f rawvideo - | od -An -tu1 -v | awk '{for(i=1;i<=NF;i++){s+=$i;n++}} END{print s/n}'`).toString());
+    const pixels = execFileSync('ffmpeg', ['-loglevel', 'error', '-i', path.join(dir, files[i]), '-vf', 'scale=64:36,format=gray', '-f', 'rawvideo', '-']);
+    const y = pixels.reduce((sum, value) => sum + value, 0) / pixels.length;
     if (y > 30) lit = true;
     if (lit && y < 4) return i;
   }
@@ -95,7 +96,8 @@ function cardFilters(cards, inputOffset, dur) {
     const fade = c.fade ?? 0.5;
     const outDur = c.fadeOutDur ?? fade;
     const outAt = Math.min(c.to, dur) - outDur;
-    let chain = `[${inputOffset + i}:v]format=rgba,fade=t=in:st=${c.from}:d=${fade}:alpha=1`;
+    let chain = `[${inputOffset + i}:v]format=rgba`;
+    if (fade > 0) chain += `,fade=t=in:st=${c.from}:d=${fade}:alpha=1`;
     if (outDur > 0) chain += `,fade=t=out:st=${outAt.toFixed(3)}:d=${outDur}:alpha=1`;
     parts.push(`${chain}[c${i}]`);
     parts.push(`[v${i}][c${i}]overlay=0:0:enable='between(t,${c.from},${c.to})'[v${i + 1}]`);
@@ -109,11 +111,11 @@ function encodeSegment(s, i) {
   const inputs = [];
   let base;
   if (s.kind === 'black') {
-    inputs.push(`-f lavfi -t ${dur} -i color=c=black:s=${W}x${H}:r=${FPS}`);
+    inputs.push('-f', 'lavfi', '-t', String(dur), '-i', `color=c=black:s=${W}x${H}:r=${FPS}`);
     base = '[0:v]format=yuv420p[v0]';
   } else if (s.kind === 'shot') {
     const n = s.toFrame - s.from + 1;
-    inputs.push(`-framerate ${FPS} -start_number ${s.from} -i ${path.join(OUT, s.shot, 'f_%05d.jpg')}`);
+    inputs.push('-framerate', String(FPS), '-start_number', String(s.from), '-i', path.join(OUT, s.shot, 'f_%05d.jpg'));
     let f = `[0:v]trim=end_frame=${n},${GRADE}`;
     if (s.fadeIn) f += `,fade=t=in:st=0:d=${s.fadeIn}`;
     if (s.fadeOut) f += `,fade=t=out:st=${(dur - s.fadeOut).toFixed(3)}:d=${s.fadeOut}`;
@@ -121,17 +123,19 @@ function encodeSegment(s, i) {
   } else {
     const img = s.image();
     const frames = Math.round(dur * FPS);
-    inputs.push(`-loop 1 -framerate ${FPS} -t ${dur} -i ${img}`);
+    inputs.push('-loop', '1', '-framerate', String(FPS), '-t', String(dur), '-i', img);
     // Slow push-in (Ken Burns) on a 2x upscale, so the zoom is smooth.
     const z = s.zoom ?? 0.05;
     base = `[0:v]scale=${W * 2}:${H * 2}:flags=lanczos,zoompan=z='1+${z}*on/${frames}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${W}x${H}:fps=${FPS},${s.grade ?? STILL_GRADE},fade=t=in:st=0:d=0.35,fade=t=out:st=${(dur - 0.35).toFixed(3)}:d=0.35,format=yuv420p[v0]`;
   }
   const cards = s.cards ?? [];
-  for (const c of cards) inputs.push(`-loop 1 -framerate ${FPS} -t ${dur} -i ${path.join(CARDS, `${c.id}.png`)}`);
-  const graph = [base, ...cardFilters(cards, 1, dur)].join(';');
-  const last = `[v${cards.length}]`;
+  for (const c of cards) inputs.push('-loop', '1', '-framerate', String(FPS), '-t', String(dur), '-i', path.join(CARDS, `${c.id}.png`));
+  // JPEG captures are full range; generated cards are limited range. Normalize every
+  // segment before concatenating so the master has consistent blacks and HD color tags.
+  const graph = [base, ...cardFilters(cards, 1, dur), `[v${cards.length}]scale=in_range=auto:out_range=tv:out_color_matrix=bt709,setsar=1,format=yuv420p,sidedata=mode=delete:type=ICC_PROFILE[out]`].join(';');
+  const last = '[out]';
   fs.writeFileSync(`${out}.filter`, graph);
-  execSync(`ffmpeg -loglevel error -y ${inputs.join(' ')} -filter_complex_script ${out}.filter -map "${last}" -t ${dur} -r ${FPS} -c:v libx264 -preset medium -crf 19 -pix_fmt yuv420p ${out}`, { stdio: 'inherit' });
+  execFileSync('ffmpeg', ['-loglevel', 'error', '-y', ...inputs, '-filter_complex_script', `${out}.filter`, '-map', last, '-t', String(dur), '-r', String(FPS), '-c:v', 'libx264', '-preset', 'medium', '-crf', '19', '-pix_fmt', 'yuv420p', '-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', out], { stdio: 'inherit' });
   return out;
 }
 
@@ -163,7 +167,7 @@ function cues(starts) {
   C.push({ t: at('door'), k: 'steps', dur: 5.0, every: 0.62, from: [-1.5, 0, -5], to: [-0.5, 0, -1.6], weight: 0.85, gain: 1.3 });
   C.push({ t: at('door', (184 - 20) / FPS), k: 'sfx', fn: 'sfxSniff', pos: [0, 0.3, -1.2], gain: 1.5 });
   C.push({ t: at('door', 0.5), k: 'heart', dur: 7, bpm0: 62, bpm1: 88, gain: 0.55 });
-  // 3. Climb: crawling, a claw scrape on the table; "Even your real voice" over the end of it.
+  // 3. Climb: crawling and a claw scrape on the table, then the microphone caption.
   C.push({ t: at('climb', 0.8), k: 'sfx', fn: 'sfxMonsterCrawl', args: [true], pos: [0.5, 0, -2.5], gain: 1.3 });
   C.push({ t: at('climb', 2.0), k: 'sfx', fn: 'sfxMonsterCrawl', args: [true], pos: [0, 0, -2.4], gain: 1.3 });
   C.push({ t: at('climb', 3.1), k: 'sfx', fn: 'sfxClawScrape', pos: [-0.5, 0, -2.3], gain: 1.3 });
@@ -200,7 +204,7 @@ let segDurs = [];
 
 async function renderAudio(starts, file) {
   const { chromium } = loadPlaywright();
-  const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, args: ['--autoplay-policy=no-user-gesture-required'] });
   const page = await browser.newPage();
   page.on('pageerror', (e) => console.log('audio page error:', e.message));
   await page.goto(`http://localhost:${PORT}/dev/trailer/audio.html`);
@@ -230,15 +234,15 @@ async function renderAudio(starts, file) {
     return encodeSegment(s, i);
   });
   const list = path.join(SEG, 'list.txt');
-  fs.writeFileSync(list, files.map((f) => `file '${f}'`).join('\n'));
+  fs.writeFileSync(list, files.map((f) => `file '${f.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`).join('\n'));
   const video = path.join(SEG, 'video.mp4');
-  execSync(`ffmpeg -loglevel error -y -f concat -safe 0 -i ${list} -c copy ${video}`, { stdio: 'inherit' });
+  execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', video], { stdio: 'inherit' });
   const final = path.join(OUT, upto < EDIT.length ? 'mute_trailer_preview.mp4' : 'mute_trailer.mp4');
-  execSync(`ffmpeg -loglevel error -y -i ${video} -i ${wav} -map 0:v -map 1:a -c:v copy -c:a aac -b:a 256k -shortest -movflags +faststart ${final}`, { stdio: 'inherit' });
-  console.log(execSync(`ffprobe -v error -show_entries format=duration,size -of default=nw=1 ${final}`).toString());
+  execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', video, '-i', wav, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '256k', '-shortest', '-movflags', '+faststart', final], { stdio: 'inherit' });
+  console.log(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration,size', '-of', 'default=nw=1', final]).toString());
   if (upto < EDIT.length) return;
   // A smaller copy for sharing and the web.
   const web = path.join(OUT, 'mute_trailer_web.mp4');
-  execSync(`ffmpeg -loglevel error -y -i ${final} -c:v libx264 -preset slow -crf 23 -pix_fmt yuv420p -c:a copy -movflags +faststart ${web}`, { stdio: 'inherit' });
-  console.log(execSync(`ffprobe -v error -show_entries format=duration,size -of default=nw=1 ${web}`).toString());
+  execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', final, '-c:v', 'libx264', '-preset', 'slow', '-crf', '23', '-pix_fmt', 'yuv420p', '-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-c:a', 'copy', '-movflags', '+faststart', web], { stdio: 'inherit' });
+  console.log(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration,size', '-of', 'default=nw=1', web]).toString());
 })();
