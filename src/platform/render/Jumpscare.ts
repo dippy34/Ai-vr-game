@@ -51,7 +51,8 @@ export const JUMPSCARE_TIMING = {
   /** The retinal-burn afterimage of the face is baked here (it ramps in over the black). */
   burnAt: 0.84,
   /** Attack clip time at 0 s, when the jaws are fully split (`jawOpenAt` s later), and at the cut. */
-  clipStart: 0.3,
+  // Start after the head has risen, so face placement cannot pull the torso through the camera.
+  clipStart: 0.48,
   clipOpen: 0.5,
   jawOpenAt: 0.2,
   clipCut: 0.66,

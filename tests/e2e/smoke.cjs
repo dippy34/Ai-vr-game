@@ -94,7 +94,8 @@ async function monsterAway(page, x, z, d = 4) {
 
 (async () => {
   const browser = await chromium.launch({
-    args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+    executablePath: process.env.CHROME_PATH,
+    args: [...(process.env.E2E_GPU === '1' ? [] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader']), '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
   });
   const ctx = await browser.newContext({ viewport: { width: 640, height: 400 } });
   await ctx.grantPermissions(['microphone']);

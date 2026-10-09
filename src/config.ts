@@ -97,6 +97,18 @@ export const LIGHT = {
   crankNoiseInterval: 0.3,
 } as const;
 
+/** Procedural monster limits (rad), turns (rad/s), blends (1/s), and clearance (m). */
+export const MONSTER_ANIMATION = {
+  elbowTurnSpeed: 4.5,
+  armTurnSpeed: 18,
+  wristTurnSpeed: 7,
+  wristMaxAngle: 1.5,
+  hipRecoverSpeed: 6,
+  handPlantBlendSpeed: 8,
+  rearUpSpeed: 10,
+  preyFaceClearance: 0.65,
+} as const;
+
 export const MONSTER = {
   /** Patrol pace inside a room (a hunched prowl), and when roaming over to another room. */
   wanderSpeed: 1.1,

@@ -62,10 +62,28 @@ describe('SkinnedMonster (procedural body)', () => {
     const target = new THREE.Vector3(-8, 1.6, 0.5);
     m.setCatch(0.4, 'face', target, 0, 0.1, 1);
     m.update(state(-9, 0), 1 / 60);
+    expect(new THREE.Vector3().setFromMatrixPosition(m.object.matrixWorld).distanceTo(m.object.position)).toBeLessThan(1e-6);
     m.clearCatch();
     m.update(state(-9, 0), 1 / 60);
     expect(m.object.position.distanceTo(new THREE.Vector3(-9, 0, 0))).toBeLessThan(0.05);
     expect(m.lungeReach).toBeGreaterThan(0);
     expect((m as unknown as { mixer: unknown }).mixer).toBeTruthy();
+  });
+
+  it('keeps its charging face outside the prey camera until the catch', () => {
+    const { asset: a, instance } = asset();
+    const m = new SkinnedMonster(a, instance);
+    m.setLevel(createLevel(1));
+    const target = { x: 8.6, y: 1.6, z: 0.05 };
+    const eye = new THREE.Vector3(target.x, target.y, target.z);
+    const jaw = instance.getObjectByName('jaw')!;
+    const face = new THREE.Vector3();
+    for (let f = 0; f < 80; f++) {
+      const x = 1.2 + 3.3 * f / 30;
+      if (target.x - x < 0.75) break;
+      m.update({ ...state(x, 0.05), mode: 'chase', target, focus: target, gait: 'run', speed: 3.3, alert: 1 }, 1 / 30);
+      jaw.localToWorld(face.set(0, 0.05, 0.015));
+      expect(face.distanceTo(eye), `camera clearance frame ${f}`).toBeGreaterThanOrEqual(0.649);
+    }
   });
 });

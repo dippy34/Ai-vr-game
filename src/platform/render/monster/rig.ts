@@ -198,8 +198,10 @@ export class MonsterRig {
     const P = this.restMP;
     const lenA = P[upper].distanceTo(P[fore]);
     const lenB = P[fore].distanceTo(P[hand]);
-    // The elbow's rest bend (it bends back/out): the reference for the arm's twist.
+    // Use the bend-plane normal for twist. A bend direction projected onto a folding
+    // forearm reverses at 90 degrees and produces a 180-degree roll snap.
     const bend = this.bendDir(upper, fore, hand, new THREE.Vector3(0, 0, 1));
+    const normal = P[hand].clone().sub(P[upper]).cross(bend).normalize();
     const fingers = FINGERS.map((f) => [1, 2, 3].map((k) => I(`${f}_${k}`)));
     const mid = fingers[2][0] >= 0 ? fingers[2] : fingers[1];
     let handLen = 0.25;
@@ -230,8 +232,8 @@ export class MonsterRig {
     }
     return {
       shoulder, upper, fore, hand, fingers, lenA, lenB, handLen,
-      upperAim: this.aim(upper, fore, bend),
-      foreAim: this.aim(fore, hand, bend),
+      upperAim: this.aim(upper, fore, normal),
+      foreAim: this.aim(fore, hand, normal),
       handAim, curlAxis, spreadAxis,
     };
   }
@@ -244,13 +246,14 @@ export class MonsterRig {
     const toe = I('toe');
     const P = this.restMP;
     const bend = this.bendDir(thigh, shin, foot, new THREE.Vector3(0, 0, -1));
+    const normal = P[foot].clone().sub(P[thigh]).cross(bend).normalize();
     const toeInv = this.restMQ[toe].clone().invert();
     return {
       thigh, shin, foot, toe,
       lenA: P[thigh].distanceTo(P[shin]),
       lenB: P[shin].distanceTo(P[foot]),
-      thighAim: this.aim(thigh, shin, bend),
-      shinAim: this.aim(shin, foot, bend),
+      thighAim: this.aim(thigh, shin, normal),
+      shinAim: this.aim(shin, foot, normal),
       ankleFromBall: P[foot].clone().sub(P[toe]),
       ballHeight: Math.max(0.01, P[toe].y),
       restBall: P[toe].clone().setY(0),

@@ -139,6 +139,9 @@ async function setup({ width = 960, height = 540, base = 'http://localhost:5302/
         mon.yaw = cmd.mon.yaw * D;
         mon.alert = cmd.mon.alert ?? 0.7;
         mon.mode = cmd.mon.mode ?? 'wander';
+        // A frozen shot must not inherit an unrelated target from the live brain.
+        mon.target = cmd.mon.target ?? (mon.mode === 'chase' ? cmd.mon.focus ?? null : null);
+        mon.targetPlayer = null;
         if (cmd.mon.speed !== undefined) mon.speed = cmd.mon.speed;
         if (cmd.mon.gait) mon.gait = cmd.mon.gait;
         if (cmd.mon.posture) mon.posture = cmd.mon.posture;
@@ -148,6 +151,8 @@ async function setup({ width = 960, height = 540, base = 'http://localhost:5302/
         }
         if (cmd.mon.focus !== undefined) mon.focus = cmd.mon.focus;
       }
+      // A scripted shot can hand a sound to the real hearing/AI rules on release.
+      if (cmd.noise && me0) sim.reportNoise({ source: 'light', position: me0.pose.head.position, loudness: cmd.noise, playerId: s.localId });
       const cap = cmd.caption ?? '';
       if (cap !== lastCap) { document.getElementById('cap').innerHTML = cap; lastCap = cap; }
       const card = cmd.card ?? '';

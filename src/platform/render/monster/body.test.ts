@@ -1,4 +1,6 @@
+/// <reference types="node" />
 import * as THREE from 'three';
+import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import { createLevel } from '../../../core/level';
 import { fixtureSkeleton } from './__fixtures__/rig';
@@ -9,6 +11,7 @@ import { MonsterWorld } from './world';
 
 const level = createLevel(1);
 const world = new MonsterWorld(level);
+const { SHOTS } = createRequire(import.meta.url)('../../../../dev/trailer/shots.cjs');
 
 function makeBody(seed = 7): { body: ProceduralBody; rig: MonsterRig } {
   const rig = MonsterRig.build(fixtureSkeleton())!;
@@ -26,6 +29,47 @@ function toLevel(body: ProceduralBody, m: THREE.Vector3, out: THREE.Vector3): TH
 }
 
 describe('ProceduralBody', () => {
+  it.each(['door', 'climb', 'wind', 'rush'])('keeps arms continuous on the %s trailer path', (name) => {
+    const { body, rig } = makeBody(0x6d6f6e);
+    const joints = rig.arms.flatMap(a => [a.upper, a.fore, a.hand]);
+    const previous = joints.map(i => rig.q[i].clone());
+    const m = {
+      position: { x: 0, y: 0, z: 0 }, yaw: 0, mode: 'wander', target: null,
+      targetPlayer: null, speed: 0, alert: 0.5, gait: 'still', posture: 'tall',
+      act: 'none', actStart: 0, focus: null,
+    } as Parameters<ProceduralBody['update']>[0];
+    for (let f = 0; f < SHOTS[name].frames; f++) {
+      const c = SHOTS[name].cmd(f).mon;
+      if (!c) break;
+      m.position = { x: c.x, y: c.y ?? 0, z: c.z };
+      m.yaw = c.yaw * Math.PI / 180;
+      m.speed = c.speed ?? 0;
+      m.mode = c.mode ?? 'wander';
+      m.alert = c.alert ?? 0.5;
+      m.gait = c.gait ?? 'still';
+      m.posture = c.posture ?? 'tall';
+      if (m.act !== c.act) m.actStart = f / 30;
+      m.act = c.act ?? 'none';
+      m.focus = c.focus ?? null;
+      body.update(m, 1 / 30);
+      for (let j = 0; j < joints.length; j++) {
+        const q = rig.q[joints[j]];
+        if (f > 10) {
+          const wrist = j % 3 === 2;
+          const limit = wrist ? 0.25 : name === 'climb' ? 0.5 : 1.0;
+          expect(previous[j].angleTo(q), `${name} ${rig.bones[joints[j]].name} frame ${f}`).toBeLessThan(limit);
+        }
+        previous[j].copy(q);
+      }
+      if (name === 'door' && f >= 20) {
+        for (const arm of rig.arms) {
+          toLevel(body, rig.mp[arm.fore], _p);
+          expect(world.blocked(_p.x, _p.z, _p.y), `door elbow frame ${f}`).toBe(false);
+        }
+      }
+    }
+  });
+
   it('reads the rig by name and measures it', () => {
     const { rig } = makeBody();
     expect(rig.hipHeight).toBeCloseTo(1.265, 2);

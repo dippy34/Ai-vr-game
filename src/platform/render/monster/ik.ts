@@ -12,6 +12,36 @@ const _y = new THREE.Vector3();
 const _z = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 
+/** Keep the bend direction continuous when the requested pole crosses the limb axis. */
+export function stablePole(
+  root: THREE.Vector3,
+  target: THREE.Vector3,
+  wanted: THREE.Vector3,
+  previous: THREE.Vector3,
+  maxTurn: number,
+  out: THREE.Vector3,
+): THREE.Vector3 {
+  _d.subVectors(target, root).normalize();
+  if (_d.lengthSq() < 1e-8) return out.copy(previous);
+  _y.copy(wanted).addScaledVector(_d, -wanted.dot(_d));
+  _p.copy(previous).addScaledVector(_d, -previous.dot(_d));
+  if (_p.lengthSq() < 1e-8) {
+    _p.set(Math.abs(_d.y) < 0.9 ? 0 : 1, Math.abs(_d.y) < 0.9 ? 1 : 0, 0);
+    _p.addScaledVector(_d, -_p.dot(_d));
+  }
+  _p.normalize();
+  // Near a singular pole there is no reliable new direction to turn toward.
+  if (_y.lengthSq() > 0.01) {
+    _y.normalize();
+    _x.crossVectors(_p, _y);
+    const angle = Math.atan2(_d.dot(_x), _p.dot(_y));
+    _p.applyAxisAngle(_d, THREE.MathUtils.clamp(angle, -maxTurn, maxTurn));
+  }
+  out.copy(_p);
+  previous.copy(out);
+  return out;
+}
+
 /**
  * Solve a two-bone chain (root -> mid -> end) for `target`. The middle joint bends toward `pole`
  * (a direction; only its part perpendicular to root->target matters). Writes the solved middle

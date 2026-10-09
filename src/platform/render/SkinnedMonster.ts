@@ -13,7 +13,7 @@
  */
 
 import * as THREE from 'three';
-import { MONSTER } from '../../config';
+import { MONSTER, MONSTER_ANIMATION } from '../../config';
 import type { LevelData, MonsterMode, MonsterState } from '../../core/types';
 import { bakeObject, type ModelAsset } from './assets';
 import type { CatchPoser } from './Jumpscare';
@@ -254,14 +254,40 @@ export class SkinnedMonster implements CatchPoser {
     }
     if (this.clipW > 0) this.mixer.update(dt);
     this.rig!.write(1 - this.clipW);
+    this.clearPreyCamera(m);
+  }
+
+  /** Keep a charging face out of the prey's camera until the catch owns its placement. */
+  private clearPreyCamera(m: MonsterState): void {
+    const target = m.target ?? m.focus;
+    if (m.mode !== 'chase' || !target) return;
+    this.object.updateMatrixWorld(true);
+    this.facePoint(_f);
+    const dy = _f.y - target.y;
+    const gap = MONSTER_ANIMATION.preyFaceClearance;
+    if (Math.abs(dy) >= gap) return;
+    _v.set(target.x - this.pos.x, 0, target.z - this.pos.z).normalize();
+    const depth = (target.x - _f.x) * _v.x + (target.z - _f.z) * _v.z;
+    const need = Math.sqrt(gap * gap - dy * dy);
+    if (depth < need) {
+      this.object.position.addScaledVector(_v, depth - need);
+      this.object.updateMatrixWorld(true);
+    }
   }
 
   private updateCatch(dt: number): void {
     const attack = this.actions.get('Attack');
+    const first = !this.catchStarted;
     if (!this.catchStarted) {
       this.catchStarted = true;
       this.lastCatch = this.time;
       if (attack) {
+        // The local catch owns the full pose, including bones the clip does not key.
+        // Clear the crawling pose before the mixer's first sample is bound.
+        if (this.catchPlace === 'face' && this.rig) {
+          this.rig.resetPose();
+          this.rig.write(1);
+        }
         const prev = this.current && this.current !== 'Attack' ? this.actions.get(this.current) : undefined;
         attack.reset();
         attack.setEffectiveWeight(1).play();
@@ -273,6 +299,7 @@ export class SkinnedMonster implements CatchPoser {
       }
     }
     if (attack) attack.time = Math.min(this.catchClip, attack.getClip().duration - 1e-3);
+    if (first) this.mixer.update(0);
     this.mixer.update(dt);
 
     const o = this.object;
@@ -292,6 +319,8 @@ export class SkinnedMonster implements CatchPoser {
       const d = Math.atan2(Math.sin(this.catchYaw - this.yaw), Math.cos(this.catchYaw - this.yaw));
       o.rotation.set(0, this.yaw + d * w, 0);
     }
+    // Skinning must see this frame's placement, including every bone and bind matrix.
+    o.updateMatrixWorld(true);
     // Afterwards it feeds: the clip layer stays on (Feed) until the sim lets it go.
     this.clipW = this.catchPlace === 'face' ? 1 : w;
     this.clipTarget = 1;

@@ -33,30 +33,30 @@ html,body{margin:0;width:1920px;height:1080px;background:transparent;overflow:hi
 .title{font:400 300px/1 'Cinzel',serif;letter-spacing:.42em;margin-left:.42em;color:#f2ede4;text-shadow:0 0 40px rgba(0,0,0,.9)}
 .rule{width:820px;height:2px;margin:46px 0 34px;background:linear-gradient(90deg,transparent,#8a1d16 20%,#c4362b 50%,#8a1d16 80%,transparent)}
 .tag{font:400 italic 54px/1.2 'Cormorant',serif;color:#cfc6b6;letter-spacing:.04em}
-.chap{font:600 46px/1 'Cinzel',serif;letter-spacing:.45em;color:#d2453a;text-shadow:0 0 10px #000,0 2px 3px #000}
-.chapname{font:400 92px/1.1 'Cinzel',serif;letter-spacing:.18em;margin-top:18px;text-shadow:0 0 24px #000,0 3px 6px #000}
+.place{font:400 92px/1.1 'Cinzel',serif;letter-spacing:.18em;text-shadow:0 0 24px #000,0 3px 6px #000}
 .status{font:400 40px/1.3 Arial,sans-serif;color:#ece6da;margin-top:34px;letter-spacing:.02em}
-.concept{font:400 32px/1.3 Arial,sans-serif;color:#ece6da;margin-top:22px;letter-spacing:.04em;text-shadow:0 0 12px #000,0 2px 4px #000}
+.coming{font:600 40px/1.3 Arial,sans-serif;color:#ece6da;margin-top:24px;text-shadow:0 0 12px #000,0 2px 4px #000}
+.concept{font:400 28px/1.3 Arial,sans-serif;color:#c8c1b8;margin-top:10px;letter-spacing:.02em;text-shadow:0 0 12px #000,0 2px 4px #000}
 .feat{font:400 64px/1.7 'Cinzel',serif;letter-spacing:.14em}
 .feat .dot{color:#c4362b;margin:0 .35em}
 .endtitle{font:400 170px/1 'Cinzel',serif;letter-spacing:.42em;margin-left:.42em}
 `;
 
 const CARDS = {
-  // Part 1: captured prologue gameplay, with fewer, direct captions.
-  tag_real: `<div class="card tag"><div class="tagtop">Prologue · The Hale House</div><div class="tagsub">Gameplay · Work in progress</div></div>`,
-  sound: `<div class="card low"><div class="line">It hunts by sound.</div></div>`,
-  voice: `<div class="card low"><div class="line">Your mic can give you away.</div></div>`,
+  // Part 1: real gameplay, with short, plain captions.
+  tag_real: `<div class="card tag"><div class="tagtop">The Hale House</div><div class="tagsub">Gameplay preview</div></div>`,
+  sound: `<div class="card low"><div class="line">It can hear you.</div></div>`,
+  voice: `<div class="card low"><div class="line">Keep your voice down.</div></div>`,
   hands: `<div class="card low"><div class="line">Use hand signals.</div></div>`,
-  wind: `<div class="card low"><div class="line">Winding the light makes noise.</div></div>`,
+  wind: `<div class="card low"><div class="line">It heard that.</div></div>`,
   title: `<div class="card black"><div class="title">MUTE</div></div>`,
-  // Part 2: chapter status. These are concepts, not completed levels.
-  story: `<div class="card black"><div class="chap">Chapter 1</div><div class="chapname">Halcyon Acoustics</div><div class="status">Still in development</div></div>`,
-  ch2: `<div class="card left"><div class="chap">Chapter 2</div><div class="chapname">The Echo Halls</div><div class="concept">Concept art · Not built yet</div></div>`,
-  ch3: `<div class="card left"><div class="chap">Chapter 3</div><div class="chapname">The Nest</div><div class="concept">Concept art · Not built yet</div></div>`,
-  ch4: `<div class="card left"><div class="chap">Chapter 4</div><div class="chapname">The Quiet Room</div><div class="concept">Concept art · Not built yet</div></div>`,
+  // Part 2: locations, without chapter numbers. Future images stay labelled as concepts.
+  story: `<div class="card black"><div class="place">Halcyon Acoustics</div><div class="status">In development</div></div>`,
+  echo: `<div class="card left"><div class="place">The Echo Halls</div><div class="coming">Soon to come</div><div class="concept">Concept preview</div></div>`,
+  nest: `<div class="card left"><div class="place">The Nest</div><div class="coming">Soon to come</div><div class="concept">Concept preview</div></div>`,
+  quiet: `<div class="card left"><div class="place">The Quiet Room</div><div class="coming">Soon to come</div><div class="concept">Concept preview</div></div>`,
   features: `<div class="card black"><div class="feat">1–4 players<span class="dot">·</span>co-op</div><div class="feat">Meta Quest VR</div></div>`,
-  end: `<div class="card black"><div class="endtitle">MUTE</div><div class="status">Chapter 1 in development</div></div>`,
+  end: `<div class="card black"><div class="endtitle">MUTE</div></div>`,
 };
 
 (async () => {

@@ -8,7 +8,6 @@
 // 25 / 50 / 85 %, each after a short warm-up) into dev/trailer/out/test_<shot>_<n>.jpg.
 const fs = require('fs');
 const path = require('path');
-const { setup } = require('../capture/harness.cjs');
 const { build } = require('../anim/scenes.cjs');
 
 const D = Math.PI / 180;
@@ -119,9 +118,10 @@ const windMon = build({ x: RUN_FROM, z: 0.1, yaw: -90 }, [
   { gait: 'still', act: 'none', alert: 0.3, wait: 3.9 },
   { act: 'listen', focus: { x: 8.6, y: 1.5, z: 0 }, mode: 'investigate', alert: 0.8, wait: 0.8 },
   { act: 'none', gait: 'run', mode: 'chase', alert: 1, focus: { x: 8.6, y: 1.4, z: 0 } },
-  // Finish inside the real 0.75 m catch radius before handing control back to the sim.
+  // The capture hands control back to the real chase before its face reaches the camera.
   { path: [[4.0, -0.15], [6.6, 0.05], [8.2, 0.0]], speed: 3.3, accel: 6 },
 ]);
+const windRelease = windMon.findIndex(m => Math.hypot(m.x - 8.6, m.z) <= 1.6);
 const wind = {
   frames: 280,
   cmd: (f) => {
@@ -132,22 +132,42 @@ const wind = {
     const c = { x: 8.6, z: 0.0, yaw: 90 + s.yaw, pitch: -2 + s.pitch, light: true, crank: winding };
     // Battery: dying (flickers) until you wind it, then full and bright.
     c.charge = t < 2.4 ? 0.11 - t * 0.02 : t < 4.6 ? 0.06 + (t - 2.4) * 0.25 : 0.6;
-    if (f < runEnd) {
+    if (f < runEnd && Math.hypot(windMon[f].x - c.x, windMon[f].z - c.z) > 1.6) {
       c.freeze = true;
       c.mon = windMon[f];
     } else {
-      // Let it loose right in front of you: the real catch and jumpscare.
+      // Let the sim close the last distance and trigger its real catch and jumpscare.
       c.freeze = false;
+      if (f === windRelease) c.noise = 0.42; // hand the crank sound to the real hearing rules
     }
     return c;
   },
 };
 
-const SHOTS = { hall, door, climb, hands, wind };
+// F. A close chase down the hallway: the player backs away as it charges.
+const rushMon = build({ x: -3.0, z: 0.05, yaw: 90 }, [
+  { gait: 'run', mode: 'chase', alert: 1, focus: { x: -10.8, y: 1.5, z: 0.05 } },
+  { path: [[-5.5, 0.05], [-7.2, 0.08], [-8.4, 0.05]], speed: 3.4, accel: 6 },
+]);
+const rush = {
+  frames: 90,
+  cmd: (f) => {
+    const t = f / 30;
+    const s = sway(f, 1.2);
+    return {
+      x: lerp(-7.8, -10.8, smooth(t / 2.4)), z: 0.05,
+      yaw: -90 + s.yaw, pitch: -2 + s.pitch, light: true,
+      mon: rushMon[Math.min(f, rushMon.length - 1)],
+    };
+  },
+};
+
+const SHOTS = { hall, door, climb, hands, wind, rush };
 
 // ---- runner -----------------------------------------------------------------------------------
 
-(async () => {
+async function capture() {
+  const { setup } = require('../capture/harness.cjs');
   fs.mkdirSync(OUT, { recursive: true });
   const names = wanted.length ? wanted : Object.keys(SHOTS);
   for (const name of names) {
@@ -181,4 +201,7 @@ const SHOTS = { hall, door, climb, hands, wind };
     await browser.close();
     if (!TEST && name === 'wind' && !caught) throw new Error('The wind shot did not reach the real catch. Re-capture before exporting the trailer.');
   }
-})();
+}
+
+module.exports = { SHOTS };
+if (require.main === module) capture();

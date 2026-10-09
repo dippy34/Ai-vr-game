@@ -1,8 +1,27 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { aimFrame, aimQuat, basisQuat, solveTwoBone } from './ik';
+import { aimFrame, aimQuat, basisQuat, solveTwoBone, stablePole } from './ik';
 
 const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+
+it('keeps the bend continuous as a requested pole crosses the limb axis', () => {
+  const previous = v(0, 1, 0);
+  const out = new THREE.Vector3();
+  const root = v(0, 0, 0);
+  const target = v(1, 0, 0);
+  for (let y = 0.2; y >= -0.2; y -= 0.01) {
+    const before = previous.clone();
+    stablePole(root, target, v(1, y, 0), previous, 0.15, out);
+    expect(before.angleTo(out)).toBeLessThanOrEqual(0.150001);
+    expect(out.dot(target)).toBeCloseTo(0, 6);
+    expect(out.length()).toBeCloseTo(1, 6);
+  }
+});
+
+it('keeps the previous bend when the target is at the root', () => {
+  const previous = v(0, 1, 0);
+  expect(stablePole(v(0, 0, 0), v(0, 0, 0), v(1, 0, 0), previous, 0.15, new THREE.Vector3()).toArray()).toEqual([0, 1, 0]);
+});
 
 describe('solveTwoBone', () => {
   const root = v(0, 1, 0);

@@ -13,10 +13,11 @@
  */
 
 import * as THREE from 'three';
+import { MONSTER_ANIMATION } from '../../../config';
 import type { MonsterAct, MonsterGait, MonsterMode, MonsterState } from '../../../core/types';
 import { Affordances, copyGoal, Grip, newAffordCtx, newGoal, type HandGoal } from './affordances';
 import { GAITS, GaitSelector, lerpGait, newGaitParams, QUAD_GAITS, readAct, readGait, readPosture, StanceSelector, SWEEP } from './gait';
-import { aimQuat, solveTwoBone } from './ik';
+import { aimQuat, solveTwoBone, stablePole } from './ik';
 import { MotionTracker } from './motion';
 import { fbm1, hashKey, noise1, Rng } from './noise';
 import type { MonsterRig } from './rig';
@@ -112,6 +113,11 @@ interface Arm {
   stretch: number;
   /** Elbow direction blend: 0 hanging (back/out), 1 reaching (out/up). */
   reachW: number;
+  /** Previous elbow bend and local joint rotations, kept across contact changes. */
+  readonly bend: THREE.Vector3;
+  readonly upperQ: THREE.Quaternion;
+  readonly foreQ: THREE.Quaternion;
+  readonly handQ: THREE.Quaternion;
   delay: number;
   twitch: Twitch;
   /** Free-target spring tuning this frame. */
@@ -212,6 +218,8 @@ export class ProceduralBody implements StepHost {
   /** Hips placement this frame (model space). */
   private readonly hipP = new THREE.Vector3();
   private readonly hipQ = new THREE.Quaternion();
+  /** Keep the hips from popping up as soon as an overextended foot lifts. */
+  private legLowering = 0;
 
   constructor(private readonly rig: MonsterRig, seed: number, private readonly scale = 1) {
     this.seed = seed;
@@ -222,6 +230,10 @@ export class ProceduralBody implements StepHost {
       wrist: new THREE.Vector3(), vel: new THREE.Vector3(), from: new THREE.Vector3(), t: 0, dur: 0.4,
       fdir: new THREE.Vector3(0, -1, 0), palm: new THREE.Vector3(1, 0, 0), contactW: 0, supportW: 0,
       curl: new Float32Array(5).fill(0.3), spread: 0.05, stretch: 0.8, reachW: 0, delay: 0, twitch: new Twitch(),
+      bend: new THREE.Vector3(i === 0 ? -0.55 : 0.55, -0.05, 0.8).normalize(),
+      upperQ: rig.restQ[rig.arms[i].upper].clone(),
+      foreQ: rig.restQ[rig.arms[i].fore].clone(),
+      handQ: rig.restQ[rig.arms[i].hand].clone(),
       omega: 7, zeta: 0.5, touchN: 0, jambPass: -1, scanAt: 0,
     });
     this.arms = [arm(0), arm(1)];
@@ -501,6 +513,7 @@ export class ProceduralBody implements StepHost {
     this.quadW.set(this.quad ? 1 : 0);
     for (const s of [this.crouch, this.hunch, this.lean, this.sideLean, this.twist, this.roll, this.hipShift, this.bob]) s.set(0);
     this.duckSeg.fill(0);
+    this.legLowering = 0;
     this.updateGait(0);
     this.planner.reset(this);
     for (const a of this.arms) {
@@ -511,13 +524,18 @@ export class ProceduralBody implements StepHost {
       this.freeTarget(a, a.wrist);
       a.vel.set(0, 0, 0);
       a.contactW = 0;
+      a.bend.set(a.side * 0.55, -0.05, 0.8).normalize();
+      a.upperQ.copy(this.rig.restQ[this.rig.arms[a.i].upper]);
+      a.foreQ.copy(this.rig.restQ[this.rig.arms[a.i].fore]);
+      a.handQ.copy(this.rig.restQ[this.rig.arms[a.i].hand]);
     }
     this.look.set(this.root.x - Math.sin(this.rootYaw) * 3, this.root.y + 1.2, this.root.z - Math.cos(this.rootYaw) * 3);
     this.lookVel.set(0, 0, 0);
   }
 
   private updateGait(dt: number): void {
-    const q = this.quadW.step(this.quad ? 1 : 0, this.quad ? 3.2 : 2.6, 1, dt);
+    const unfold = this.reachingTarget() ? MONSTER_ANIMATION.rearUpSpeed : 2.6;
+    const q = this.quadW.step(this.quad ? 1 : 0, this.quad ? 3.2 : unfold, 1, dt);
     const base = GAITS[this.gait];
     const quadG = this.gait === 'run' ? QUAD_GAITS.gallop : QUAD_GAITS.crawl;
     lerpGait(base, quadG, this.quad ? 1 : 0, this.gp);
@@ -560,7 +578,7 @@ export class ProceduralBody implements StepHost {
         // Push off the floor into the free spring.
         a.vel.set(0, 1.6, 0);
       }
-      a.supportW += ((l.active ? 1 : 0) - a.supportW) * damp(l.active ? 14 : 7, this.dt);
+      a.supportW += ((l.active ? 1 : 0) - a.supportW) * damp(l.active ? MONSTER_ANIMATION.handPlantBlendSpeed : 7, this.dt);
     }
   }
 
@@ -1109,6 +1127,8 @@ export class ProceduralBody implements StepHost {
     // The hips must let the planted feet reach: lower them if a leg would over-stretch.
     let drop = 0;
     for (let i = 0; i < 2; i++) drop = Math.max(drop, this.legDrop(i));
+    this.legLowering = Math.max(drop, lerp(this.legLowering, drop, damp(MONSTER_ANIMATION.hipRecoverSpeed, dt)));
+    drop = this.legLowering;
     if (drop > 1e-4) {
       hipP.y -= drop;
       R.setHips(hipP, hipQ);
@@ -1130,8 +1150,9 @@ export class ProceduralBody implements StepHost {
     let s = 0;
     let n = 0;
     for (const l of this.planner.limbs) {
-      if (!l.active) continue;
-      const w = l.front ? q : 1;
+      if (!l.front && !l.active) continue;
+      // A lifting hand still carries some weight while the support blend fades.
+      const w = l.front ? q * this.arms[l.index - 2].supportW : 1;
       s += (l.planted ? l.pos.y : Math.max(l.from.y, l.to.y)) * w;
       n += w;
     }
@@ -1144,7 +1165,8 @@ export class ProceduralBody implements StepHost {
     if (q < 0.05) return 0;
     const L = this.planner.limbs;
     const hind = (L[0].cur.y + L[1].cur.y) / 2;
-    const front = L[2].active && L[3].active ? (L[2].cur.y + L[3].cur.y) / 2 : hind;
+    const support = (this.arms[0].supportW + this.arms[1].supportW) / 2;
+    const front = lerp(hind, (L[2].cur.y + L[3].cur.y) / 2, support);
     return -Math.atan2(front - hind, 1.0) * q * 0.9;
   }
 
@@ -1397,11 +1419,12 @@ export class ProceduralBody implements StepHost {
     const out = lerp(this.gait === 'creep' ? 0.3 : 0.12, 0.75, this.quadW.x);
     _pole.set(side * out, 0.05, -(1 - out * 0.5)).applyAxisAngle(UP, yawRel * 0.6);
     l.stretch = solveTwoBone(hip, _v4, leg.lenA, leg.lenB, _pole, _mid, _end);
+    _v3.subVectors(_end, hip).cross(_v1.subVectors(_mid, hip)).normalize();
     _v1.subVectors(_mid, hip);
-    R.setModelQ(leg.thigh, aimQuat(leg.thighAim, _v1, _pole, _q1));
+    R.setModelQ(leg.thigh, aimQuat(leg.thighAim, _v1, _v3, _q1));
     R.fk1(leg.shin);
     _v1.subVectors(_end, _mid);
-    R.setModelQ(leg.shin, aimQuat(leg.shinAim, _v1, _pole, _q1));
+    R.setModelQ(leg.shin, aimQuat(leg.shinAim, _v1, _v3, _q1));
     // Foot: yawed to its contact, rolled about the ball.
     const roll = this.footRoll(l);
     _q2.setFromAxisAngle(UP, yawRel);
@@ -1425,12 +1448,7 @@ export class ProceduralBody implements StepHost {
     if (a.supportW > 0.001) {
       // Planted: palm flat (fingers spread) or a fingertip claw, per step.
       style = l.styleA < 0.45 ? 0 : 1;
-      const yaw = l.curYaw;
-      const fxl = -Math.sin(yaw);
-      const fzl = -Math.cos(yaw);
-      const lift = l.planted ? 0 : Math.sin(Math.PI * l.t) * 0.06;
-      const wy = (style === 0 ? 0.05 : 0.16) * this.scale + lift;
-      _v2.set(l.cur.x - fxl * 0.12 * this.scale, l.cur.y + wy, l.cur.z - fzl * 0.12 * this.scale);
+      this.supportWrist(a, _v2);
       _v1.lerp(_v2, a.supportW);
     }
     this.toModel(_v1, _v4);
@@ -1450,14 +1468,18 @@ export class ProceduralBody implements StepHost {
     _pole.set(side * lerp(0.55, 0.85, rw), lerp(-0.05, 0.45, rw), lerp(0.8, 0.25, rw));
     if (a.supportW > 0) _pole.lerp(_v2.set(side * 0.7, 0.7, 0.2), a.supportW);
     if (a.goal.kind === 'wall' || a.goal.kind === 'trail' || a.goal.kind === 'ear') _pole.lerp(_v2.set(side * 0.3, -0.6, 0.6), a.contactW * 0.7);
+    // Keep the elbows low and close to the ribs while passing a narrow frame.
+    if (this.doorK > 0.05) _pole.lerp(_v2.set(side * 0.15, -0.8, 0.45), this.doorK);
     _pole.normalize();
+    stablePole(S, _v4, _pole, a.bend, MONSTER_ANIMATION.elbowTurnSpeed * dt, _pole);
     a.stretch = solveTwoBone(S, _v4, arm.lenA, arm.lenB, _pole, _mid, _end);
     if (a.supportW > 0.5) l.stretch = a.stretch;
+    _v3.subVectors(_end, S).cross(_v2.subVectors(_mid, S)).normalize();
     _v2.subVectors(_mid, S);
-    R.setModelQ(arm.upper, aimQuat(arm.upperAim, _v2, _pole, _q1));
+    this.armRotation(arm.upper, aimQuat(arm.upperAim, _v2, _v3, _q1), a.upperQ, dt);
     R.fk1(arm.fore);
     _v2.subVectors(_end, _mid);
-    R.setModelQ(arm.fore, aimQuat(arm.foreAim, _v2, _pole, _q1));
+    this.armRotation(arm.fore, aimQuat(arm.foreAim, _v2, _v3, _q1), a.foreQ, dt);
     R.fk1(arm.hand);
     // Hand: relaxed (rest relative to the forearm, drooping) blended toward the contact frame.
     _q2.copy(R.mq[arm.fore]).multiply(R.restQ[arm.hand]);
@@ -1481,9 +1503,33 @@ export class ProceduralBody implements StepHost {
     } else _q1.copy(_q2);
     // Wrist limit: never bend the hand more than ~85 degrees off the forearm.
     const dev = _q1.angleTo(_q2);
-    if (dev > 1.5) _q1.copy(_q2).slerp(_q3.copy(_q1), 1.5 / dev);
-    R.setModelQ(arm.hand, _q1);
+    if (dev > MONSTER_ANIMATION.wristMaxAngle) {
+      _q3.copy(_q1);
+      _q1.copy(_q2).slerp(_q3, MONSTER_ANIMATION.wristMaxAngle / dev);
+    }
+    // Smooth in the forearm's local frame so a changing grip cannot pop the wrist.
+    _q3.copy(R.mq[arm.fore]).invert().multiply(_q1);
+    a.handQ.rotateTowards(_q3, MONSTER_ANIMATION.wristTurnSpeed * dt);
+    R.q[arm.hand].copy(a.handQ);
+    R.fk1(arm.hand);
     this.fingers(a, style, dt);
+  }
+
+  /** Wrist placement above the palm / claw contact used by both IK and push-off. */
+  private supportWrist(a: Arm, out: THREE.Vector3): void {
+    const l = this.planner.limbs[2 + a.i];
+    const lift = l.planted ? 0 : Math.sin(Math.PI * l.t) * 0.06;
+    const y = (l.styleA < 0.45 ? 0.05 : 0.16) * this.scale + lift;
+    out.set(l.cur.x + Math.sin(l.curYaw) * 0.12 * this.scale, l.cur.y + y, l.cur.z + Math.cos(l.curYaw) * 0.12 * this.scale);
+  }
+
+  /** A contact change may demand a sharp IK turn; let the joint take time to reach it. */
+  private armRotation(bone: number, model: THREE.Quaternion, previous: THREE.Quaternion, dt: number): void {
+    const R = this.rig;
+    _qa.copy(R.mq[R.parent[bone]]).invert().multiply(model);
+    previous.rotateTowards(_qa, MONSTER_ANIMATION.armTurnSpeed * dt);
+    R.q[bone].copy(previous);
+    R.fk1(bone);
   }
 
   /** Finger curls and spread per finger: contact style, drumming, twitching, splay. */
