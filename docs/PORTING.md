@@ -31,6 +31,40 @@ Meta's Horizon Store accepts Progressive Web Apps. The game already ships as one
 **Pros:** zero code changes, and updates ship by redeploying the website. **Cons:** browser
 performance limits, and the store presence feels slightly less "native".
 
+## The Unity port (decided October 2026)
+
+The owner chose **Unity** over Godot and Unreal for the store version:
+- **Unity:** Meta builds its Quest tools for it first (hand tracking, frame-rate features, store
+  achievements and purchases), drop-in co-op voice that reports mic loudness (Photon Voice or
+  Normcore), the Asset Store for better textures, and it runs on the owner's MacBook.
+- **Godot** (the runner-up): free forever and the most AI-friendly (scenes are plain text), but
+  we'd build voice chat ourselves and its Quest graphics tuning is less mature.
+- **Unreal:** its high-end rendering doesn't run on standalone Quest, Mac-to-Quest development is
+  poorly supported, and it's the hardest for an AI assistant to work in.
+
+**Setup** (the owner, on the Mac): Unity Hub → the newest **Unity 6 LTS** with *Android Build
+Support* (OpenJDK, Android SDK and NDK); Quest in developer mode; Meta Quest Developer Hub for
+installing builds. Claude Code runs **locally on the Mac** inside the Unity project, so it can edit
+scripts and (with a Unity MCP bridge) read the console and drive the editor. Note: Quest Link
+(play-in-editor through the headset) is Windows only, so on the Mac you test in the editor with
+keyboard/mouse or a simulator, and build to the headset over USB.
+
+**Where it lives:** a `unity/` folder in this repo next to the web game, with Unity's standard
+`.gitignore` (Library/, Temp/, Obj/, Build/, Logs/, UserSettings/). Big textures may need Git LFS.
+
+**Order:**
+1. **First slice:** the Hale House, solo: Crank Light, one fuse, the monster hearing your mic.
+   Check it holds frame rate on a Quest.
+2. **Port `src/core/` to plain C#** (`unity/Assets/MUTE/Core/`, no UnityEngine in it, same rule as
+   today) with the vitest suites translated to NUnit (Unity Test Framework) as the spec.
+3. **Co-op and voice** (same JSON messages as `src/net/protocol.ts`, host-authoritative).
+4. **Art upgrade:** high-res PBR textures, baked lighting plus the Crank Light as the one realtime
+   shadowed light, fog, post-processing. Models still come from `art/blender/`.
+5. **The monster's procedural animation** (`src/platform/render/monster/`) ported to C#.
+6. **Sound:** the procedural sounds (`src/platform/audio/`, the new `monsterVoice.ts`) rendered
+   to WAV variations with the offline renderers in `dev/` and played through Meta's spatial audio.
+7. **Store prep.**
+
 ## Route 2: a native port (Godot 4 or Unity)
 
 When the game needs more performance, better audio, or store features (achievements, IAP):
