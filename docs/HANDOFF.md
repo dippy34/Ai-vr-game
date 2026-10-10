@@ -19,7 +19,7 @@ today) and `docs/STORY.md` (the agreed future direction: story, chapters, tools,
   (§6, step 1). An **action-focused development trailer** is finished (§8).
 - **Money plan:** the owner is launching a **Kickstarter** (and maybe more) to pay for a bigger AI
   plan. The trailer is for that campaign. The free web demo is the proof the game is real.
-- **Engine decision (October 2026): the game moves to Unity** (the newest Unity 6 LTS, URP, Meta's
+- **Engine decision (October 2026): the game moves to Unity** (Unity 6.3 LTS, URP, Meta's
   XR SDK) for the Quest store and better graphics. The web version stays live as the free demo.
   The port is planned in `docs/PORTING.md` → "The Unity port". It's built on the owner's MacBook
   with Claude Code running locally (Unity can't run in the cloud sandbox).

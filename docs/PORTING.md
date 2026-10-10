@@ -42,7 +42,7 @@ The owner chose **Unity** over Godot and Unreal for the store version:
 - **Unreal:** its high-end rendering doesn't run on standalone Quest, Mac-to-Quest development is
   poorly supported, and it's the hardest for an AI assistant to work in.
 
-**Setup** (the owner, on the Mac): Unity Hub → the newest **Unity 6 LTS** with *Android Build
+**Setup** (the owner, on the Mac): Unity Hub → **Unity 6.3 LTS** (not the newer 6.6 feature release) with *Android Build
 Support* (OpenJDK, Android SDK and NDK); Quest in developer mode; Meta Quest Developer Hub for
 installing builds. Claude Code runs **locally on the Mac** inside the Unity project, so it can edit
 scripts and (with a Unity MCP bridge) read the console and drive the editor. Note: Quest Link
